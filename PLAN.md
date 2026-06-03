@@ -1135,4 +1135,27 @@ Implemented in this bootstrap slice:
 - Environment overrides for local runtime paths and ports via `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, and `AI_API_URL`.
 - Review-created background reflection jobs and a worker path for review learning follow-ups.
 
-No pending items remain in this slice.
+## 22. Observability Slice (in progress)
+
+Per the user's explicit "do not jump to auto-agents; make the system observable and replayable first" directive, the following slice adds durable traces for every important action.
+
+Implemented:
+
+- Migration `0002_observability.sql` with 50+ new tables covering conversations, retrieval queries/rewrites/results/selected-context/feedback/misses, model providers/profiles/routes/health-checks/calls, context packs/items/budget events, memory candidates/entries/facts/rule rows, agent runs/messages/handoffs, eval cases/runs/answer and retrieval evaluations/session outcomes, and skill candidates/skills/usage rows.
+- `packages/db/src/migrate.ts` with `listMigrations` and `runMigrations` (tracks applied versions in `schema_migrations`; migrations must be idempotent because `PRAGMA journal_mode = WAL` cannot run inside a transaction).
+- `packages/db/src/repositories/{_shared,conversation,retrieval,models,agents,context,memory,skills,eval,index}.ts` providing typed factory functions for every observability table.
+- `packages/agent-protocol/src/index.ts` rewritten as a real agent registry with 16 typed agent descriptors, tool gating, model role mapping, and required-event lists (`listAgents`, `getAgent`, `isToolAllowed`, `agentsWithTool`, `agentsWithModelRole`).
+- `store.ts` `createStore()` now exposes `store.conversation`, `store.retrieval`, `store.models`, `store.agents`, `store.context`, `store.memory`, `store.skills`, `store.evals` plus the new query-analysis helpers (`tokenize`, `classifyIntent`, `analyzeQuery`, `rewriteQuery`, `detectQueryLanguage`).
+- `ask()` now records: conversation user/assistant messages, `retrieval_query` + rewrite + result rows + selected context rows + miss (when applicable), `agent_runs` for `retrieval_agent` and `answer_agent` with input/output/prompt/tokens, `context_packs` with item rows and budget event, `answer_evaluations` with groundedness, and a `session_outcomes` row.
+- `createHandoff()` now records an `agent_handoff` row, a handoff context pack, and an `agent_run` for the `handoff_agent`.
+- `indexProject()` now records an `agent_run` for the `indexer` with `model_role = embedding` and indexed-file summary output.
+- `createLesson()` now dual-writes to the legacy `lessons` table and a new `memory_candidates` row (kind `workflow_lesson`) so memory review tooling can see them.
+- New CLI commands: `ai memory candidates|accept|reject|list`, `ai models list|health`, `ai trace conversation <session-id>`, `ai skills candidates|accept|reject`, `ai eval add|list|run` (CLI opens the local store directly; network-bound commands continue to route through the API client).
+- New tests in `tests/observability.test.ts` (7 tests): ask populates retrieval/conversation/agent/context/memory/eval tables; retrieval-miss recording; handoff records context pack + agent run; indexProject records indexer run; memory candidate accept/reject lifecycle; agent-protocol registry; agent-protocol required events.
+
+Not yet implemented (next slices):
+
+- New API endpoints for observability detail views (currently CLI-only and direct-store).
+- Real embeddings, real reranker, real model router.
+- Worker reflection job that promotes `memory_candidates` / `skill_candidates` and records `facts` automatically.
+- Web detail pages for retrieval, memory, models, skills, eval.

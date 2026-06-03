@@ -429,3 +429,472 @@ export function parseEventEnvelope(value: unknown): EventEnvelope {
     payload: requireObject(input.payload, "payload"),
   };
 }
+
+// ─── Observability types (Slice 1) ────────────────────────────────────────
+
+export type ConversationMessageRole = "user" | "assistant" | "system" | "tool" | "agent";
+
+export interface ConversationMessageRecord {
+  id: string;
+  sessionId: string;
+  projectId: string | null;
+  role: ConversationMessageRole;
+  agent: string | null;
+  content: string;
+  contentHash: string;
+  metaJson: string;
+  tokenCount: number;
+  parentMessageId: string | null;
+  ts: string;
+  createdAt: string;
+}
+
+export type RetrievalIntentKind = "lookup" | "explain" | "debug" | "plan" | "review" | "summary";
+export type RetrievalDepth = "shallow" | "standard" | "deep";
+export type RetrievalMode = AskMode | "index";
+
+export interface QueryAnalysis {
+  language: string | null;
+  terms: string[];
+  pathHints: string[];
+  symbolHints: string[];
+  isLikelyDefinition: boolean;
+  isLikelyDebug: boolean;
+  notes: string[];
+}
+
+export interface QueryRewriteRecord {
+  id: string;
+  retrievalQueryId: string;
+  variant: string;
+  terms: string[];
+  pathHints: string[];
+  symbolHints: string[];
+  score: number;
+  createdAt: string;
+}
+
+export interface RetrievalQueryRecord {
+  id: string;
+  sessionId: string | null;
+  taskId: string | null;
+  projectId: string;
+  originalQuery: string;
+  intent: RetrievalIntentKind;
+  mode: RetrievalMode;
+  depth: RetrievalDepth;
+  rewrittenQuery: string | null;
+  analysis: QueryAnalysis;
+  createdAt: string;
+}
+
+export interface RetrievalResultRecord {
+  id: string;
+  retrievalQueryId: string;
+  chunkId: string;
+  path: string;
+  startLine: number;
+  endLine: number;
+  source: "fts" | "vector" | "heuristic" | "reranked";
+  baseScore: number;
+  rerankScore: number;
+  finalScore: number;
+  included: boolean;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface RetrievalSelectedContextRecord {
+  id: string;
+  retrievalQueryId: string;
+  chunkId: string;
+  rank: number;
+  tokenCount: number;
+  excerpt: string;
+  createdAt: string;
+}
+
+export type RetrievalFeedbackRating = "good" | "bad" | "missed";
+
+export interface RetrievalFeedbackRecord {
+  id: string;
+  retrievalQueryId: string;
+  chunkId: string | null;
+  rating: RetrievalFeedbackRating;
+  missedPath: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface RetrievalMissRecord {
+  id: string;
+  retrievalQueryId: string;
+  missedPath: string;
+  confidence: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export type ModelProviderKind = "local_openai_compat" | "cloud_openai_compat" | "heuristic" | "fastembed";
+
+export interface ModelProviderRecord {
+  id: string;
+  kind: ModelProviderKind;
+  displayName: string;
+  baseUrl: string | null;
+  apiKeyEnv: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ModelRole = "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker";
+
+export interface ModelProfileRecord {
+  id: string;
+  providerId: string;
+  role: ModelRole;
+  modelName: string;
+  displayName: string | null;
+  contextWindow: number;
+  maxOutputTokens: number;
+  localOnly: boolean;
+  enabled: boolean;
+  fallbackProfileId: string | null;
+  qualityScore: number;
+  latencyScore: number;
+  costScore: number;
+  meta: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ModelRouteRecord {
+  id: string;
+  taskPattern: string;
+  mode: AskMode | "any";
+  selectedProfileId: string;
+  fallbackProfileId: string | null;
+  reason: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ModelHealthStatus = "healthy" | "degraded" | "unreachable" | "disabled";
+
+export interface ModelHealthCheckRecord {
+  id: string;
+  providerId: string;
+  profileId: string | null;
+  status: ModelHealthStatus;
+  latencyMs: number | null;
+  detail: string | null;
+  checkedAt: string;
+}
+
+export type ModelCallStatus = "ok" | "failed" | "fallback" | "blocked";
+
+export interface ModelCallRecord {
+  id: string;
+  sessionId: string | null;
+  taskId: string | null;
+  retrievalQueryId: string | null;
+  profileId: string;
+  role: ModelRole;
+  promptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
+  status: ModelCallStatus;
+  error: string | null;
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  ts: string;
+  createdAt: string;
+}
+
+export interface ContextPackRecord {
+  id: string;
+  sessionId: string | null;
+  taskId: string | null;
+  projectId: string | null;
+  retrievalQueryId: string | null;
+  budgetTokens: number;
+  usedTokens: number;
+  reason: string | null;
+  createdAt: string;
+}
+
+export type ContextPackItemKind =
+  | "retrieval_chunk"
+  | "memory_entry"
+  | "fact"
+  | "project_rule"
+  | "previous_message"
+  | "previous_session"
+  | "system"
+  | "git_state"
+  | "check_failure"
+  | "skill";
+
+export interface ContextPackItemRecord {
+  id: string;
+  contextPackId: string;
+  kind: ContextPackItemKind;
+  sourceId: string | null;
+  rank: number;
+  tokenCount: number;
+  excerpt: string;
+  included: boolean;
+  omissionReason: string | null;
+  createdAt: string;
+}
+
+export interface ContextBudgetEventRecord {
+  id: string;
+  contextPackId: string;
+  deltaTokens: number;
+  reason: string;
+  createdAt: string;
+}
+
+export type MemoryCandidateKind =
+  | "project_convention"
+  | "architectural_fact"
+  | "user_preference"
+  | "command_worked"
+  | "command_failed"
+  | "error_fix"
+  | "dependency_version"
+  | "file_ownership"
+  | "style_rule"
+  | "anti_pattern"
+  | "retrieval_miss"
+  | "workflow_lesson";
+
+export type MemoryCandidateStatus = "pending" | "accepted" | "rejected" | "edited";
+
+export type MemoryScope = "global" | "project" | "repo" | "path";
+
+export interface MemoryCandidateRecord {
+  id: string;
+  projectId: string | null;
+  sessionId: string | null;
+  kind: MemoryCandidateKind;
+  title: string;
+  body: string;
+  evidence: Array<Record<string, unknown>>;
+  confidence: number;
+  scope: MemoryScope;
+  status: MemoryCandidateStatus;
+  reviewedAt: string | null;
+  reviewerNotes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MemoryEntryRecord {
+  id: string;
+  candidateId: string | null;
+  projectId: string | null;
+  scope: MemoryScope;
+  kind: MemoryCandidateKind;
+  title: string;
+  body: string;
+  evidence: Array<Record<string, unknown>>;
+  confidence: number;
+  pinned: boolean;
+  archived: boolean;
+  lastUsedAt: string | null;
+  useCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FactStatus = "fresh" | "stale" | "disputed" | "archived";
+
+export interface FactRecord {
+  id: string;
+  projectId: string | null;
+  key: string;
+  value: string;
+  kind: string;
+  confidence: number;
+  sourceKind: string;
+  status: FactStatus;
+  lastVerifiedAt: string | null;
+  expiresAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FactSourceRecord {
+  id: string;
+  factId: string;
+  sourceKind: string;
+  sourceRef: string;
+  excerpt: string | null;
+  createdAt: string;
+}
+
+export interface ProjectRuleRecord {
+  id: string;
+  projectId: string;
+  title: string;
+  body: string;
+  pinned: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AgentStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+export type AgentRisk = "low" | "medium" | "high";
+
+export interface AgentRunRecord {
+  id: string;
+  sessionId: string | null;
+  taskId: string | null;
+  projectId: string | null;
+  agent: string;
+  role: string;
+  status: AgentStatus;
+  input: Record<string, unknown>;
+  output: Record<string, unknown>;
+  modelRole: ModelRole | null;
+  risk: AgentRisk;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  error: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type AgentMessageDirection = "in" | "out" | "internal";
+
+export interface AgentMessageRecord {
+  id: string;
+  agentRunId: string;
+  direction: AgentMessageDirection;
+  role: string;
+  content: string;
+  meta: Record<string, unknown>;
+  ts: string;
+  createdAt: string;
+}
+
+export interface AgentHandoffRecord {
+  id: string;
+  fromAgentRunId: string | null;
+  toAgent: string;
+  payload: Record<string, unknown>;
+  contextPackId: string | null;
+  sessionId: string | null;
+  taskId: string | null;
+  createdAt: string;
+}
+
+export interface EvalCaseRecord {
+  id: string;
+  projectId: string | null;
+  question: string;
+  expectedFiles: string[];
+  expectedAnswerContains: string | null;
+  difficulty: "easy" | "standard" | "hard";
+  tags: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvalRunRecord {
+  id: string;
+  caseId: string;
+  sessionId: string | null;
+  projectId: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  passed: boolean;
+  score: number;
+  notes: string | null;
+}
+
+export interface AnswerEvaluationRecord {
+  id: string;
+  sessionId: string | null;
+  retrievalQueryId: string | null;
+  groundedness: number;
+  citationCoverage: number;
+  contradiction: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface RetrievalEvaluationRecord {
+  id: string;
+  retrievalQueryId: string;
+  hitAtK: number;
+  mrr: number;
+  precision: number;
+  recall: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export type SessionOutcomeKind = "success" | "partial" | "failed" | "abandoned";
+
+export interface SessionOutcomeRecord {
+  id: string;
+  sessionId: string;
+  outcome: SessionOutcomeKind;
+  score: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export type SkillStatus = "pending" | "active" | "deprecated" | "rejected";
+export type SkillSourceKind = "reflection" | "manual" | "imported";
+
+export interface SkillCandidateRecord {
+  id: string;
+  projectId: string | null;
+  title: string;
+  triggerTerms: string[];
+  applicableProjects: string[];
+  steps: string[];
+  requiredContext: string[];
+  commands: string[];
+  safetyNotes: string | null;
+  validation: string[];
+  exampleSessionId: string | null;
+  sourceKind: SkillSourceKind;
+  confidence: number;
+  status: SkillStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SkillRecord {
+  id: string;
+  candidateId: string | null;
+  title: string;
+  triggerTerms: string[];
+  applicableProjects: string[];
+  steps: string[];
+  requiredContext: string[];
+  commands: string[];
+  safetyNotes: string | null;
+  validation: string[];
+  status: SkillStatus;
+  useCount: number;
+  lastUsedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SkillUsageRecord {
+  id: string;
+  skillId: string;
+  sessionId: string | null;
+  applied: boolean;
+  notes: string | null;
+  createdAt: string;
+}

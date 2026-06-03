@@ -1,10 +1,20 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
-import { readFileSync } from "node:fs";
 // @ts-ignore - this workspace's node type surface does not expose node:module, but the runtime does.
 import { createRequire } from "node:module";
 import { basename, extname, join, normalize, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { runMigrations } from "./migrate.ts";
+import {
+  createAgentsRepo,
+  createContextRepo,
+  createConversationRepo,
+  createEvalRepo,
+  createMemoryRepo,
+  createModelsRepo,
+  createRetrievalRepo,
+  createSkillsRepo,
+} from "./repositories/index.ts";
 import type {
   AskMode,
   AskRequest,
@@ -22,6 +32,9 @@ import type {
   JobRecord,
   PlanRequest,
   PlanResponse,
+  QueryAnalysis,
+  RetrievalChunk,
+  RetrievalIntentKind,
   ReviewRecord,
   ReviewRequest,
   ReviewResponse,
@@ -30,7 +43,6 @@ import type {
   ProjectRecord,
   ProjectStatus,
   ProjectSummary,
-  RetrievalChunk,
   SessionRecord,
   SessionStatus,
   TaskRecord,
@@ -217,6 +229,86 @@ function selectModelProfile(
   if (details.depth === "deep") return "ask-deep-local";
   if (details.question && details.question.length > 120) return "ask-extended-local";
   return "ask-fast-local";
+}
+
+const DEFINITION_TOKENS = new Set(["what", "where", "how", "why", "when", "which", "who"]);
+const DEBUG_TOKENS = new Set(["fix", "bug", "error", "failing", "regression", "crash", "trace", "stack", "panic"]);
+const SYMBOL_TOKEN = /[A-Za-z_][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*/g;
+const PATH_TOKEN = /[A-Za-z0-9_./-]+\.[a-z]{1,4}(?:\b|$)/g;
+const STOP_TOKENS = new Set([
+  "the", "and", "for", "are", "with", "this", "that", "from", "have", "has", "into",
+  "you", "your", "our", "what", "where", "how", "why", "when", "which", "who",
+  "find", "show", "give", "tell", "explain", "describe", "about", "please",
+  "should", "would", "could", "there", "their", "they", "them", "then",
+  "any", "all", "some", "most", "more", "less", "than",
+]);
+
+function tokenize(text: string): string[] {
+  return Array.from(
+    new Set(
+      text
+        .toLowerCase()
+        .split(/[^a-z0-9_]+/g)
+        .filter((term) => term.length >= 3 && !STOP_TOKENS.has(term)),
+    ),
+  );
+}
+
+function classifyIntent(query: string, mode: AskMode | "index"): RetrievalIntentKind {
+  const lowered = query.toLowerCase();
+  if (mode === "index") return "lookup";
+  if (Array.from(DEBUG_TOKENS).some((token) => lowered.includes(token))) return "debug";
+  if (Array.from(DEBUG_TOKENS).some((token) => lowered.startsWith(token))) return "debug";
+  if (lowered.startsWith("plan") || lowered.includes("plan ")) return "plan";
+  if (lowered.startsWith("review") || lowered.includes("review ")) return "review";
+  if (lowered.startsWith("summarize") || lowered.startsWith("summary")) return "summary";
+  if (lowered.includes("explain") || lowered.includes("how does") || lowered.includes("how do")) return "explain";
+  return "lookup";
+}
+
+function analyzeQuery(query: string): QueryAnalysis {
+  const tokens = tokenize(query);
+  const symbolMatches = Array.from(query.matchAll(SYMBOL_TOKEN)).map((m) => m[0]);
+  const pathMatches = Array.from(query.matchAll(PATH_TOKEN)).map((m) => m[0]);
+  const language = detectQueryLanguage(query);
+  const notes: string[] = [];
+  const startsWithDefinition = Array.from(DEFINITION_TOKENS).some((token) =>
+    query.toLowerCase().trimStart().startsWith(`${token} `),
+  );
+  const isLikelyDefinition = startsWithDefinition || /what is|where is|how does/.test(query.toLowerCase());
+  const isLikelyDebug = Array.from(DEBUG_TOKENS).some((token) => query.toLowerCase().includes(token));
+  if (isLikelyDefinition) notes.push("definition-style question");
+  if (isLikelyDebug) notes.push("debug-style question");
+  if (symbolMatches.length > 0) notes.push("contains identifiers");
+  if (pathMatches.length > 0) notes.push("contains path hints");
+  return {
+    language,
+    terms: tokens,
+    pathHints: Array.from(new Set(pathMatches)),
+    symbolHints: Array.from(new Set(symbolMatches)),
+    isLikelyDefinition,
+    isLikelyDebug,
+    notes,
+  };
+}
+
+function rewriteQuery(query: string, analysis: QueryAnalysis): { variant: string; terms: string[]; pathHints: string[]; symbolHints: string[] } {
+  const terms = analysis.terms;
+  const symbolHints = analysis.symbolHints;
+  const pathHints = analysis.pathHints;
+  const extra = symbolHints.length > 0 ? ` ${symbolHints.join(" ")}` : "";
+  const variant = terms.length > 0 ? `${query.trim()} ${terms.join(" ")}${extra}`.trim() : query.trim();
+  return { variant, terms, pathHints, symbolHints };
+}
+
+function detectQueryLanguage(query: string): string | null {
+  const lowered = query.toLowerCase();
+  if (lowered.includes("typescript") || lowered.includes(" ts ") || lowered.includes(".ts")) return "typescript";
+  if (lowered.includes("python") || lowered.includes(".py")) return "python";
+  if (lowered.includes("rust") || lowered.includes(".rs")) return "rust";
+  if (lowered.includes("go ") || lowered.includes(".go")) return "go";
+  if (lowered.includes("swift") || lowered.includes(".swift")) return "swift";
+  return null;
 }
 
 function buildFtsQuery(question: string): string | null {
@@ -574,15 +666,13 @@ export function openStore(options: StoreOptions) {
 }
 
 export function migrateStore(db: DatabaseSync): void {
-  const sql = readFileSync(join(process.cwd(), "packages/db/migrations/0001_init.sql"), "utf8");
-  db.exec(sql);
+  runMigrations(db);
   tryEnableSearchIndex(db);
 }
 
 export function initializeStore(dbPath: string): DatabaseSync {
   const db = openStore({ databasePath: dbPath });
-  const migrationSql = readFileSync(join(process.cwd(), "packages/db/migrations/0001_init.sql"), "utf8");
-  db.exec(migrationSql);
+  runMigrations(db);
   tryEnableSearchIndex(db);
   return db;
 }
@@ -601,6 +691,15 @@ export function createStore(db: DatabaseSync) {
   function disableQdrant(): void {
     qdrantAvailable = false;
   }
+
+  const conversationRepo = createConversationRepo(db);
+  const retrievalRepo = createRetrievalRepo(db);
+  const modelsRepo = createModelsRepo(db);
+  const agentsRepo = createAgentsRepo(db);
+  const contextRepo = createContextRepo(db);
+  const memoryRepo = createMemoryRepo(db);
+  const skillsRepo = createSkillsRepo(db);
+  const evalRepo = createEvalRepo(db);
 
   const store = {
     db,
@@ -1526,6 +1625,52 @@ export function createStore(db: DatabaseSync) {
         `INSERT INTO handoffs (id, session_id, task_id, project_id, target, prompt, selected_context_json, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(id, session.id, session.activeTaskId, project.id, input.target, prompt, JSON.stringify(selectedContext), ts, ts);
+      const contextPack = contextRepo.recordPack({
+        sessionId: session.id,
+        taskId: session.activeTaskId,
+        projectId: project.id,
+        budgetTokens: 2048,
+        usedTokens: files.slice(0, 4).reduce((sum, file) => sum + file.length / 4, 0),
+        reason: `handoff:${input.target}`,
+        items: files.slice(0, 4).map((file, index) => ({
+          kind: "previous_session",
+          sourceId: file,
+          rank: index,
+          tokenCount: Math.ceil(file.length / 4),
+          excerpt: file,
+        })),
+      });
+      const handoffAgentRun = agentsRepo.createRun({
+        sessionId: session.id,
+        taskId: session.activeTaskId,
+        projectId: project.id,
+        agent: "handoff_agent",
+        role: "target-handoff",
+        modelRole: "coder_handoff",
+        risk: "low",
+        input: { target: input.target, subtask: input.subtask, contextPackId: contextPack.id },
+      });
+      agentsRepo.appendMessage({
+        agentRunId: handoffAgentRun.id,
+        direction: "out",
+        role: "prompt",
+        content: prompt,
+        meta: { target: input.target, subtask: input.subtask },
+      });
+      agentsRepo.updateRun(handoffAgentRun.id, {
+        status: "completed",
+        finishedAt: now(),
+        durationMs: 0,
+        output: { handoffId: id, contextPackId: contextPack.id, target: input.target },
+      });
+      agentsRepo.recordHandoff({
+        fromAgentRunId: handoffAgentRun.id,
+        toAgent: input.target,
+        payload: { subtask: input.subtask, filesToInspect: selectedContext.filesToInspect, checks: selectedContext.checksToRun },
+        contextPackId: contextPack.id,
+        sessionId: session.id,
+        taskId: session.activeTaskId,
+      });
       store.appendEvent(createEvent("handoff.created", { target: input.target, prompt }, { sessionId: session.id, projectId: project.id, agent: "handoff" }));
       store.enqueueJob({
         type: "handoff.archive",
@@ -1711,6 +1856,29 @@ export function createStore(db: DatabaseSync) {
       });
       store.updateTask(task.id, { status: "completed", resultJson: JSON.stringify(indexSummary) });
       store.updateProjectStatus(project.id, "ready", now());
+      const indexerRun = agentsRepo.createRun({
+        sessionId: session.id,
+        taskId: task.id,
+        projectId: project.id,
+        agent: "indexer",
+        role: "indexer",
+        modelRole: "embedding",
+        risk: "low",
+        input: { projectPath: project.path, mode: "index" },
+      });
+      agentsRepo.appendMessage({
+        agentRunId: indexerRun.id,
+        direction: "out",
+        role: "summary",
+        content: `Indexed ${indexSummary.filesIndexed} files and ${indexSummary.chunksIndexed} chunks.`,
+        meta: { qdrantFailed: indexSummary.qdrantFailed },
+      });
+      agentsRepo.updateRun(indexerRun.id, {
+        status: "completed",
+        finishedAt: now(),
+        durationMs: Date.parse(now()) - Date.parse(indexerRun.startedAt),
+        output: { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed, qdrantFailed: indexSummary.qdrantFailed },
+      });
 
       push("task.completed", { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed }, { taskId: task.id, agent: "indexer" });
       push("session.completed", { summary: completedSession.finalSummary }, { agent: "orchestrator" });
@@ -1747,6 +1915,16 @@ export function createStore(db: DatabaseSync) {
         `INSERT INTO lessons (id, project_id, session_id, title, body, tags_json, importance, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(id, input.projectId, input.sessionId, input.title, input.body, JSON.stringify(input.tags), input.importance, ts, ts);
+      memoryRepo.createCandidate({
+        projectId: input.projectId,
+        sessionId: input.sessionId,
+        kind: "workflow_lesson",
+        title: input.title,
+        body: input.body,
+        evidence: [{ kind: "lesson", tags: input.tags, importance: input.importance }],
+        confidence: Math.min(1, Math.max(0, input.importance / 5)),
+        scope: input.projectId ? "project" : "global",
+      });
       return { id, ...input, createdAt: ts, updatedAt: ts };
     },
     async ask(input: AskRequest): Promise<AskResponse> {
@@ -1764,10 +1942,62 @@ export function createStore(db: DatabaseSync) {
         source: "cli",
       });
 
+      const userMessage = conversationRepo.appendMessage({
+        sessionId: session.id,
+        projectId: project.id,
+        role: "user",
+        agent: "user",
+        content: input.question,
+        meta: { mode: input.mode ?? "local", depth: input.depth ?? "standard" },
+      });
+
+      const retrievalAgentRun = agentsRepo.createRun({
+        sessionId: session.id,
+        projectId: project.id,
+        agent: "retrieval_agent",
+        role: "retrieval-pipeline",
+        modelRole: "retrieval_judge",
+        risk: "low",
+        input: { question: input.question, projectId: project.id, mode: input.mode ?? "local", depth: input.depth ?? "standard" },
+      });
+
+      const analysis = analyzeQuery(input.question);
+      const rewritten = rewriteQuery(input.question, analysis);
+      const retrievalQuery = retrievalRepo.createQuery({
+        sessionId: session.id,
+        projectId: project.id,
+        originalQuery: input.question,
+        intent: classifyIntent(input.question, input.mode ?? "local"),
+        mode: input.mode ?? "local",
+        depth: input.depth ?? "standard",
+        rewrittenQuery: rewritten.variant,
+        analysis,
+      });
+      if (rewritten.variant !== input.question.trim()) {
+        retrievalRepo.updateRewrittenQuery(retrievalQuery.id, rewritten.variant);
+      }
+      if (rewritten.terms.length > 0) {
+        retrievalRepo.createRewrite({
+          retrievalQueryId: retrievalQuery.id,
+          variant: rewritten.variant,
+          terms: rewritten.terms,
+          pathHints: rewritten.pathHints,
+          symbolHints: rewritten.symbolHints,
+          score: 1.0,
+        });
+      }
+      agentsRepo.appendMessage({
+        agentRunId: retrievalAgentRun.id,
+        direction: "internal",
+        role: "intent",
+        content: JSON.stringify({ intent: retrievalQuery.intent, analysis }),
+        meta: { retrievalQueryId: retrievalQuery.id },
+      });
+
       const retrievalStarted = createEvent("retrieval.started", { question: input.question }, { sessionId: session.id, projectId: project.id, agent: "retriever" });
       store.appendEvent(retrievalStarted);
 
-      const chunks = store.searchChunks(project.id, input.question, { limit: input.depth === "deep" ? 12 : input.depth === "shallow" ? 4 : 8 });
+      const chunks = store.searchChunks(project.id, rewritten.variant, { limit: input.depth === "deep" ? 12 : input.depth === "shallow" ? 4 : 8 });
       const citations = chunks.map((chunk) => ({
         chunkId: chunk.id,
         path: chunk.path,
@@ -1777,12 +2007,75 @@ export function createStore(db: DatabaseSync) {
         score: chunk.score,
       }));
 
+      const recordedResults = retrievalRepo.recordResults(
+        retrievalQuery.id,
+        chunks.map((chunk) => ({
+          chunkId: chunk.id,
+          path: chunk.path,
+          startLine: chunk.startLine,
+          endLine: chunk.endLine,
+          source: "heuristic",
+          baseScore: chunk.score,
+          finalScore: chunk.score,
+          included: true,
+        })),
+      );
+      retrievalRepo.recordSelectedContext(
+        retrievalQuery.id,
+        chunks.map((chunk, index) => ({
+          chunkId: chunk.id,
+          rank: index,
+          tokenCount: chunk.tokenCount,
+          excerpt: chunk.content.split("\n").slice(0, 4).join("\n"),
+        })),
+      );
+      const contextPack = contextRepo.recordPack({
+        sessionId: session.id,
+        projectId: project.id,
+        retrievalQueryId: retrievalQuery.id,
+        budgetTokens: 4096,
+        usedTokens: chunks.reduce((sum, c) => sum + c.tokenCount, 0),
+        reason: "ask",
+        items: chunks.map((chunk, index) => ({
+          kind: "retrieval_chunk",
+          sourceId: chunk.id,
+          rank: index,
+          tokenCount: chunk.tokenCount,
+          excerpt: chunk.content.split("\n").slice(0, 4).join("\n"),
+        })),
+      });
+
       const confidence = chunks.length === 0 ? 0 : Math.min(0.95, Math.max(0.25, chunks[0].score / 8));
       const insufficientReason = chunks.length === 0 ? "No matching chunks were found in the selected project." : null;
+      if (chunks.length === 0) {
+        retrievalRepo.recordMiss({
+          retrievalQueryId: retrievalQuery.id,
+          missedPath: project.path,
+          confidence: 0,
+          notes: "no chunks returned from hybrid retrieval",
+        });
+      }
       const answer =
         chunks.length === 0
           ? `I could not find enough local context in ${project.name} to answer "${input.question}".`
           : buildAnswer(input.question, project, chunks, citations, confidence);
+
+      agentsRepo.updateRun(retrievalAgentRun.id, {
+        status: "completed",
+        finishedAt: now(),
+        durationMs: Date.parse(now()) - Date.parse(retrievalAgentRun.startedAt),
+        output: { chunkCount: chunks.length, confidence, retrievalQueryId: retrievalQuery.id },
+      });
+
+      const answerAgentRun = agentsRepo.createRun({
+        sessionId: session.id,
+        projectId: project.id,
+        agent: "answer_agent",
+        role: "answer-synthesizer",
+        modelRole: "answer",
+        risk: "low",
+        input: { question: input.question, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
+      });
 
       const retrievalCompleted = createEvent(
         chunks.length === 0 ? "retrieval.low_confidence" : "retrieval.completed",
@@ -1811,6 +2104,22 @@ export function createStore(db: DatabaseSync) {
         activeTaskId: null,
       });
 
+      conversationRepo.appendMessage({
+        sessionId: session.id,
+        projectId: project.id,
+        role: "assistant",
+        agent: "answer_agent",
+        content: answer,
+        parentMessageId: userMessage.id,
+        meta: { confidence, retrievalQueryId: retrievalQuery.id, citationCount: citations.length },
+      });
+      agentsRepo.updateRun(answerAgentRun.id, {
+        status: "completed",
+        finishedAt: now(),
+        durationMs: Date.parse(now()) - Date.parse(answerAgentRun.startedAt),
+        output: { answer, confidence, citations: citations.length, contextPackId: contextPack.id },
+      });
+
       if (chunks.length > 0) {
         store.createLesson({
           projectId: project.id,
@@ -1833,6 +2142,20 @@ export function createStore(db: DatabaseSync) {
           ),
         );
       }
+      evalRepo.recordAnswerEvaluation({
+        sessionId: session.id,
+        retrievalQueryId: retrievalQuery.id,
+        groundedness: chunks.length > 0 ? confidence : 0,
+        citationCoverage: chunks.length > 0 ? Math.min(1, citations.length / 3) : 0,
+        contradiction: 0,
+        notes: chunks.length === 0 ? "no_chunks" : null,
+      });
+      evalRepo.recordSessionOutcome({
+        sessionId: session.id,
+        outcome: chunks.length === 0 ? "failed" : confidence >= 0.5 ? "success" : "partial",
+        score: confidence,
+        notes: chunks.length === 0 ? "no_chunks" : null,
+      });
       enqueueReflectionJob(store, session.id, "ask", project.id);
 
       return {
@@ -1852,6 +2175,14 @@ export function createStore(db: DatabaseSync) {
     listStatefulSessions(): SessionRecord[] {
       return store.listSessions(100);
     },
+    conversation: conversationRepo,
+    retrieval: retrievalRepo,
+    models: modelsRepo,
+    agents: agentsRepo,
+    context: contextRepo,
+    memory: memoryRepo,
+    skills: skillsRepo,
+    evals: evalRepo,
   };
   return store;
 }

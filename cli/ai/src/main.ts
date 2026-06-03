@@ -4,6 +4,7 @@ import { startWorkbenchServer } from "../../../apps/api/src/server.ts";
 import { startWorkbenchWeb } from "../../../apps/web/src/server.ts";
 import { startWorkbenchWorker } from "../../../apps/worker/src/worker.ts";
 import { startMcpServer } from "../../../mcp/server/src/stdio.ts";
+import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 
 function printUsage(): void {
   console.log(`ai commands:
@@ -26,6 +27,18 @@ function printUsage(): void {
   ai mcp calls
   ai reviews list
   ai reviews create --project <project> [--session <session-id>] [--title <title>] [--planned <files>] [--edited <files>] [--checks <checks>] [--notes <notes>]
+  ai memory candidates [--status <pending|accepted|rejected>]
+  ai memory accept <candidate-id>
+  ai memory reject <candidate-id> [--reason <text>]
+  ai memory list [--scope <scope>]
+  ai models list
+  ai models health
+  ai trace conversation <session-id>
+  ai skills candidates [--status <status>]
+  ai skills accept <candidate-id>
+  ai skills reject <candidate-id> [--reason <text>]
+  ai eval add --project <project> --query "<q>" --expected "<e>" [--kind <retrieval|answer>]
+  ai eval run --project <project> [--limit <n>]
   ai status`);
 }
 
@@ -305,7 +318,186 @@ async function run(): Promise<void> {
   printUsage();
 }
 
-run().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
+type DirectStore = ReturnType<typeof createStore>;
+
+function openDirectStore(): DirectStore {
+  const config = resolveConfig({});
+  const db = initializeStore(config.databasePath);
+  return createStore(db);
+}
+
+function withDirectStore<T>(fn: (store: DirectStore) => T | Promise<T>): Promise<T> {
+  const store = openDirectStore();
+  return Promise.resolve()
+    .then(() => fn(store))
+    .finally(() => {
+      try {
+        store.db.close();
+      } catch {
+        // ignore close errors
+      }
+    });
+}
+
+if (process.argv[2] === "memory") {
+  withDirectStore(async (store) => {
+    const sub = process.argv[3] ?? "candidates";
+    if (sub === "candidates") {
+      const status = process.argv.find((arg) => arg.startsWith("--status="))?.split("=")[1];
+      const candidates = status
+        ? store.memory.listCandidates(status as "pending" | "accepted" | "rejected")
+        : store.memory.listCandidates("pending");
+      printJson(candidates);
+      return;
+    }
+    if (sub === "accept" || sub === "reject") {
+      const id = process.argv[4];
+      if (!id) {
+        throw new Error(`memory ${sub} requires a candidate id`);
+      }
+      if (sub === "accept") {
+        const entry = store.memory.acceptCandidate(id);
+        printJson(entry);
+        return;
+      }
+      const reasonArg = process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
+      store.memory.reviewCandidate(id, "rejected", reasonArg);
+      printJson({ id, status: "rejected" });
+      return;
+    }
+    if (sub === "list") {
+      const scopeArg = process.argv.find((arg) => arg.startsWith("--scope="))?.split("=")[1] as
+        | "global" | "project" | "repo" | "path" | undefined;
+      printJson(store.memory.listEntries(undefined, scopeArg));
+      return;
+    }
+    throw new Error(`unknown memory subcommand: ${sub}`);
+  })
+    .catch((error) => {
+      console.error(error instanceof Error ? error.message : String(error));
+      process.exit(1);
+    });
+} else if (process.argv[2] === "models") {
+  withDirectStore((store) => {
+    const sub = process.argv[3] ?? "list";
+    if (sub === "list") {
+      printJson({ providers: store.models.listProviders(), profiles: store.models.listProfiles() });
+      return;
+    }
+    if (sub === "health") {
+      const providers = store.models.listProviders();
+      const calls = store.models.listAllCalls(50);
+      printJson({ providers, recentCalls: calls });
+      return;
+    }
+    throw new Error(`unknown models subcommand: ${sub}`);
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (process.argv[2] === "trace" && process.argv[3] === "conversation") {
+  const sessionId = process.argv[4];
+  if (!sessionId) {
+    console.error("trace conversation requires a session id");
+    process.exit(1);
+  }
+  withDirectStore((store) => {
+    const messages = store.conversation.listMessages(sessionId);
+    const runs = store.agents.listRuns(sessionId);
+    const handoffs = store.agents.listHandoffs(sessionId);
+    const queries = store.retrieval.listQueriesForSession(sessionId);
+    const packs = store.context.listPacksForSession(sessionId);
+    printJson({ messages, runs, handoffs, retrievalQueries: queries, contextPacks: packs });
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (process.argv[2] === "skills") {
+  withDirectStore(async (store) => {
+    const sub = process.argv[3] ?? "candidates";
+    if (sub === "candidates") {
+      const status = process.argv.find((arg) => arg.startsWith("--status="))?.split("=")[1];
+      printJson(
+        status
+          ? store.skills.listCandidates(status as "pending" | "active" | "deprecated" | "rejected")
+          : store.skills.listCandidates(),
+      );
+      return;
+    }
+    if (sub === "accept" || sub === "reject") {
+      const id = process.argv[4];
+      if (!id) {
+        throw new Error(`skills ${sub} requires a candidate id`);
+      }
+      if (sub === "accept") {
+        const skill = store.skills.acceptCandidate(id);
+        printJson(skill);
+        return;
+      }
+      const reasonArg = process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
+      store.skills.reviewCandidate(id, "rejected");
+      printJson({ id, status: "rejected", reason: reasonArg });
+      return;
+    }
+    throw new Error(`unknown skills subcommand: ${sub}`);
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (process.argv[2] === "eval") {
+  withDirectStore(async (store) => {
+    const sub = process.argv[3] ?? "list";
+    if (sub === "add") {
+      const project = process.argv.find((arg) => arg.startsWith("--project="))?.split("=")[1];
+      const query = process.argv.find((arg) => arg.startsWith("--query="))?.split("=").slice(1).join("=");
+      const expected = process.argv.find((arg) => arg.startsWith("--expected="))?.split("=").slice(1).join("=");
+      if (!project || !query || !expected) {
+        throw new Error("eval add requires --project, --query, --expected");
+      }
+      const evalCase = store.evals.addCase({
+        projectId: project,
+        question: query,
+        expectedAnswerContains: expected,
+      });
+      printJson(evalCase);
+      return;
+    }
+    if (sub === "list") {
+      printJson(store.evals.listCases());
+      return;
+    }
+    if (sub === "run") {
+      const project = process.argv.find((arg) => arg.startsWith("--project="))?.split("=")[1];
+      if (!project) {
+        throw new Error("eval run requires --project");
+      }
+      const cases = store.evals.listCases().filter((c) => c.projectId === project);
+      const evaluations: Array<Record<string, unknown>> = [];
+      for (const c of cases) {
+        const answer = await store.ask({ project, question: c.question, mode: "local", depth: "standard" });
+        const groundedness = answer.confidence;
+        const citationCoverage = answer.citations.length > 0 ? 1 : 0;
+        const evalRecord = store.evals.recordAnswerEvaluation({
+          sessionId: answer.sessionId,
+          retrievalQueryId: null,
+          groundedness,
+          citationCoverage,
+          contradiction: 0,
+          notes: `auto-graded on case ${c.id}`,
+        });
+        evaluations.push({ caseId: c.id, evalRecord, confidence: groundedness });
+      }
+      printJson({ evaluations });
+      return;
+    }
+    throw new Error(`unknown eval subcommand: ${sub}`);
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else {
+  run().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}
