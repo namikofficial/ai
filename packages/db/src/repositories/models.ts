@@ -7,6 +7,7 @@ import type {
   ModelProfileRecord,
   ModelProviderKind,
   ModelProviderRecord,
+  ModelRouteRecord,
   ModelRole,
 } from "../../../shared/src/index.ts";
 import { asBool, asNumber, asString, asStringOrNull, now, newId, safeParseJson } from "./_shared.ts";
@@ -67,6 +68,27 @@ interface ModelHealthRow {
   latency_ms: number | null;
   detail: string | null;
   checked_at: string;
+}
+
+interface ModelRouteRow {
+  id: string;
+  task_pattern: string;
+  mode: string;
+  selected_profile_id: string;
+  fallback_profile_id: string | null;
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface ModelUsageDailyRow {
+  day: string;
+  model_name: string;
+  prompt_tokens: number;
+  completion_tokens: number;
+  requests: number;
+  created_at: string;
+  updated_at: string;
 }
 
 function rowToProvider(row: ModelProviderRow): ModelProviderRecord {
@@ -135,6 +157,19 @@ function rowToHealth(row: ModelHealthRow): ModelHealthCheckRecord {
   };
 }
 
+function rowToRoute(row: ModelRouteRow): ModelRouteRecord {
+  return {
+    id: asString(row.id),
+    taskPattern: asString(row.task_pattern),
+    mode: asString(row.mode) as ModelRouteRecord["mode"],
+    selectedProfileId: asString(row.selected_profile_id),
+    fallbackProfileId: asStringOrNull(row.fallback_profile_id),
+    reason: asStringOrNull(row.reason),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  };
+}
+
 export function createModelsRepo(db: DatabaseSync) {
   return {
     upsertProvider(input: {
@@ -147,23 +182,26 @@ export function createModelsRepo(db: DatabaseSync) {
     }): ModelProviderRecord {
       const ts = now();
       if (input.id) {
-        db.prepare(
-          `UPDATE model_providers
-             SET kind = ?, display_name = ?, base_url = ?, api_key_env = ?, enabled = ?, updated_at = ?
-           WHERE id = ?`,
-        ).run(
-          input.kind,
-          input.displayName,
-          input.baseUrl ?? null,
-          input.apiKeyEnv ?? null,
-          input.enabled === false ? 0 : 1,
-          ts,
-          input.id,
-        );
-        const row = db.prepare("SELECT * FROM model_providers WHERE id = ?").get(input.id) as ModelProviderRow;
-        return rowToProvider(row);
+        const existing = db.prepare("SELECT * FROM model_providers WHERE id = ? LIMIT 1").get(input.id) as ModelProviderRow | undefined;
+        if (existing) {
+          db.prepare(
+            `UPDATE model_providers
+               SET kind = ?, display_name = ?, base_url = ?, api_key_env = ?, enabled = ?, updated_at = ?
+             WHERE id = ?`,
+          ).run(
+            input.kind,
+            input.displayName,
+            input.baseUrl ?? null,
+            input.apiKeyEnv ?? null,
+            input.enabled === false ? 0 : 1,
+            ts,
+            input.id,
+          );
+          const row = db.prepare("SELECT * FROM model_providers WHERE id = ?").get(input.id) as ModelProviderRow;
+          return rowToProvider(row);
+        }
       }
-      const id = newId("mp");
+      const id = input.id ?? newId("mp");
       db.prepare(
         `INSERT INTO model_providers (
           id, kind, display_name, base_url, api_key_env, enabled, created_at, updated_at
@@ -216,34 +254,37 @@ export function createModelsRepo(db: DatabaseSync) {
       const ts = now();
       const meta = input.meta ?? {};
       if (input.id) {
-        db.prepare(
-          `UPDATE model_profiles SET
-             provider_id = ?, role = ?, model_name = ?, display_name = ?,
-             context_window = ?, max_output_tokens = ?, local_only = ?, enabled = ?,
-             fallback_profile_id = ?, quality_score = ?, latency_score = ?, cost_score = ?,
-             meta_json = ?, updated_at = ?
-           WHERE id = ?`,
-        ).run(
-          input.providerId,
-          input.role,
-          input.modelName,
-          input.displayName ?? null,
-          input.contextWindow ?? 8192,
-          input.maxOutputTokens ?? 1024,
-          input.localOnly === false ? 0 : 1,
-          input.enabled === false ? 0 : 1,
-          input.fallbackProfileId ?? null,
-          input.qualityScore ?? 0.5,
-          input.latencyScore ?? 0.5,
-          input.costScore ?? 0.5,
-          JSON.stringify(meta),
-          ts,
-          input.id,
-        );
-        const row = db.prepare("SELECT * FROM model_profiles WHERE id = ?").get(input.id) as ModelProfileRow;
-        return rowToProfile(row);
+        const existing = db.prepare("SELECT * FROM model_profiles WHERE id = ? LIMIT 1").get(input.id) as ModelProfileRow | undefined;
+        if (existing) {
+          db.prepare(
+            `UPDATE model_profiles SET
+               provider_id = ?, role = ?, model_name = ?, display_name = ?,
+               context_window = ?, max_output_tokens = ?, local_only = ?, enabled = ?,
+               fallback_profile_id = ?, quality_score = ?, latency_score = ?, cost_score = ?,
+               meta_json = ?, updated_at = ?
+             WHERE id = ?`,
+          ).run(
+            input.providerId,
+            input.role,
+            input.modelName,
+            input.displayName ?? null,
+            input.contextWindow ?? 8192,
+            input.maxOutputTokens ?? 1024,
+            input.localOnly === false ? 0 : 1,
+            input.enabled === false ? 0 : 1,
+            input.fallbackProfileId ?? null,
+            input.qualityScore ?? 0.5,
+            input.latencyScore ?? 0.5,
+            input.costScore ?? 0.5,
+            JSON.stringify(meta),
+            ts,
+            input.id,
+          );
+          const row = db.prepare("SELECT * FROM model_profiles WHERE id = ?").get(input.id) as ModelProfileRow;
+          return rowToProfile(row);
+        }
       }
-      const id = newId("mpr");
+      const id = input.id ?? newId("mpr");
       db.prepare(
         `INSERT INTO model_profiles (
           id, provider_id, role, model_name, display_name, context_window, max_output_tokens,
@@ -297,6 +338,46 @@ export function createModelsRepo(db: DatabaseSync) {
       const row = db.prepare("SELECT * FROM model_profiles WHERE id = ? LIMIT 1").get(id) as ModelProfileRow | undefined;
       return row ? rowToProfile(row) : null;
     },
+    listRoutes(limit = 100): ModelRouteRecord[] {
+      const rows = db
+        .prepare("SELECT * FROM model_routes ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as ModelRouteRow[];
+      return rows.map(rowToRoute);
+    },
+    recordRoute(input: {
+      taskPattern: string;
+      mode: ModelRouteRecord["mode"];
+      selectedProfileId: string;
+      fallbackProfileId?: string | null;
+      reason?: string | null;
+    }): ModelRouteRecord {
+      const id = newId("mroute");
+      const ts = now();
+      db.prepare(
+        `INSERT INTO model_routes (
+          id, task_pattern, mode, selected_profile_id, fallback_profile_id, reason, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        input.taskPattern,
+        input.mode,
+        input.selectedProfileId,
+        input.fallbackProfileId ?? null,
+        input.reason ?? null,
+        ts,
+        ts,
+      );
+      return {
+        id,
+        taskPattern: input.taskPattern,
+        mode: input.mode,
+        selectedProfileId: input.selectedProfileId,
+        fallbackProfileId: input.fallbackProfileId ?? null,
+        reason: input.reason ?? null,
+        createdAt: ts,
+        updatedAt: ts,
+      };
+    },
     recordCall(input: {
       sessionId?: string | null;
       taskId?: string | null;
@@ -336,7 +417,7 @@ export function createModelsRepo(db: DatabaseSync) {
         ts,
         ts,
       );
-      return {
+      const record: ModelCallRecord = {
         id,
         sessionId: input.sessionId ?? null,
         taskId: input.taskId ?? null,
@@ -353,6 +434,83 @@ export function createModelsRepo(db: DatabaseSync) {
         ts,
         createdAt: ts,
       };
+      const day = ts.slice(0, 10);
+      const existing = db
+        .prepare("SELECT * FROM model_usage_daily WHERE day = ? AND model_name = ? LIMIT 1")
+        .get(day, input.profileId) as ModelUsageDailyRow | undefined;
+      if (!existing) {
+        db.prepare(
+          `INSERT INTO model_usage_daily (
+            day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(day, input.profileId, record.promptTokens, record.completionTokens, 1, ts, ts);
+      } else {
+        db.prepare(
+          `UPDATE model_usage_daily
+             SET prompt_tokens = prompt_tokens + ?,
+                 completion_tokens = completion_tokens + ?,
+                 requests = requests + ?,
+                 updated_at = ?
+           WHERE day = ? AND model_name = ?`,
+        ).run(record.promptTokens, record.completionTokens, 1, ts, day, input.profileId);
+      }
+      return record;
+    },
+    bumpDailyUsage(input: {
+      modelName: string;
+      promptTokens?: number;
+      completionTokens?: number;
+      requests?: number;
+      day?: string;
+    }): void {
+      const day = input.day ?? now().slice(0, 10);
+      const ts = now();
+      const existing = db
+        .prepare("SELECT * FROM model_usage_daily WHERE day = ? AND model_name = ? LIMIT 1")
+        .get(day, input.modelName) as ModelUsageDailyRow | undefined;
+      if (!existing) {
+        db.prepare(
+          `INSERT INTO model_usage_daily (
+            day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          day,
+          input.modelName,
+          input.promptTokens ?? 0,
+          input.completionTokens ?? 0,
+          input.requests ?? 0,
+          ts,
+          ts,
+        );
+        return;
+      }
+      db.prepare(
+        `UPDATE model_usage_daily
+           SET prompt_tokens = prompt_tokens + ?,
+               completion_tokens = completion_tokens + ?,
+               requests = requests + ?,
+               updated_at = ?
+         WHERE day = ? AND model_name = ?`,
+      ).run(
+        input.promptTokens ?? 0,
+        input.completionTokens ?? 0,
+        input.requests ?? 0,
+        ts,
+        day,
+        input.modelName,
+      );
+    },
+    listUsageDaily(limit = 50): Array<{ day: string; modelName: string; promptTokens: number; completionTokens: number; requests: number }> {
+      const rows = db
+        .prepare("SELECT * FROM model_usage_daily ORDER BY day DESC, model_name ASC LIMIT ?")
+        .all(limit) as ModelUsageDailyRow[];
+      return rows.map((row) => ({
+        day: asString(row.day),
+        modelName: asString(row.model_name),
+        promptTokens: asNumber(row.prompt_tokens),
+        completionTokens: asNumber(row.completion_tokens),
+        requests: asNumber(row.requests),
+      }));
     },
     listCalls(sessionId: string, limit = 200): ModelCallRecord[] {
       const rows = db

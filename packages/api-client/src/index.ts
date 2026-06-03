@@ -235,11 +235,43 @@ export function createApiClient(options: ApiClientOptions) {
     getModelProviders(): Promise<{ status: "ok"; data: { providers: Array<Record<string, unknown>>; profiles: Array<Record<string, unknown>> } }> {
       return requestJson(options.baseUrl, `/models/providers`);
     },
+    getModelRoutes(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/models/routes`);
+    },
+    routeModel(input: {
+      taskPattern: string;
+      mode?: "local" | "cloud" | "hybrid" | "any";
+      risk?: "low" | "medium" | "high";
+      depth?: "shallow" | "standard" | "deep";
+      question?: string;
+      goal?: string;
+      fallbackProfileId?: string | null;
+      reason?: string | null;
+    }): Promise<{ status: "ok"; data: { route: Record<string, unknown>; profile: Record<string, unknown> | null } }> {
+      return requestJson(options.baseUrl, `/models/route`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
     getModelCalls(limit = 50): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/models/calls?limit=${limit}`);
     },
     getModelHealth(): Promise<{ status: "ok"; data: { providers: Array<Record<string, unknown>>; recentCalls: Array<Record<string, unknown>> } }> {
       return requestJson(options.baseUrl, `/models/health`);
+    },
+    checkModelHealth(input: {
+      providerId: string;
+      profileId?: string | null;
+      status?: "healthy" | "degraded" | "unreachable" | "disabled";
+      latencyMs?: number | null;
+      detail?: string | null;
+    }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/models/health/check`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
     },
     listAgentRuns(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/agents/runs?sessionId=${encodeURIComponent(sessionId)}`);
@@ -259,6 +291,9 @@ export function createApiClient(options: ApiClientOptions) {
     },
     listConversationMessages(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/conversations/${encodeURIComponent(sessionId)}`);
+    },
+    getSessionTrace(sessionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/trace`);
     },
     listEvalCases(projectId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";

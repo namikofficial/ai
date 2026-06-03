@@ -381,13 +381,38 @@ if (process.argv[2] === "memory") {
   withDirectStore((store) => {
     const sub = process.argv[3] ?? "list";
     if (sub === "list") {
-      printJson({ providers: store.models.listProviders(), profiles: store.models.listProfiles() });
+      printJson({ providers: store.models.listProviders(), profiles: store.models.listProfiles(), routes: store.listModelRoutes(50) });
       return;
     }
     if (sub === "health") {
       const providers = store.models.listProviders();
       const calls = store.models.listAllCalls(50);
-      printJson({ providers, recentCalls: calls });
+      printJson({ providers, recentCalls: calls, routes: store.listModelRoutes(50), usageDaily: store.models.listUsageDaily(50) });
+      return;
+    }
+    if (sub === "route") {
+      const args = process.argv.slice(4);
+      const taskPattern = args.filter((arg) => !arg.startsWith("--")).join(" ") || "ask";
+      const mode = process.argv.find((arg) => arg.startsWith("--mode="))?.split("=")[1];
+      const risk = process.argv.find((arg) => arg.startsWith("--risk="))?.split("=")[1];
+      const depth = process.argv.find((arg) => arg.startsWith("--depth="))?.split("=")[1];
+      const question = process.argv.find((arg) => arg.startsWith("--question="))?.split("=").slice(1).join("=");
+      const goal = process.argv.find((arg) => arg.startsWith("--goal="))?.split("=").slice(1).join("=");
+      const route = store.recordModelRoute({
+        taskPattern,
+        mode: mode === "local" || mode === "cloud" || mode === "hybrid" ? mode : "any",
+        selectedProfileId: store.recommendModelProfile(
+          taskPattern.includes("plan") ? "plan" : taskPattern.includes("handoff") ? "handoff" : taskPattern.includes("check") ? "check" : "ask",
+          {
+            risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
+            depth: depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
+            question,
+            goal,
+          },
+        ),
+        reason: `cli:${taskPattern}`,
+      });
+      printJson({ route, profile: store.models.getProfile(route.selectedProfileId) });
       return;
     }
     throw new Error(`unknown models subcommand: ${sub}`);
@@ -407,7 +432,10 @@ if (process.argv[2] === "memory") {
     const handoffs = store.agents.listHandoffs(sessionId);
     const queries = store.retrieval.listQueriesForSession(sessionId);
     const packs = store.context.listPacksForSession(sessionId);
-    printJson({ messages, runs, handoffs, retrievalQueries: queries, contextPacks: packs });
+    const modelCalls = store.models.listCalls(sessionId);
+    const events = store.listEvents(sessionId);
+    const outcomes = store.evals.listOutcomes(sessionId);
+    printJson({ messages, runs, handoffs, retrievalQueries: queries, contextPacks: packs, modelCalls, events, outcomes });
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

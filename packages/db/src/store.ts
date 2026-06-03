@@ -200,7 +200,7 @@ function rankChunk(question: string, path: string, content: string, startLine: n
 }
 
 function selectModelProfile(
-  mode: AskMode | "index" | "plan" | "handoff" | "check" | "reflect",
+  mode: AskMode | "ask" | "any" | "index" | "plan" | "handoff" | "check" | "reflect",
   details: { risk?: "low" | "medium" | "high"; depth?: "shallow" | "standard" | "deep"; question?: string; goal?: string } = {},
 ): string {
   if (mode === "cloud") {
@@ -229,6 +229,73 @@ function selectModelProfile(
   if (details.depth === "deep") return "ask-deep-local";
   if (details.question && details.question.length > 120) return "ask-extended-local";
   return "ask-fast-local";
+}
+
+const DEFAULT_MODEL_PROVIDER_ROWS = [
+  {
+    id: "provider_heuristic_local",
+    kind: "heuristic" as const,
+    displayName: "Heuristic local router",
+    baseUrl: null,
+    apiKeyEnv: null,
+    enabled: true,
+  },
+  {
+    id: "provider_cloud_openai_compat",
+    kind: "cloud_openai_compat" as const,
+    displayName: "Cloud OpenAI-compatible",
+    baseUrl: null,
+    apiKeyEnv: "AI_CLOUD_API_KEY",
+    enabled: false,
+  },
+];
+
+const DEFAULT_MODEL_PROFILE_ROWS = [
+  { id: "intent-local", providerId: "provider_heuristic_local", role: "intent" as const, modelName: "intent-local", displayName: "Intent classifier" },
+  { id: "query-rewrite-local", providerId: "provider_heuristic_local", role: "query_rewrite" as const, modelName: "query-rewrite-local", displayName: "Query rewriter" },
+  { id: "retrieval-judge-local", providerId: "provider_heuristic_local", role: "retrieval_judge" as const, modelName: "retrieval-judge-local", displayName: "Retrieval judge" },
+  { id: "reranker-local", providerId: "provider_heuristic_local", role: "reranker" as const, modelName: "reranker-local", displayName: "Reranker" },
+  { id: "embedding-local", providerId: "provider_heuristic_local", role: "embedding" as const, modelName: "embedding-local", displayName: "Embedding model" },
+  { id: "summarizer-local", providerId: "provider_heuristic_local", role: "summarizer" as const, modelName: "summarizer-local", displayName: "Summarizer" },
+  { id: "reviewer-local", providerId: "provider_heuristic_local", role: "reviewer" as const, modelName: "reviewer-local", displayName: "Reviewer" },
+  { id: "reflection-local", providerId: "provider_heuristic_local", role: "reflection" as const, modelName: "reflection-local", displayName: "Reflection model" },
+  { id: "indexer-local", providerId: "provider_heuristic_local", role: "embedding" as const, modelName: "indexer-local", displayName: "Indexer" },
+  { id: "ask-fast-local", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-fast-local", displayName: "Fast answer" },
+  { id: "ask-extended-local", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-extended-local", displayName: "Extended answer" },
+  { id: "ask-deep-local", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-deep-local", displayName: "Deep answer" },
+  { id: "ask-hybrid-router", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-hybrid-router", displayName: "Hybrid answer router" },
+  { id: "ask-cloud-router", providerId: "provider_cloud_openai_compat", role: "answer" as const, modelName: "ask-cloud-router", displayName: "Cloud answer router", localOnly: false, enabled: false },
+  { id: "planner-fast-local", providerId: "provider_heuristic_local", role: "planner" as const, modelName: "planner-fast-local", displayName: "Fast planner" },
+  { id: "planner-balanced-local", providerId: "provider_heuristic_local", role: "planner" as const, modelName: "planner-balanced-local", displayName: "Balanced planner" },
+  { id: "planner-deep-local", providerId: "provider_heuristic_local", role: "planner" as const, modelName: "planner-deep-local", displayName: "Deep planner" },
+  { id: "handoff-local", providerId: "provider_heuristic_local", role: "coder_handoff" as const, modelName: "handoff-local", displayName: "Handoff compiler" },
+  { id: "checker-local", providerId: "provider_heuristic_local", role: "reviewer" as const, modelName: "checker-local", displayName: "Check summarizer" },
+];
+
+function seedDefaultModelCatalog(modelsRepo: ReturnType<typeof createModelsRepo>): void {
+  const profiles = modelsRepo.listProfiles();
+  if (profiles.length > 0) {
+    return;
+  }
+  for (const provider of DEFAULT_MODEL_PROVIDER_ROWS) {
+    modelsRepo.upsertProvider(provider);
+  }
+  for (const profile of DEFAULT_MODEL_PROFILE_ROWS) {
+    modelsRepo.upsertProfile({
+      id: profile.id,
+      providerId: profile.providerId,
+      role: profile.role,
+      modelName: profile.modelName,
+      displayName: profile.displayName,
+      contextWindow: profile.id.includes("deep") ? 32_768 : profile.id.includes("extended") ? 16_384 : 8_192,
+      maxOutputTokens: profile.id.includes("deep") ? 4_096 : 2_048,
+      localOnly: profile.localOnly !== false,
+      enabled: profile.enabled !== false,
+      qualityScore: profile.role === "planner" ? 0.7 : profile.role === "answer" ? 0.65 : 0.6,
+      latencyScore: profile.role === "embedding" ? 0.8 : 0.7,
+      costScore: profile.localOnly === false ? 0.2 : 0.9,
+    });
+  }
 }
 
 const DEFINITION_TOKENS = new Set(["what", "where", "how", "why", "when", "which", "who"]);
@@ -700,6 +767,8 @@ export function createStore(db: DatabaseSync) {
   const memoryRepo = createMemoryRepo(db);
   const skillsRepo = createSkillsRepo(db);
   const evalRepo = createEvalRepo(db);
+
+  seedDefaultModelCatalog(modelsRepo);
 
   const store = {
     db,
@@ -1513,6 +1582,12 @@ export function createStore(db: DatabaseSync) {
         modelProfile: selectModelProfile("plan", { risk: input.risk, goal: input.goal }),
         source: "cli",
       });
+      modelsRepo.recordRoute({
+        taskPattern: "plan",
+        mode: "any",
+        selectedProfileId: session.modelProfile ?? "planner-balanced-local",
+        reason: `risk=${input.risk ?? "medium"}`,
+      });
       const files = store.listProjectFiles(project.id, 12).map((file) => file.path);
       const taskGraph = [
         {
@@ -1562,6 +1637,21 @@ export function createStore(db: DatabaseSync) {
         );
         return { ...task, id: record.id };
       });
+      const plannerProfileId = session.modelProfile ?? "planner-balanced-local";
+      const plannerModelCall = modelsRepo.recordCall({
+        sessionId: session.id,
+        taskId: persistedTaskGraph[0]?.id ?? null,
+        profileId: plannerProfileId,
+        role: "planner",
+        promptTokens: Math.ceil(input.goal.length / 4),
+        completionTokens: Math.ceil(JSON.stringify(taskGraph).length / 4),
+        latencyMs: 0,
+        status: "ok",
+        request: { goal: input.goal, risk: input.risk ?? "medium", files },
+        response: { taskGraph: persistedTaskGraph, likelyFiles: files.slice(0, 8) },
+      });
+      store.appendEvent(createEvent("model.called", { role: "planner", profileId: plannerModelCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
+      store.appendEvent(createEvent("model.completed", { role: "planner", profileId: plannerModelCall.profileId, requestId: plannerModelCall.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
       const response: PlanResponse = {
         sessionId: session.id,
         projectId: project.id,
@@ -1600,6 +1690,12 @@ export function createStore(db: DatabaseSync) {
       if (!project) throw new Error(`Unknown project: ${input.project}`);
       const session = store.getSession(input.sessionId);
       if (!session) throw new Error(`Unknown session: ${input.sessionId}`);
+      modelsRepo.recordRoute({
+        taskPattern: "handoff",
+        mode: "any",
+        selectedProfileId: session.modelProfile ?? "handoff-local",
+        reason: `target=${input.target}`,
+      });
       const files = store.listProjectFiles(project.id, 10).map((file) => file.path);
       const prompt = [
         `Target: ${input.target}`,
@@ -1640,6 +1736,20 @@ export function createStore(db: DatabaseSync) {
           excerpt: file,
         })),
       });
+      const handoffModelCall = modelsRepo.recordCall({
+        sessionId: session.id,
+        taskId: session.activeTaskId,
+        profileId: modelsRepo.getProfile("handoff-local")?.id ?? "handoff-local",
+        role: "coder_handoff",
+        promptTokens: Math.ceil((input.subtask.length + files.join("\n").length) / 4),
+        completionTokens: Math.ceil(prompt.length / 4),
+        latencyMs: 0,
+        status: "ok",
+        request: { target: input.target, subtask: input.subtask, files, contextPackId: contextPack.id },
+        response: { handoffId: id, prompt, selectedContext },
+      });
+      store.appendEvent(createEvent("model.called", { role: "coder_handoff", profileId: handoffModelCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
+      store.appendEvent(createEvent("model.completed", { role: "coder_handoff", profileId: handoffModelCall.profileId, requestId: handoffModelCall.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
       const handoffAgentRun = agentsRepo.createRun({
         sessionId: session.id,
         taskId: session.activeTaskId,
@@ -1809,6 +1919,12 @@ export function createStore(db: DatabaseSync) {
         modelProfile: selectModelProfile("index", { goal: project.path }),
         source: "cli",
       });
+      modelsRepo.recordRoute({
+        taskPattern: "index",
+        mode: "any",
+        selectedProfileId: session.modelProfile ?? "indexer-local",
+        reason: `project=${project.name}`,
+      });
 
       const events: EventEnvelope[] = [];
       const push = (type: EventType, payload: Record<string, unknown>, details: Partial<Pick<EventEnvelope, "taskId" | "agent" | "level">> = {}) => {
@@ -1879,6 +1995,20 @@ export function createStore(db: DatabaseSync) {
         durationMs: Date.parse(now()) - Date.parse(indexerRun.startedAt),
         output: { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed, qdrantFailed: indexSummary.qdrantFailed },
       });
+      const indexModelCall = modelsRepo.recordCall({
+        sessionId: session.id,
+        taskId: task.id,
+        profileId: session.modelProfile ?? "indexer-local",
+        role: "embedding",
+        promptTokens: Math.ceil(project.path.length / 4),
+        completionTokens: Math.ceil(`${indexSummary.filesIndexed}:${indexSummary.chunksIndexed}`.length / 2),
+        latencyMs: 0,
+        status: "ok",
+        request: { projectPath: project.path, fileCount: indexSummary.filesIndexed, chunkCount: indexSummary.chunksIndexed },
+        response: { qdrantFailed: indexSummary.qdrantFailed, filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed },
+      });
+      store.appendEvent(createEvent("model.called", { role: "embedding", profileId: indexModelCall.profileId }, { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }));
+      store.appendEvent(createEvent("model.completed", { role: "embedding", profileId: indexModelCall.profileId, requestId: indexModelCall.id }, { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }));
 
       push("task.completed", { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed }, { taskId: task.id, agent: "indexer" });
       push("session.completed", { summary: completedSession.finalSummary }, { agent: "orchestrator" });
@@ -1941,6 +2071,12 @@ export function createStore(db: DatabaseSync) {
         modelProfile: selectModelProfile(input.mode ?? "local", { depth: input.depth, question: input.question }),
         source: "cli",
       });
+      modelsRepo.recordRoute({
+        taskPattern: "ask",
+        mode: input.mode ?? "local",
+        selectedProfileId: session.modelProfile ?? "ask-fast-local",
+        reason: `depth=${input.depth ?? "standard"}`,
+      });
 
       const userMessage = conversationRepo.appendMessage({
         sessionId: session.id,
@@ -1986,6 +2122,21 @@ export function createStore(db: DatabaseSync) {
           score: 1.0,
         });
       }
+      const queryRewriteProfileId = modelsRepo.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
+      const queryRewriteCall = modelsRepo.recordCall({
+        sessionId: session.id,
+        retrievalQueryId: retrievalQuery.id,
+        profileId: queryRewriteProfileId,
+        role: "query_rewrite",
+        promptTokens: Math.ceil(input.question.length / 4),
+        completionTokens: Math.ceil(rewritten.variant.length / 4),
+        latencyMs: 0,
+        status: "ok",
+        request: { question: input.question, analysis },
+        response: { rewritten: rewritten.variant, terms: rewritten.terms, pathHints: rewritten.pathHints, symbolHints: rewritten.symbolHints },
+      });
+      store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+      store.appendEvent(createEvent("model.completed", { role: "query_rewrite", profileId: queryRewriteCall.profileId, requestId: queryRewriteCall.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       agentsRepo.appendMessage({
         agentRunId: retrievalAgentRun.id,
         direction: "internal",
@@ -2042,11 +2193,35 @@ export function createStore(db: DatabaseSync) {
           rank: index,
           tokenCount: chunk.tokenCount,
           excerpt: chunk.content.split("\n").slice(0, 4).join("\n"),
-        })),
+          })),
       });
 
       const confidence = chunks.length === 0 ? 0 : Math.min(0.95, Math.max(0.25, chunks[0].score / 8));
       const insufficientReason = chunks.length === 0 ? "No matching chunks were found in the selected project." : null;
+      const retrievalJudgeCall = modelsRepo.recordCall({
+        sessionId: session.id,
+        taskId: retrievalAgentRun.id,
+        retrievalQueryId: retrievalQuery.id,
+        profileId: modelsRepo.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local",
+        role: "retrieval_judge",
+        promptTokens: Math.ceil((input.question.length + rewritten.variant.length) / 4),
+        completionTokens: Math.ceil(String(chunks.length).length / 2),
+        latencyMs: 0,
+        status: "ok",
+        request: {
+          question: input.question,
+          rewritten: rewritten.variant,
+          chunkCount: chunks.length,
+          mode: input.mode ?? "local",
+        },
+        response: {
+          confidence,
+          insufficientReason,
+          citations: citations.slice(0, 3),
+        },
+      });
+      store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+      store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeCall.profileId, requestId: retrievalJudgeCall.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       if (chunks.length === 0) {
         retrievalRepo.recordMiss({
           retrievalQueryId: retrievalQuery.id,
@@ -2076,6 +2251,32 @@ export function createStore(db: DatabaseSync) {
         risk: "low",
         input: { question: input.question, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
       });
+      const answerProfileId = session.modelProfile ?? selectModelProfile(input.mode ?? "local", { depth: input.depth, question: input.question });
+      const answerModelCall = modelsRepo.recordCall({
+        sessionId: session.id,
+        taskId: answerAgentRun.id,
+        retrievalQueryId: retrievalQuery.id,
+        profileId: answerProfileId,
+        role: "answer",
+        promptTokens: Math.ceil((input.question.length + contextPack.usedTokens) / 4),
+        completionTokens: Math.ceil(answer.length / 4),
+        latencyMs: 0,
+        status: "ok",
+        request: {
+          question: input.question,
+          retrievalQueryId: retrievalQuery.id,
+          contextPackId: contextPack.id,
+          citations: citations.slice(0, 5),
+        },
+        response: {
+          answer,
+          confidence,
+          citations: citations.slice(0, 5),
+          insufficientReason,
+        },
+      });
+      store.appendEvent(createEvent("model.called", { role: "answer", profileId: answerModelCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
+      store.appendEvent(createEvent("model.completed", { role: "answer", profileId: answerModelCall.profileId, requestId: answerModelCall.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
 
       const retrievalCompleted = createEvent(
         chunks.length === 0 ? "retrieval.low_confidence" : "retrieval.completed",
@@ -2171,6 +2372,24 @@ export function createStore(db: DatabaseSync) {
     },
     getConfig(config: ConfigSnapshot): ConfigSnapshot {
       return config;
+    },
+    recommendModelProfile(
+      mode: AskMode | "ask" | "any" | "index" | "plan" | "handoff" | "check" | "reflect",
+      details: { risk?: "low" | "medium" | "high"; depth?: "shallow" | "standard" | "deep"; question?: string; goal?: string } = {},
+    ): string {
+      return selectModelProfile(mode, details);
+    },
+    recordModelRoute(input: {
+      taskPattern: string;
+      mode: "local" | "cloud" | "hybrid" | "any";
+      selectedProfileId: string;
+      fallbackProfileId?: string | null;
+      reason?: string | null;
+    }) {
+      return modelsRepo.recordRoute(input);
+    },
+    listModelRoutes(limit = 50) {
+      return modelsRepo.listRoutes(limit);
     },
     listStatefulSessions(): SessionRecord[] {
       return store.listSessions(100);

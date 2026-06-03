@@ -405,10 +405,14 @@ function SessionsPage(): ReactNode {
 
 function SessionDetailPage(): ReactNode {
   const { sessionId = "" } = useParams();
-  const resource = useResource(() => Promise.all([api.getSession(sessionId), api.getSessionEvents(sessionId), api.listTasks()]), [sessionId]);
+  const resource = useResource(
+    () => Promise.all([api.getSession(sessionId), api.getSessionEvents(sessionId), api.listTasks(), api.getSessionTrace(sessionId)]),
+    [sessionId],
+  );
   const session = resource.data?.[0].data ?? null;
   const events = resource.data?.[1].data ?? [];
   const tasks = resource.data?.[2].data.filter((task) => task.sessionId === sessionId) ?? [];
+  const trace = resource.data?.[3].data ?? null;
 
   if (!session) {
     return (
@@ -470,6 +474,32 @@ function SessionDetailPage(): ReactNode {
             ))
           ) : (
             <EmptyState title="No events yet" body="Session events will stream here once work begins." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Trace Replay" span={12}>
+        <div className="list">
+          {trace ? (
+            <>
+              <div className="list-item">
+                <strong>Model Calls</strong>
+                <div className="tiny">{Array.isArray(trace.modelCalls) ? trace.modelCalls.length : 0} calls recorded</div>
+              </div>
+              <div className="list-item">
+                <strong>Retrieval Queries</strong>
+                <div className="tiny">{Array.isArray(trace.retrievalQueries) ? trace.retrievalQueries.length : 0} queries replayable</div>
+              </div>
+              <div className="list-item">
+                <strong>Context Packs</strong>
+                <div className="tiny">{Array.isArray(trace.contextPacks) ? trace.contextPacks.length : 0} packs stored</div>
+              </div>
+              <div className="list-item">
+                <strong>Conversation Replay</strong>
+                <pre>{JSON.stringify(trace.messages ?? [], null, 2).slice(0, 1200)}</pre>
+              </div>
+            </>
+          ) : (
+            <EmptyState title="No trace" body="The session trace will appear once the API returns replay data." />
           )}
         </div>
       </Panel>
@@ -1341,13 +1371,14 @@ function ReviewDetailPage(): ReactNode {
 
 function ModelsPage(): ReactNode {
   const resource = useResource(() =>
-    Promise.all([api.getModels(), api.getModelProviders(), api.getModelHealth(), api.getModelCalls(30)]),
+    Promise.all([api.getModels(), api.getModelProviders(), api.getModelHealth(), api.getModelCalls(30), api.getModelRoutes()]),
   );
   const usage = (resource.data?.[0].data?.usage ?? []) as Array<{ day: string; modelName: string; promptTokens: number; completionTokens: number; requests: number }>;
   const providers = (resource.data?.[1].data?.providers ?? []) as Array<Record<string, unknown>>;
   const profiles = (resource.data?.[1].data?.profiles ?? []) as Array<Record<string, unknown>>;
   const healthProviders = (resource.data?.[2].data?.providers ?? []) as Array<Record<string, unknown>>;
   const calls = (resource.data?.[3].data ?? []) as Array<Record<string, unknown>>;
+  const routes = (resource.data?.[4].data ?? []) as Array<Record<string, unknown>>;
 
   return (
     <PageShell title="Models" subtitle="Local model routing, providers, and recent calls">
@@ -1384,6 +1415,25 @@ function ModelsPage(): ReactNode {
             ))
           ) : (
             <EmptyState title="No profiles" body="Profiles are created from providers." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Routes" span={6}>
+        <div className="list">
+          {routes.length > 0 ? (
+            routes.map((route) => (
+              <div className="list-item" key={String(route.id)}>
+                <div className="row">
+                  <strong>{String(route.taskPattern ?? route.id)}</strong>
+                  <Badge tone="neutral">{String(route.mode ?? "any")}</Badge>
+                </div>
+                <div className="tiny">
+                  selected {String(route.selectedProfileId ?? "?")} · fallback {String(route.fallbackProfileId ?? "none")}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No routes" body="Route decisions will appear here once model routing is recorded." />
           )}
         </div>
       </Panel>

@@ -63,6 +63,18 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
   assert.ok(runAgents.has("retrieval_agent"));
   assert.ok(runAgents.has("answer_agent"));
 
+  const modelCalls = store.models.listCalls(answer.sessionId);
+  assert.ok(modelCalls.length >= 3);
+  assert.ok(modelCalls.some((call) => call.role === "query_rewrite"));
+  assert.ok(modelCalls.some((call) => call.role === "retrieval_judge"));
+  assert.ok(modelCalls.some((call) => call.role === "answer"));
+
+  const modelRoutes = store.listModelRoutes(10);
+  assert.ok(modelRoutes.some((route) => route.taskPattern === "ask"));
+
+  const usageDaily = store.models.listUsageDaily(10);
+  assert.ok(usageDaily.some((entry) => entry.modelName === "ask-fast-local" || entry.modelName === "ask-deep-local" || entry.modelName === "ask-extended-local"));
+
   const contextPacks = store.context.listPacksForSession(answer.sessionId);
   assert.ok(contextPacks.length > 0);
   const items = store.context.listItems(contextPacks[0].id);

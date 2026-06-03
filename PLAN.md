@@ -1126,6 +1126,7 @@ Implemented in this bootstrap slice:
 - Safe MCP tool server entrypoint with allowlisted tool dispatch and call logging.
 - Background worker entrypoint with queued plan, handoff, and reflection follow-up jobs.
 - Session model/profile routing plus env-aware settings snapshots and a best-effort FTS-backed retrieval index with heuristic fallback.
+- Model route records, model-call persistence, daily usage rollups, and replayable session trace endpoints/CLI output for observable routing decisions.
 - Live reindex and retrieval smoke against a freshly indexed workspace project.
 - Persisted task graphs with `/tasks` list/detail pages and task lifecycle routes.
 - Review history with `/reviews` list and `/reviews/:id` detail pages.

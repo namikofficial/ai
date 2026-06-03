@@ -17,11 +17,13 @@ import {
 
 export interface ServerOptions {
   config?: Partial<ConfigSnapshot>;
+  inProcess?: boolean;
 }
 
 export interface ServerHandle {
   url: string;
   close(): Promise<void>;
+  inject(input: { method: string; url: string; headers?: Record<string, string>; body?: unknown }): Promise<{ statusCode: number; body: string }>;
 }
 
 interface JsonResponse {
@@ -1230,6 +1232,35 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           sendJson(res, json("ok", store.listEvents(sessionId, 500)));
           return;
         }
+        if (method === "GET" && rest === "/trace") {
+          const session = store.getSession(sessionId);
+          if (!session) {
+            sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+            return;
+          }
+          const projectId = session.projectId;
+          sendJson(
+            res,
+            json("ok", {
+              session,
+              messages: store.conversation.listMessages(sessionId, 500),
+              events: store.listEvents(sessionId, 500),
+              retrievalQueries: store.retrieval.listQueriesForSession(sessionId, 100),
+              modelCalls: store.models.listCalls(sessionId, 100),
+              agentRuns: store.agents.listRuns(sessionId, 100),
+              agentHandoffs: store.agents.listHandoffs(sessionId, 100),
+              contextPacks: store.context.listPacksForSession(sessionId, 100).map((pack) => ({
+                pack,
+                items: store.context.listItems(pack.id),
+                budgetEvents: store.context.listBudgetEvents(pack.id),
+              })),
+              memoryCandidates: store.memory.listCandidates(undefined, projectId, 100).filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId),
+              skills: store.skills.listSkills(undefined, 100),
+              evalOutcomes: store.evals.listOutcomes(sessionId, 100),
+            }),
+          );
+          return;
+        }
       }
 
       if (path.startsWith("/tasks/")) {
@@ -1895,9 +1926,65 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         );
         return;
       }
+      if (method === "GET" && path === "/models/routes") {
+        sendJson(res, json("ok", store.listModelRoutes(100)));
+        return;
+      }
+      if (method === "POST" && path === "/models/route") {
+        const body = (req.headers?.["content-type"]?.includes("application/json")
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
+        const selectedProfileId = store.recommendModelProfile(
+          body.mode === "cloud" || body.mode === "hybrid" || body.mode === "local" ? body.mode : "any",
+          {
+            risk: body.risk === "low" || body.risk === "medium" || body.risk === "high" ? body.risk : undefined,
+            depth: body.depth === "shallow" || body.depth === "standard" || body.depth === "deep" ? body.depth : undefined,
+            question: body.question ? String(body.question) : undefined,
+            goal: body.goal ? String(body.goal) : undefined,
+          },
+        );
+        const route = store.recordModelRoute({
+          taskPattern: String(body.taskPattern ?? body.task ?? "ask"),
+          mode: body.mode === "cloud" || body.mode === "hybrid" || body.mode === "local" ? body.mode : "any",
+          selectedProfileId,
+          fallbackProfileId: body.fallbackProfileId ? String(body.fallbackProfileId) : null,
+          reason: body.reason ? String(body.reason) : null,
+        });
+        sendJson(
+          res,
+          json("ok", {
+            route,
+            profile: store.models.getProfile(selectedProfileId),
+          }),
+        );
+        return;
+      }
       if (method === "GET" && path === "/models/calls") {
         const limit = Number(url.searchParams.get("limit") ?? "50") || 50;
         sendJson(res, json("ok", store.models.listAllCalls(limit)));
+        return;
+      }
+      if (method === "POST" && path === "/models/health/check") {
+        const body = (req.headers?.["content-type"]?.includes("application/json")
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
+        const providerId = String(body.providerId ?? "");
+        if (!providerId) {
+          sendJson(res, json("error", undefined, { message: "providerId is required" }), 400);
+          return;
+        }
+        const profileId = body.profileId ? String(body.profileId) : null;
+        const status = body.status === "healthy" || body.status === "degraded" || body.status === "unreachable" || body.status === "disabled"
+          ? body.status
+          : "healthy";
+        const check = store.models.recordHealthCheck({
+          providerId,
+          profileId,
+          status,
+          latencyMs: body.latencyMs == null ? null : Number(body.latencyMs),
+          detail: body.detail ? String(body.detail) : null,
+        });
+        sendJson(res, json("ok", check));
         return;
       }
       if (method === "GET" && path === "/models/health") {
@@ -2077,6 +2164,30 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     });
   });
 
+  const inject = async (input: { method: string; url: string; headers?: Record<string, string>; body?: unknown }) => {
+    const headers = {
+      accept: "application/json",
+      ...(input.body === undefined ? input.headers : { "content-type": "application/json", ...input.headers }),
+    };
+    const method = input.method.toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
+    const response = await app.inject({
+      method,
+      url: input.url,
+      headers,
+      payload: input.body === undefined ? undefined : JSON.stringify(input.body),
+    });
+    return { statusCode: response.statusCode, body: response.body };
+  };
+
+  if (options.inProcess) {
+    await app.ready();
+    return {
+      url: "http://in-process",
+      inject,
+      close: () => app.close(),
+    };
+  }
+
   const port = config.apiPort;
   await app.listen({ port, host: "127.0.0.1" });
   const address = app.server.address();
@@ -2084,6 +2195,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
   return {
     url: `http://127.0.0.1:${actualPort}`,
+    inject,
     close: () => app.close(),
   };
 }
