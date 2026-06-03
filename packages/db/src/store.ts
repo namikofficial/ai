@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { readFileSync } from "node:fs";
+// @ts-ignore - this workspace's node type surface does not expose node:module, but the runtime does.
+import { createRequire } from "node:module";
 import { basename, extname, join, normalize, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type {
@@ -37,6 +39,7 @@ import type {
 import { createEvent, createId, slugifyName } from "../../shared/src/index.ts";
 
 type Row = Record<string, unknown>;
+const require = createRequire(import.meta.url);
 
 const DEFAULT_IGNORE_DIRS = new Set([
   ".git",
@@ -153,6 +156,9 @@ function rankChunk(question: string, path: string, content: string, startLine: n
     .split(/[^a-z0-9]+/g)
     .filter((term) => term.length >= 3);
   let score = 0;
+  if (question.trim().length > 0 && haystack.includes(question.toLowerCase().trim())) {
+    score += 5;
+  }
   for (const term of terms) {
     if (haystack.includes(term)) {
       score += term.length >= 6 ? 3 : 1;
@@ -164,11 +170,18 @@ function rankChunk(question: string, path: string, content: string, startLine: n
       score += 2;
     }
   }
+  if (terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))) {
+    score += 1;
+  }
   if (/auth|login|session|token/i.test(path)) score += 2;
   if (/test|spec/i.test(path)) score += 1;
   if (/readme|docs?|notes?/i.test(path)) score += 1;
+  if (/index|overview|summary/i.test(path)) score += 0.5;
   if (terms.some((term) => content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `))) {
     score += 1;
+  }
+  if (content.split("\n")[0]?.toLowerCase().includes(terms[0] ?? "")) {
+    score += 0.5;
   }
   score += Math.max(0, 5 - Math.min(5, Math.abs(endLine - startLine) / 40));
   return score;
@@ -219,6 +232,203 @@ function buildFtsQuery(question: string): string | null {
     return null;
   }
   return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND ");
+}
+
+interface QdrantRuntimeSettings {
+  enabled: boolean;
+  url: string | null;
+  collection: string;
+}
+
+interface QdrantPoint {
+  id: string;
+  vector: number[];
+  payload: Record<string, unknown>;
+}
+
+function getQdrantRuntimeSettings(): QdrantRuntimeSettings {
+  const enabled = /^(1|true|yes)$/i.test(process.env.AI_QDRANT_ENABLED ?? "");
+  const collection = process.env.AI_QDRANT_COLLECTION ?? "ai_chunks";
+  const url = process.env.AI_QDRANT_URL ?? (enabled ? "http://127.0.0.1:6333" : null);
+  return { enabled, url, collection };
+}
+
+function embedText(text: string): number[] {
+  const dim = 32;
+  const vector = Array.from({ length: dim }, () => 0);
+  const terms = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((term) => term.length >= 2);
+  for (const term of terms) {
+    let hash = 2166136261;
+    for (let index = 0; index < term.length; index += 1) {
+      hash ^= term.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    const bucket = hash >>> 0;
+    vector[bucket % dim] += 1;
+    vector[(bucket >>> 5) % dim] += term.length / 8;
+    vector[(bucket >>> 11) % dim] += term.includes("auth") ? 1.5 : 0.25;
+  }
+  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return magnitude > 0 ? vector.map((value) => value / magnitude) : vector;
+}
+
+function qdrantRequestSync(
+  baseUrl: string,
+  path: string,
+  init?: { method: string; body?: unknown },
+): { ok: boolean; status: number; body: string } | null {
+  const method = init?.method ?? "GET";
+  const encodedBody = init?.body === undefined ? "" : encodeURIComponent(JSON.stringify(init.body));
+  const script = `
+    const [url, method, bodyB64] = process.argv.slice(1);
+    const body = bodyB64 ? JSON.parse(decodeURIComponent(bodyB64)) : undefined;
+    const response = await fetch(url, {
+      method,
+      headers: body === undefined ? undefined : { "content-type": "application/json" },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await response.text();
+    process.stdout.write(JSON.stringify({ ok: response.ok, status: response.status, body: text }));
+  `;
+  const { spawnSync } = require("node:child_process") as {
+    spawnSync: (
+      command: string,
+      args: string[],
+      options: { encoding: "utf8"; timeout: number; maxBuffer: number },
+    ) => { status: number | null; stdout: string };
+  };
+  let stdout = "";
+  try {
+    stdout = spawnSync(process.argv[0], ["--input-type=module", "-e", script, new URL(path, baseUrl).toString(), method, encodedBody], {
+      encoding: "utf8",
+      timeout: 2500,
+      maxBuffer: 10_000_000,
+    }).stdout;
+  } catch {
+    return null;
+  }
+  try {
+    return JSON.parse(stdout) as { ok: boolean; status: number; body: string };
+  } catch {
+    return null;
+  }
+}
+
+function ensureQdrantCollectionSync(settings: QdrantRuntimeSettings): boolean {
+  if (!settings.enabled || !settings.url) {
+    return false;
+  }
+  const existing = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, { method: "GET" });
+  if (existing?.ok) {
+    return true;
+  }
+  const created = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, {
+    method: "PUT",
+    body: {
+      vectors: {
+        size: 32,
+        distance: "Cosine",
+      },
+    },
+  });
+  return Boolean(created?.ok);
+}
+
+function qdrantPointForChunk(projectId: string, documentId: string, path: string, chunk: { id: string; content: string; startLine: number; endLine: number; tokenCount: number }, language: string | null): QdrantPoint {
+  return {
+    id: chunk.id,
+    vector: embedText(`${path}\n${chunk.content}`),
+    payload: {
+      chunkId: chunk.id,
+      projectId,
+      documentId,
+      path,
+      content: chunk.content,
+      startLine: chunk.startLine,
+      endLine: chunk.endLine,
+      tokenCount: chunk.tokenCount,
+      metadata: {
+        path,
+        language,
+      },
+    },
+  };
+}
+
+function upsertQdrantChunksSync(settings: QdrantRuntimeSettings, points: QdrantPoint[]): boolean {
+  if (!settings.enabled || !settings.url || points.length === 0) {
+    return false;
+  }
+  if (!ensureQdrantCollectionSync(settings)) {
+    return false;
+  }
+  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points?wait=true`, {
+    method: "PUT",
+    body: { points },
+  });
+  return Boolean(response?.ok);
+}
+
+function searchQdrantChunksSync(settings: QdrantRuntimeSettings, projectId: string, query: string, limit: number): RetrievalChunk[] | null {
+  if (!settings.enabled || !settings.url || query.trim().length === 0) {
+    return null;
+  }
+  if (!ensureQdrantCollectionSync(settings)) {
+    return null;
+  }
+  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points/search`, {
+    method: "POST",
+    body: {
+      vector: embedText(query),
+      limit: limit * 3,
+      with_payload: true,
+      filter: {
+        must: [
+          {
+            key: "projectId",
+            match: {
+              value: projectId,
+            },
+          },
+        ],
+      },
+    },
+  });
+  if (!response?.ok) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(response.body) as {
+      result?: Array<{
+        id: string | number;
+        score: number;
+        payload?: Record<string, unknown>;
+      }>;
+    };
+    return (parsed.result ?? [])
+      .map((result) => {
+        const payload = result.payload ?? {};
+        const metadata = payload.metadata && typeof payload.metadata === "object" ? (payload.metadata as Record<string, unknown>) : {};
+        return {
+          id: asString(payload.chunkId ?? result.id),
+          projectId: asString(payload.projectId),
+          documentId: asString(payload.documentId),
+          path: asString(payload.path),
+          content: asString(payload.content),
+          startLine: toNumber(payload.startLine),
+          endLine: toNumber(payload.endLine),
+          tokenCount: toNumber(payload.tokenCount),
+          score: result.score * 10,
+          metadata,
+        } satisfies RetrievalChunk;
+      })
+      .filter((chunk) => chunk.id.length > 0 && chunk.path.length > 0 && chunk.content.length > 0);
+  } catch {
+    return null;
+  }
 }
 
 function tryEnableSearchIndex(db: DatabaseSync): boolean {
@@ -378,6 +588,20 @@ export function initializeStore(dbPath: string): DatabaseSync {
 }
 
 export function createStore(db: DatabaseSync) {
+  const qdrantBaseSettings = getQdrantRuntimeSettings();
+  let qdrantAvailable = qdrantBaseSettings.enabled && Boolean(qdrantBaseSettings.url);
+
+  function getActiveQdrantSettings(): QdrantRuntimeSettings | null {
+    if (!qdrantBaseSettings.enabled || !qdrantAvailable || !qdrantBaseSettings.url) {
+      return null;
+    }
+    return qdrantBaseSettings;
+  }
+
+  function disableQdrant(): void {
+    qdrantAvailable = false;
+  }
+
   const store = {
     db,
     seedAndMigrate: () => {
@@ -1331,6 +1555,26 @@ export function createStore(db: DatabaseSync) {
     searchChunks(projectId: string, query: string, options: SearchOptions = {}): RetrievalChunk[] {
       const normalizedQuery = query.trim();
       const limit = options.limit ?? 8;
+      const candidates = new Map<string, RetrievalChunk>();
+      const addCandidates = (chunks: RetrievalChunk[]) => {
+        for (const chunk of chunks) {
+          const existing = candidates.get(chunk.id);
+          if (!existing || chunk.score > existing.score) {
+            candidates.set(chunk.id, chunk);
+          }
+        }
+      };
+
+      const qdrantSettings = getActiveQdrantSettings();
+      if (normalizedQuery.length > 0 && qdrantSettings) {
+        const qdrantChunks = searchQdrantChunksSync(qdrantSettings, projectId, normalizedQuery, limit);
+        if (qdrantChunks === null) {
+          disableQdrant();
+        } else {
+          addCandidates(qdrantChunks);
+        }
+      }
+
       const ftsQuery = normalizedQuery.length > 0 ? buildFtsQuery(normalizedQuery) : null;
       if (ftsQuery) {
         try {
@@ -1368,9 +1612,7 @@ export function createStore(db: DatabaseSync) {
             })
             .filter((chunk) => chunk.score > 0)
             .sort((left, right) => right.score - left.score);
-          if (scored.length > 0) {
-            return scored.slice(0, limit);
-          }
+          addCandidates(scored);
         } catch {
           // Fall back to the heuristic scorer if FTS isn't available or the query is unsupported.
         }
@@ -1400,7 +1642,10 @@ export function createStore(db: DatabaseSync) {
         })
         .filter((chunk) => normalizedQuery.length === 0 || chunk.score > 0)
         .sort((left, right) => right.score - left.score);
-      return scored.slice(0, limit);
+      addCandidates(scored);
+      return Array.from(candidates.values())
+        .sort((left, right) => right.score - left.score)
+        .slice(0, limit);
     },
     async addOrUpdateProject(input: ProjectCreateInput): Promise<ProjectSummary> {
       return store.createProject(input);
@@ -1453,7 +1698,10 @@ export function createStore(db: DatabaseSync) {
       push("task.created", { title: task.title, description: task.description }, { taskId: task.id, agent: "orchestrator" });
       push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
 
-      const indexSummary = await indexProjectFiles(db, project.id, project.path);
+      const indexSummary = await indexProjectFiles(db, project.id, project.path, getActiveQdrantSettings());
+      if (indexSummary.qdrantFailed) {
+        disableQdrant();
+      }
       const completedSession = store.updateSession(session.id, {
         status: "completed",
         finishedAt: now(),
@@ -1654,10 +1902,11 @@ function buildAnswer(
   ].join("\n");
 }
 
-async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPath: string) {
+async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPath: string, qdrantSettings: QdrantRuntimeSettings | null) {
   const files = await walkFiles(projectPath);
   let filesIndexed = 0;
   let chunksIndexed = 0;
+  let qdrantFailed = false;
   const ts = now();
   const upsertFile = db.prepare(
     `INSERT INTO files (
@@ -1689,6 +1938,7 @@ async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPat
       id, project_id, document_id, chunk_index, content, content_hash, start_line, end_line, token_count, embedding_id, metadata_json, created_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
+  const qdrantPoints: QdrantPoint[] = [];
 
   for (const filePath of files) {
     const absolutePath = resolve(filePath);
@@ -1730,14 +1980,38 @@ async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPat
         ts,
       );
       indexedChunks.push({ id: chunkId, content: chunk.content });
+      if (qdrantSettings) {
+        qdrantPoints.push(
+          qdrantPointForChunk(
+            projectId,
+            documentId,
+            relativePath,
+            {
+              id: chunkId,
+              content: chunk.content,
+              startLine: chunk.startLine,
+              endLine: chunk.endLine,
+              tokenCount: chunk.tokenCount,
+            },
+            language,
+          ),
+        );
+      }
       chunksIndexed += 1;
     });
     syncSearchIndexForFile(db, projectId, relativePath, indexedChunks);
     filesIndexed += 1;
   }
 
+  if (qdrantSettings && qdrantPoints.length > 0) {
+    const upserted = upsertQdrantChunksSync(qdrantSettings, qdrantPoints);
+    if (!upserted) {
+      qdrantFailed = true;
+    }
+  }
+
   db.prepare("UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?").run("ready", ts, ts, projectId);
-  return { filesIndexed, chunksIndexed };
+  return { filesIndexed, chunksIndexed, qdrantFailed };
 }
 
 async function walkFiles(root: string): Promise<string[]> {

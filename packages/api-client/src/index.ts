@@ -12,6 +12,9 @@ import type {
   ReviewResponse,
   ProjectCreateInput,
   ProjectSummary,
+  RetrievalChunk,
+  ReviewRecord,
+  TaskRecord,
   SessionRecord,
   SettingsSnapshot,
 } from "../../shared/src/index.ts";
@@ -20,10 +23,18 @@ export interface ApiClientOptions {
   baseUrl: string;
 }
 
+function resolveUrl(baseUrl: string, path: string): URL {
+  const url = new URL(baseUrl);
+  const basePath = url.pathname.endsWith("/") ? url.pathname.slice(0, -1) : url.pathname;
+  const nextPath = path.startsWith("/") ? path : `/${path}`;
+  url.pathname = `${basePath}${nextPath}`.replace(/\/{2,}/g, "/");
+  return url;
+}
+
 async function requestJson<T>(baseUrl: string, path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers ?? {});
   headers.set("accept", "application/json");
-  const response = await fetch(new URL(path, baseUrl), {
+  const response = await fetch(resolveUrl(baseUrl, path), {
     ...init,
     headers,
   });
@@ -49,6 +60,9 @@ export function createApiClient(options: ApiClientOptions) {
     listProjects(): Promise<{ status: "ok"; data: ProjectSummary[] }> {
       return requestJson(options.baseUrl, "/projects");
     },
+    getProject(projectId: string): Promise<{ status: "ok"; data: ProjectSummary | null }> {
+      return requestJson(options.baseUrl, `/projects/${projectId}`);
+    },
     createProject(input: ProjectCreateInput): Promise<{ status: "ok"; data: ProjectSummary }> {
       return requestJson(options.baseUrl, "/projects", {
         method: "POST",
@@ -59,6 +73,13 @@ export function createApiClient(options: ApiClientOptions) {
     indexProject(projectId: string): Promise<{ status: "ok"; data: { session: SessionRecord; events: EventEnvelope[] } }> {
       return requestJson(options.baseUrl, `/projects/${projectId}/index`, { method: "POST" });
     },
+    getProjectMemory(projectId: string): Promise<{ status: "ok"; data: { lessons: Array<Record<string, unknown>>; rules: Array<Record<string, unknown>>; memory: Array<Record<string, unknown>> } }> {
+      return requestJson(options.baseUrl, `/projects/${projectId}/memory`);
+    },
+    getProjectRetrieval(projectId: string, query = ""): Promise<{ status: "ok"; data: { chunks: RetrievalChunk[]; query: string } }> {
+      const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
+      return requestJson(options.baseUrl, `/projects/${projectId}/retrieval${suffix}`);
+    },
     listSessions(): Promise<{ status: "ok"; data: SessionRecord[] }> {
       return requestJson(options.baseUrl, "/sessions");
     },
@@ -67,6 +88,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getSessionEvents(sessionId: string): Promise<{ status: "ok"; data: EventEnvelope[] }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/events`);
+    },
+    listTasks(): Promise<{ status: "ok"; data: TaskRecord[] }> {
+      return requestJson(options.baseUrl, "/tasks");
+    },
+    getTask(taskId: string): Promise<{ status: "ok"; data: TaskRecord }> {
+      return requestJson(options.baseUrl, `/tasks/${taskId}`);
     },
     ask(input: AskRequest): Promise<{ status: "ok"; data: AskResponse }> {
       return requestJson(options.baseUrl, "/ask", {
@@ -119,7 +146,7 @@ export function createApiClient(options: ApiClientOptions) {
     listReviews(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, "/reviews");
     },
-    getReview(reviewId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
+    getReview(reviewId: string): Promise<{ status: "ok"; data: ReviewRecord | null }> {
       return requestJson(options.baseUrl, `/reviews/${reviewId}`);
     },
     createReview(input: ReviewRequest): Promise<{ status: "ok"; data: ReviewResponse }> {
@@ -132,6 +159,9 @@ export function createApiClient(options: ApiClientOptions) {
     getModels(): Promise<{ status: "ok"; data: { usage: Array<{ day: string; modelName: string; promptTokens: number; completionTokens: number; requests: number }> } }> {
       return requestJson(options.baseUrl, "/models");
     },
+    getMcpOverview(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, "/mcp");
+    },
     getMcpCalls(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, "/mcp/calls");
     },
@@ -140,7 +170,7 @@ export function createApiClient(options: ApiClientOptions) {
     },
     streamEvents(onEvent: (event: EventEnvelope) => void): () => void {
       const controller = new AbortController();
-      fetch(new URL("/events/stream", options.baseUrl), { signal: controller.signal }).then(async (response) => {
+      fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(async (response) => {
         if (!response.body) {
           return;
         }

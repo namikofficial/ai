@@ -84,6 +84,10 @@ test("indexes a repo and answers from the local retrieval store", async () => {
     apiUrl: "http://127.0.0.1:4242",
     webPort: 4242,
     apiPort: 4242,
+    cloudEnabled: false,
+    qdrantEnabled: false,
+    qdrantUrl: null,
+    qdrantCollection: "ai_chunks",
   });
   assert.equal(settings.projectCount >= 1, true);
 

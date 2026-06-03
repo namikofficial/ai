@@ -11,6 +11,7 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
+    "jsx": "react-jsx",
     "types": [],
     "baseUrl": ".",
     "ignoreDeprecations": "6.0"

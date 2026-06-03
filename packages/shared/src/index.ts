@@ -226,6 +226,8 @@ export interface SettingsSnapshot {
   apiPort: number;
   cloudEnabled: boolean;
   qdrantEnabled: boolean;
+  qdrantUrl: string | null;
+  qdrantCollection: string;
   projectCount: number;
 }
 
@@ -307,6 +309,10 @@ export interface ConfigSnapshot {
   apiUrl: string;
   webPort: number;
   apiPort: number;
+  cloudEnabled: boolean;
+  qdrantEnabled: boolean;
+  qdrantUrl: string | null;
+  qdrantCollection: string;
 }
 
 export interface DashboardSnapshot {

@@ -1,0 +1,11 @@
+{
+  "name": "@ai/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types src/main.ts"
+  },
+  "dependencies": {
+    "fastify": "^5.8.5"
+  }
+}

@@ -22,12 +22,18 @@ test("honors runtime env overrides", () => {
   const previousApiPort = process.env.AI_API_PORT;
   const previousWebPort = process.env.AI_WEB_PORT;
   const previousApiUrl = process.env.AI_API_URL;
+  const previousQdrantEnabled = process.env.AI_QDRANT_ENABLED;
+  const previousQdrantUrl = process.env.AI_QDRANT_URL;
+  const previousQdrantCollection = process.env.AI_QDRANT_COLLECTION;
 
   process.env.AI_DATABASE_PATH = "/tmp/ai-test.db";
   process.env.AI_RUNTIME_DIR = "/tmp/ai-runtime";
   process.env.AI_API_PORT = "4999";
   process.env.AI_WEB_PORT = "3999";
   process.env.AI_API_URL = "http://127.0.0.1:4999";
+  process.env.AI_QDRANT_ENABLED = "true";
+  process.env.AI_QDRANT_URL = "http://127.0.0.1:6333";
+  process.env.AI_QDRANT_COLLECTION = "ai-test";
 
   try {
     const config = resolveConfig();
@@ -36,6 +42,9 @@ test("honors runtime env overrides", () => {
     assert.equal(config.apiPort, 4999);
     assert.equal(config.webPort, 3999);
     assert.equal(config.apiUrl, "http://127.0.0.1:4999");
+    assert.equal(config.qdrantEnabled, true);
+    assert.equal(config.qdrantUrl, "http://127.0.0.1:6333");
+    assert.equal(config.qdrantCollection, "ai-test");
   } finally {
     if (previousDatabasePath === undefined) delete process.env.AI_DATABASE_PATH;
     else process.env.AI_DATABASE_PATH = previousDatabasePath;
@@ -47,5 +56,11 @@ test("honors runtime env overrides", () => {
     else process.env.AI_WEB_PORT = previousWebPort;
     if (previousApiUrl === undefined) delete process.env.AI_API_URL;
     else process.env.AI_API_URL = previousApiUrl;
+    if (previousQdrantEnabled === undefined) delete process.env.AI_QDRANT_ENABLED;
+    else process.env.AI_QDRANT_ENABLED = previousQdrantEnabled;
+    if (previousQdrantUrl === undefined) delete process.env.AI_QDRANT_URL;
+    else process.env.AI_QDRANT_URL = previousQdrantUrl;
+    if (previousQdrantCollection === undefined) delete process.env.AI_QDRANT_COLLECTION;
+    else process.env.AI_QDRANT_COLLECTION = previousQdrantCollection;
   }
 });

@@ -1,5 +1,5 @@
-import { createServer } from "node:http";
 import { mkdir } from "node:fs/promises";
+import fastify from "fastify";
 import type { AskRequest, ConfigSnapshot, EventEnvelope, HandoffRequest, PlanRequest, ProjectSummary } from "../../../packages/shared/src/index.ts";
 import { createEvent, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
@@ -1000,13 +1000,18 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     }
   };
 
-  const server = createServer((req: any, res: any) => {
+  const app = fastify({ logger: false });
+  app.all("/*", async (request, reply) => {
+    reply.hijack();
+    const req: any = request.raw;
+    const res: any = reply.raw;
+    let path = "/";
     void (async () => {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    const method = String(req.method ?? "GET").toUpperCase();
-    const path = url.pathname;
+      const url = new URL(req.url ?? "/", "http://127.0.0.1");
+      const method = String(req.method ?? "GET").toUpperCase();
+      path = url.pathname;
 
-    try {
+      try {
       if (method === "GET" && path === "/health") {
         sendJson(res, json("ok", { uptime: process.uptime(), databasePath: config.databasePath }));
         return;
@@ -1751,17 +1756,33 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         return;
       }
       sendJson(res, json("error", undefined, { message }), 500);
-    }
-    })();
+      }
+    })().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!res.headersSent) {
+        if (isHtmlRequest(req)) {
+          sendHtml(res, pageShell("Error", path, {
+            contentHtml: renderCard("Request failed", `<pre>${escapeHtml(message)}</pre>`),
+            projects: store.listProjects(),
+            projectCount: store.listProjects().length,
+            sessionCount: store.listSessions(1000).length,
+            activeSessionCount: store.dashboardSnapshot().activeSessions,
+            liveStatus: "error",
+          }), 500);
+          return;
+        }
+        sendJson(res, json("error", undefined, { message }), 500);
+      }
+    });
   });
 
-  const port = config.webPort;
-  await new Promise<void>((resolveListen) => {
-    server.listen(port, "127.0.0.1", () => resolveListen());
-  });
+  const port = config.apiPort;
+  await app.listen({ port, host: "127.0.0.1" });
+  const address = app.server.address();
+  const actualPort = address && typeof address === "object" ? address.port : port;
 
   return {
-    url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+    url: `http://127.0.0.1:${actualPort}`,
+    close: () => app.close(),
   };
 }
