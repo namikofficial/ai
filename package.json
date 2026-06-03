@@ -1,0 +1,14 @@
+{
+  "name": "ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "api": "node --experimental-strip-types apps/api/src/main.ts",
+    "mcp": "node --experimental-strip-types mcp/server/src/main.ts",
+    "web": "node --experimental-strip-types cli/ai/src/main.ts web",
+    "cli": "node --experimental-strip-types cli/ai/src/main.ts",
+    "worker": "node --experimental-strip-types apps/worker/src/main.ts"
+  }
+}

@@ -1,0 +1,114 @@
+import { mkdir } from "node:fs/promises";
+import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
+import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
+import { resolveConfig } from "../../../packages/config/src/index.ts";
+import { handleMcpRequest } from "./tools.ts";
+
+type ProcessLike = {
+  stdin: {
+    setEncoding(encoding: string): void;
+    on(event: "data", listener: (chunk: string) => void): void;
+    on(event: "end", listener: () => void): void;
+    resume(): void;
+  };
+  stdout: {
+    write(chunk: string): void;
+  };
+  stderr: {
+    write(chunk: string): void;
+  };
+  on(event: string, listener: (...args: any[]) => void): void;
+  exit(code?: number): never;
+  env: Record<string, string | undefined>;
+};
+
+const proc = process as unknown as ProcessLike;
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function writeMessage(message: unknown): void {
+  const json = JSON.stringify(message);
+  proc.stdout.write(`Content-Length: ${byteLength(json)}\r\n\r\n${json}`);
+}
+
+function parseMessages(buffer: string): { messages: unknown[]; rest: string } {
+  const messages: unknown[] = [];
+  let remaining = buffer;
+
+  while (true) {
+    const headerEnd = remaining.indexOf("\r\n\r\n");
+    if (headerEnd === -1) break;
+    const header = remaining.slice(0, headerEnd);
+    const lengthMatch = /content-length:\s*(\d+)/i.exec(header);
+    if (!lengthMatch) {
+      throw new Error("Missing Content-Length header");
+    }
+    const length = Number(lengthMatch[1]);
+    const bodyStart = headerEnd + 4;
+    const bodyEnd = bodyStart + length;
+    if (remaining.length < bodyEnd) break;
+    const body = remaining.slice(bodyStart, bodyEnd);
+    messages.push(JSON.parse(body));
+    remaining = remaining.slice(bodyEnd).replace(/^\r?\n/, "");
+  }
+
+  return { messages, rest: remaining };
+}
+
+export async function startMcpServer(): Promise<void> {
+  const config = resolveConfig({
+    databasePath: proc.env.AI_DATABASE_PATH,
+    runtimeDir: proc.env.AI_RUNTIME_DIR,
+    apiUrl: proc.env.AI_API_URL,
+    webPort: proc.env.AI_WEB_PORT ? Number(proc.env.AI_WEB_PORT) : undefined,
+    apiPort: proc.env.AI_API_PORT ? Number(proc.env.AI_API_PORT) : undefined,
+  });
+  await mkdir(config.runtimeDir, { recursive: true });
+  const store = createStore(initializeStore(config.databasePath));
+  await store.ensureRuntimeDirs(config.runtimeDir);
+
+  proc.stdin.setEncoding("utf8");
+  proc.stdin.resume();
+
+  let buffer = "";
+  proc.stdin.on("data", (chunk: string) => {
+    buffer += chunk;
+    try {
+      const parsed = parseMessages(buffer);
+      buffer = parsed.rest;
+      for (const message of parsed.messages) {
+        const request = message as { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
+        if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
+          continue;
+        }
+        const response = handleMcpRequest(store, config, {
+          jsonrpc: "2.0",
+          id: request.id ?? null,
+          method: request.method,
+          params: request.params,
+        });
+        if (response) {
+          writeMessage(response);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      writeMessage({
+        jsonrpc: "2.0",
+        id: null,
+        error: { code: -32700, message },
+      });
+    }
+  });
+
+  proc.on("SIGINT", () => proc.exit(0));
+  proc.on("SIGTERM", () => proc.exit(0));
+
+  await new Promise<void>((resolve) => {
+    proc.stdin.on("end", resolve);
+    proc.on("SIGINT", resolve);
+    proc.on("SIGTERM", resolve);
+  });
+}

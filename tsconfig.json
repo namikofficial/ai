@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2022", "DOM"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "moduleDetection": "force",
+    "types": [],
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0"
+  },
+  "include": ["apps/**/*", "cli/**/*", "packages/**/*", "tests/**/*", "types/**/*"]
+}
