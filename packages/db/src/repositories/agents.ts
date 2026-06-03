@@ -264,6 +264,12 @@ export function createAgentsRepo(db: DatabaseSync) {
         .all(sessionId, limit) as AgentHandoffRow[];
       return rows.map(rowToHandoff);
     },
+    listAllHandoffs(limit = 50): AgentHandoffRecord[] {
+      const rows = db
+        .prepare("SELECT * FROM agent_handoffs ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as AgentHandoffRow[];
+      return rows.map(rowToHandoff);
+    },
   };
 }
 

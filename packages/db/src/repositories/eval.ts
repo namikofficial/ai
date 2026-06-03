@@ -242,6 +242,12 @@ export function createEvalRepo(db: DatabaseSync) {
         createdAt: ts,
       };
     },
+    listAnswerEvaluations(limit = 50): AnswerEvaluationRecord[] {
+      const rows = db
+        .prepare("SELECT * FROM answer_evaluations ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as AnswerEvaluationRow[];
+      return rows.map(rowToAnswerEvaluation);
+    },
     recordRetrievalEvaluation(input: {
       retrievalQueryId: string;
       hitAtK: number;
@@ -296,6 +302,12 @@ export function createEvalRepo(db: DatabaseSync) {
       const rows = db
         .prepare("SELECT * FROM session_outcomes WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
         .all(sessionId, limit) as SessionOutcomeRow[];
+      return rows.map(rowToOutcome);
+    },
+    listAllOutcomes(limit = 50): SessionOutcomeRecord[] {
+      const rows = db
+        .prepare("SELECT * FROM session_outcomes ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as SessionOutcomeRow[];
       return rows.map(rowToOutcome);
     },
   };

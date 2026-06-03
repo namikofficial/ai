@@ -48,18 +48,30 @@ function isHtmlRequest(req: any): boolean {
   return accept.includes("text/html") || (!accept.includes("application/json") && !accept.includes("text/event-stream"));
 }
 
-async function readJsonBody(req: any): Promise<unknown> {
+async function readJsonBody(fastifyRequest: any, rawReq: any): Promise<unknown> {
   let body = "";
-  for await (const chunk of req) {
-    body += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+  if (typeof fastifyRequest?.body === "string" && fastifyRequest.body.length > 0) {
+    body = fastifyRequest.body;
+  } else if (typeof rawReq?.body === "string" && rawReq.body.length > 0) {
+    body = rawReq.body;
+  } else {
+    for await (const chunk of rawReq) {
+      body += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+    }
   }
   if (body.trim().length === 0) return {};
   return JSON.parse(body);
 }
 
-async function readTextBody(req: any): Promise<string> {
+async function readTextBody(fastifyRequest: any, rawReq: any): Promise<string> {
+  if (typeof fastifyRequest?.body === "string" && fastifyRequest.body.length > 0) {
+    return fastifyRequest.body;
+  }
+  if (typeof rawReq?.body === "string" && rawReq.body.length > 0) {
+    return rawReq.body;
+  }
   let body = "";
-  for await (const chunk of req) {
+  for await (const chunk of rawReq) {
     body += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
   }
   return body;
@@ -1001,6 +1013,25 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   };
 
   const app = fastify({ logger: false });
+  app.removeAllContentTypeParsers();
+  app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
+    done(null, body);
+  });
+  app.addContentTypeParser("text/plain", { parseAs: "string" }, (_request, body, done) => {
+    done(null, body);
+  });
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => {
+    done(null, body);
+  });
+  app.addContentTypeParser("multipart/form-data", (_request, payload, done) => {
+    const req = payload as unknown as { on: (event: string, listener: (...args: unknown[]) => void) => void };
+    let data = "";
+    req.on("data", (chunk: unknown) => {
+      data += typeof chunk === "string" ? chunk : (chunk as { toString(enc: string): string }).toString("utf8");
+    });
+    req.on("end", () => done(null, data));
+    req.on("error", (err: unknown) => done(err instanceof Error ? err : new Error(String(err))));
+  });
   app.all("/*", async (request, reply) => {
     reply.hijack();
     const req: any = request.raw;
@@ -1154,8 +1185,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/projects") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const input = parseProjectCreateInput(body);
         const project = store.createProject(input);
         if (isHtmlRequest(req)) {
@@ -1223,8 +1254,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         }
         if (method === "POST" && (rest === "/start" || rest === "/complete" || rest === "/fail")) {
           const body = (req.headers?.["content-type"]?.includes("application/json")
-            ? await readJsonBody(req)
-            : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+            ? await readJsonBody(request, req)
+            : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
           const session = store.getSession(task.sessionId);
           const projectId = session?.projectId ?? null;
           let nextTask = task;
@@ -1284,8 +1315,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/ask") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const normalized: AskRequest = parseAskRequest(body);
         const result = await store.ask(normalized);
         store.listEvents(result.sessionId).forEach(publish);
@@ -1299,8 +1330,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/plan") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const normalized: PlanRequest = {
           project: String(body.project ?? ""),
           goal: String(body.goal ?? ""),
@@ -1317,8 +1348,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/research") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = String(body.project ?? body.projectId ?? "");
         const topic = String(body.topic ?? "");
         const mode = body.mode === "web" || body.mode === "hybrid" ? body.mode : "local";
@@ -1361,8 +1392,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/handoff") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const normalized: HandoffRequest = {
           sessionId: String(body.sessionId ?? ""),
           project: String(body.project ?? ""),
@@ -1387,8 +1418,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/checks/run") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const name = String(body.name ?? "");
         const projectId = body.projectId ? String(body.projectId) : null;
         const allowed = new Set(["typecheck", "tests", "build", "lint"]);
@@ -1418,8 +1449,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/memory/lesson") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = body.projectId ? String(body.projectId) : null;
         const lesson = store.createLesson({
           projectId,
@@ -1439,8 +1470,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/memory/reflect") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const sessionId = String(body.sessionId ?? "");
         const session = store.getSession(sessionId);
         if (!session) {
@@ -1465,8 +1496,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/reviews") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const result = store.createReview({
           project: String(body.project ?? ""),
           sessionId: body.sessionId ? String(body.sessionId) : null,
@@ -1495,8 +1526,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/retrieval/search") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = String(body.project ?? body.projectId ?? "");
         const query = String(body.query ?? "");
         const chunks = store.searchChunks(projectId, query, { limit: Number(body.limit ?? 8) || 8 });
@@ -1510,8 +1541,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/retrieval/explain") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = String(body.project ?? body.projectId ?? "");
         const query = String(body.query ?? "");
         const chunks = store.searchChunks(projectId, query, { limit: Number(body.limit ?? 8) || 8 });
@@ -1529,8 +1560,8 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "POST" && path === "/retrieval/context") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
-          ? await readJsonBody(req)
-          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))) as Record<string, unknown>;
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = String(body.project ?? body.projectId ?? "");
         const query = String(body.query ?? "");
         const chunks = store.searchChunks(projectId, query, { limit: Number(body.limit ?? 8) || 8 });
@@ -1727,6 +1758,276 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           return;
         }
         sendHtml(res, renderSettingsPage(store, config));
+        return;
+      }
+
+      // ---- Observability API: retrieval, memory, skills, models, agents, context, conversations, eval ----
+
+      if (method === "GET" && path === "/retrieval/queries") {
+        const sessionId = url.searchParams.get("sessionId");
+        const projectId = url.searchParams.get("projectId");
+        const limit = Number(url.searchParams.get("limit") ?? "50") || 50;
+        const queries = sessionId
+          ? store.retrieval.listQueriesForSession(sessionId, limit)
+          : projectId
+            ? store.retrieval.listQueriesForProject(projectId, limit)
+            : store.retrieval.listQueriesForProject(
+                store.listProjects()[0]?.id ?? "",
+                limit,
+              ).slice(0, 0);
+        sendJson(res, json("ok", queries));
+        return;
+      }
+      if (path.startsWith("/retrieval/queries/")) {
+        const id = decodeURIComponent(path.slice("/retrieval/queries/".length)).split("/")[0];
+        if (method === "GET") {
+          const query = store.retrieval.getQuery(id);
+          if (!query) {
+            sendJson(res, json("error", undefined, { message: "retrieval query not found" }), 404);
+            return;
+          }
+          sendJson(
+            res,
+            json("ok", {
+              query,
+              rewrites: store.retrieval.listRewrites(id),
+              results: store.retrieval.listResults(id),
+              selected: store.retrieval.listSelectedContext(id),
+              misses: store.retrieval.listMisses(id),
+              feedback: store.retrieval.listFeedback(id),
+            }),
+          );
+          return;
+        }
+      }
+
+      if (method === "GET" && path === "/memory/candidates") {
+        const status = url.searchParams.get("status") as "pending" | "accepted" | "rejected" | null;
+        const projectId = url.searchParams.get("projectId");
+        sendJson(
+          res,
+          json("ok", store.memory.listCandidates(status ?? "pending", projectId, 100)),
+        );
+        return;
+      }
+      if (path.startsWith("/memory/candidates/") && method === "POST") {
+        const tail = decodeURIComponent(path.slice("/memory/candidates/".length));
+        const [id, action] = tail.split("/");
+        if (action === "accept") {
+          const body = (await readJsonBody(request, req)) as { notes?: string } | null;
+          const entry = store.memory.acceptCandidate(id, body?.notes ?? null);
+          sendJson(res, json("ok", entry));
+          return;
+        }
+        if (action === "reject") {
+          const body = (await readJsonBody(request, req)) as { reason?: string } | null;
+          store.memory.reviewCandidate(id, "rejected", body?.reason ?? null);
+          sendJson(res, json("ok", { id, status: "rejected" }));
+          return;
+        }
+        sendJson(res, json("error", undefined, { message: `unknown action: ${action ?? ""}` }), 400);
+        return;
+      }
+      if (method === "GET" && path === "/memory/entries") {
+        const projectId = url.searchParams.get("projectId");
+        const scope = url.searchParams.get("scope") as
+          | "global" | "project" | "repo" | "path" | null;
+        sendJson(res, json("ok", store.memory.listEntries(projectId, scope ?? undefined, 100)));
+        return;
+      }
+      if (method === "GET" && path === "/memory/facts") {
+        const projectId = url.searchParams.get("projectId");
+        const project = projectId ? store.getProject(projectId) : null;
+        if (projectId && !project) {
+          sendJson(res, json("ok", []));
+          return;
+        }
+        sendJson(res, json("ok", store.memory.listFacts(project?.id ?? null, 100)));
+        return;
+      }
+      if (method === "GET" && path === "/memory/rules") {
+        const projectId = url.searchParams.get("projectId");
+        if (!projectId) {
+          sendJson(res, json("ok", []));
+          return;
+        }
+        sendJson(res, json("ok", store.memory.listProjectRules(projectId, 100)));
+        return;
+      }
+
+      if (method === "GET" && path === "/skills/candidates") {
+        const status = url.searchParams.get("status") as "pending" | "active" | "deprecated" | "rejected" | null;
+        sendJson(
+          res,
+          json("ok", store.skills.listCandidates(status ?? undefined, 100)),
+        );
+        return;
+      }
+      if (path.startsWith("/skills/candidates/") && method === "POST") {
+        const tail = decodeURIComponent(path.slice("/skills/candidates/".length));
+        const [id, action] = tail.split("/");
+        if (action === "accept") {
+          const skill = store.skills.acceptCandidate(id);
+          sendJson(res, json("ok", skill));
+          return;
+        }
+        if (action === "reject") {
+          const body = (await readJsonBody(request, req)) as { reason?: string } | null;
+          store.skills.reviewCandidate(id, "rejected");
+          sendJson(res, json("ok", { id, status: "rejected", reason: body?.reason ?? null }));
+          return;
+        }
+        sendJson(res, json("error", undefined, { message: `unknown action: ${action ?? ""}` }), 400);
+        return;
+      }
+      if (method === "GET" && path === "/skills") {
+        sendJson(res, json("ok", store.skills.listSkills()));
+        return;
+      }
+
+      if (method === "GET" && path === "/models/providers") {
+        sendJson(
+          res,
+          json("ok", {
+            providers: store.models.listProviders(),
+            profiles: store.models.listProfiles(),
+          }),
+        );
+        return;
+      }
+      if (method === "GET" && path === "/models/calls") {
+        const limit = Number(url.searchParams.get("limit") ?? "50") || 50;
+        sendJson(res, json("ok", store.models.listAllCalls(limit)));
+        return;
+      }
+      if (method === "GET" && path === "/models/health") {
+        const providers = store.models.listProviders();
+        const profiles = store.models.listProfiles();
+        const recentCalls = store.models.listAllCalls(20);
+        const profileById = new Map(profiles.map((p) => [p.id, p]));
+        const lastByProvider = new Map<string, typeof recentCalls[number]>();
+        for (const call of recentCalls) {
+          const profile = profileById.get(call.profileId);
+          if (!profile) continue;
+          if (!lastByProvider.has(profile.providerId)) {
+            lastByProvider.set(profile.providerId, call);
+          }
+        }
+        const providersWithHealth = providers.map((p) => ({
+          ...p,
+          lastCall: lastByProvider.get(p.id) ?? null,
+        }));
+        sendJson(
+          res,
+          json("ok", { providers: providersWithHealth, recentCalls }),
+        );
+        return;
+      }
+
+      if (method === "GET" && path === "/agents/runs") {
+        const sessionId = url.searchParams.get("sessionId");
+        if (!sessionId) {
+          sendJson(res, json("ok", []));
+          return;
+        }
+        sendJson(res, json("ok", store.agents.listRuns(sessionId, 200)));
+        return;
+      }
+      if (path.startsWith("/agents/runs/") && method === "GET") {
+        const id = decodeURIComponent(path.slice("/agents/runs/".length)).split("/")[0];
+        const run = store.agents.getRun(id);
+        if (!run) {
+          sendJson(res, json("error", undefined, { message: "agent run not found" }), 404);
+          return;
+        }
+        sendJson(
+          res,
+          json("ok", { run, messages: store.agents.listMessages(id) }),
+        );
+        return;
+      }
+      if (method === "GET" && path === "/agents/handoffs") {
+        const sessionId = url.searchParams.get("sessionId");
+        sendJson(
+          res,
+          json("ok", sessionId ? store.agents.listHandoffs(sessionId, 100) : store.agents.listAllHandoffs(100)),
+        );
+        return;
+      }
+
+      if (method === "GET" && path === "/context/packs") {
+        const sessionId = url.searchParams.get("sessionId");
+        if (!sessionId) {
+          sendJson(res, json("ok", []));
+          return;
+        }
+        sendJson(res, json("ok", store.context.listPacksForSession(sessionId, 50)));
+        return;
+      }
+      if (path.startsWith("/context/packs/") && method === "GET") {
+        const id = decodeURIComponent(path.slice("/context/packs/".length)).split("/")[0];
+        const pack = store.context.getPack(id);
+        if (!pack) {
+          sendJson(res, json("error", undefined, { message: "context pack not found" }), 404);
+          return;
+        }
+        sendJson(
+          res,
+          json("ok", {
+            pack,
+            items: store.context.listItems(id),
+            budgetEvents: store.context.listBudgetEvents(id),
+          }),
+        );
+        return;
+      }
+
+      if (path.startsWith("/conversations/") && method === "GET") {
+        const sessionId = decodeURIComponent(path.slice("/conversations/".length)).split("/")[0];
+        sendJson(res, json("ok", store.conversation.listMessages(sessionId, 200)));
+        return;
+      }
+
+      if (method === "GET" && path === "/eval/cases") {
+        const projectId = url.searchParams.get("projectId");
+        const cases = projectId
+          ? store.evals.listCases().filter((c) => c.projectId === projectId)
+          : store.evals.listCases();
+        sendJson(res, json("ok", cases));
+        return;
+      }
+      if (method === "POST" && path === "/eval/cases") {
+        const body = (await readJsonBody(request, req)) as {
+          projectId?: string;
+          question: string;
+          expectedAnswerContains?: string;
+          expectedFiles?: string[];
+          tags?: string[];
+        };
+        if (!body.question) {
+          sendJson(res, json("error", undefined, { message: "question is required" }), 400);
+          return;
+        }
+        const created = store.evals.addCase({
+          projectId: body.projectId ?? null,
+          question: body.question,
+          expectedAnswerContains: body.expectedAnswerContains ?? null,
+          expectedFiles: body.expectedFiles ?? [],
+          tags: body.tags ?? [],
+        });
+        sendJson(res, json("ok", created));
+        return;
+      }
+      if (method === "GET" && path === "/eval/answers") {
+        sendJson(res, json("ok", store.evals.listAnswerEvaluations(100)));
+        return;
+      }
+      if (method === "GET" && path === "/eval/outcomes") {
+        const sessionId = url.searchParams.get("sessionId");
+        sendJson(
+          res,
+          json("ok", sessionId ? store.evals.listOutcomes(sessionId) : store.evals.listAllOutcomes(100)),
+        );
         return;
       }
 
