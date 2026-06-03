@@ -101,6 +101,20 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
         tags: ["worker", "reflection"],
         importance: 3,
       });
+    } else if (job.type === "review.reflect") {
+      const reviewId = typeof payload.reviewId === "string" ? payload.reviewId : null;
+      const review = reviewId ? store.getReview(reviewId) : null;
+      if (!review) {
+        throw new Error(`Unknown review: ${reviewId ?? "missing"}`);
+      }
+      output = store.createLesson({
+        projectId: review.projectId,
+        sessionId: review.sessionId,
+        title: `Review reflection: ${review.title}`,
+        body: `${review.summary}\n\nReflect on follow-up actions and keep the scope tight.`,
+        tags: ["worker", "review", "reflection"],
+        importance: 3,
+      });
     } else {
       output = { skipped: true, reason: `No worker for job type ${job.type}` };
     }

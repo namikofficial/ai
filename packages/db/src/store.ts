@@ -870,6 +870,14 @@ export function createStore(db: DatabaseSync) {
         tags: ["review", "learning"],
         importance: scopeCreep.length > 0 || missingTests.length > 0 ? 3 : 2,
       });
+      store.enqueueJob({
+        type: "review.reflect",
+        payload: {
+          reviewId: id,
+          projectId: project.id,
+          sessionId: session?.id ?? null,
+        },
+      });
       return response;
     },
     getCheckRun(checkId: string): CheckRunSummary | null {
@@ -1008,6 +1016,20 @@ export function createStore(db: DatabaseSync) {
         blocked: toBool(row.blocked),
         createdAt: asString(row.created_at),
       }));
+    },
+    getMcpCall(callId: string): McpCallSummary | null {
+      const row = db.prepare("SELECT * FROM mcp_calls WHERE id = ? LIMIT 1").get(callId) as Row | undefined;
+      if (!row) return null;
+      return {
+        id: asString(row.id),
+        sessionId: row.session_id == null ? null : asString(row.session_id),
+        projectId: row.project_id == null ? null : asString(row.project_id),
+        toolName: asString(row.tool_name),
+        inputJson: asString(row.input_json),
+        outputJson: row.output_json == null ? null : asString(row.output_json),
+        blocked: toBool(row.blocked),
+        createdAt: asString(row.created_at),
+      };
     },
     listJobs(limit = 20): JobRecord[] {
       return (db

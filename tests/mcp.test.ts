@@ -60,6 +60,8 @@ test("serves MCP tools and logs calls", async () => {
   });
   assert.equal(Boolean(blockedResponse?.error), true);
   assert.ok(store.listMcpCalls(10).length >= 2);
+  const callId = store.listMcpCalls(10)[0]?.id;
+  assert.equal(store.getMcpCall(callId ?? "")?.id, callId);
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

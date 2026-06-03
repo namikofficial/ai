@@ -945,7 +945,7 @@ function renderMcpPage(store: ReturnType<typeof createStore>): string {
     ),
     renderCard(
       "Recent Calls",
-      `<div class="list">${calls.length > 0 ? calls.map((call) => `<div class="list-item"><div class="row"><strong>${escapeHtml(call.toolName)}</strong><span class="badge" data-tone="${call.blocked ? "bad" : "good"}">${call.blocked ? "blocked" : "allowed"}</span></div><div class="tiny">${escapeHtml(call.inputJson)}</div></div>`).join("") : renderEmptyState("No calls yet", "MCP calls will be logged here.")}</div>`,
+      `<div class="list">${calls.length > 0 ? calls.map((call) => `<a href="/mcp/calls/${encodeURIComponent(call.id)}" style="display:block"><div class="list-item"><div class="row"><strong>${escapeHtml(call.toolName)}</strong><span class="badge" data-tone="${call.blocked ? "bad" : "good"}">${call.blocked ? "blocked" : "allowed"}</span></div><div class="tiny">${escapeHtml(call.inputJson)}</div></div></a>`).join("") : renderEmptyState("No calls yet", "MCP calls will be logged here.")}</div>`,
       6,
     ),
   ].join("");
@@ -1660,6 +1660,61 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
       if (method === "GET" && path === "/mcp/calls") {
         sendJson(res, json("ok", store.listMcpCalls(50)));
         return;
+      }
+      if (path.startsWith("/mcp/calls/")) {
+        const callId = decodeURIComponent(path.slice("/mcp/calls/".length)).split("/")[0];
+        if (method === "GET") {
+          if (!isHtmlRequest(req)) {
+            sendJson(res, json("ok", store.getMcpCall(callId)));
+            return;
+          }
+          const call = store.getMcpCall(callId);
+          if (!call) {
+            sendHtml(
+              res,
+              pageShell("MCP call not found", `/mcp/calls/${callId}`, {
+                contentHtml: renderCard("Missing call", `No MCP call found for <code>${escapeHtml(callId)}</code>.`),
+                projects: store.listProjects(),
+                projectCount: store.listProjects().length,
+                sessionCount: store.listSessions(1000).length,
+                activeSessionCount: store.dashboardSnapshot().activeSessions,
+                liveStatus: "missing",
+              }),
+              404,
+            );
+            return;
+          }
+          const session = call.sessionId ? store.getSession(call.sessionId) : null;
+          const project = call.projectId ? store.getProject(call.projectId) : null;
+          sendHtml(
+            res,
+            pageShell(`MCP ${call.toolName}`, `/mcp/calls/${call.id}`, {
+              contentHtml: [
+                renderCard(
+                  "Call Summary",
+                  renderKeyValueList([
+                    ["Tool", call.toolName],
+                    ["Blocked", call.blocked ? "yes" : "no"],
+                    ["Project", project ? project.name : call.projectId ?? "none"],
+                    ["Session", session ? session.title : call.sessionId ?? "none"],
+                    ["Created", call.createdAt],
+                  ]),
+                  6,
+                ),
+                renderCard("Input", `<pre>${escapeHtml(call.inputJson)}</pre>`, 6),
+                renderCard("Output", `<pre>${escapeHtml(call.outputJson ?? "No output recorded.")}</pre>`, 12),
+              ].join(""),
+              rightPanelHtml: renderCard("Recent Trace", renderEventFeed(store.listEvents(call.sessionId ?? undefined, 40))),
+              activeProjectId: project?.id ?? null,
+              projects: store.listProjects(),
+              projectCount: store.listProjects().length,
+              sessionCount: store.listSessions(1000).length,
+              activeSessionCount: store.dashboardSnapshot().activeSessions,
+              liveStatus: call.blocked ? "blocked" : "ready",
+            }),
+          );
+          return;
+        }
       }
       if (method === "GET" && path === "/settings") {
         if (!isHtmlRequest(req)) {

@@ -1129,11 +1129,13 @@ Implemented in this bootstrap slice:
 - Live reindex and retrieval smoke against a freshly indexed workspace project.
 - Persisted task graphs with `/tasks` list/detail pages and task lifecycle routes.
 - Review history with `/reviews` list and `/reviews/:id` detail pages.
+- MCP call inspection with `/mcp/calls` list and `/mcp/calls/:id` detail pages.
 - Separate web shell startup on port `3000` with API proxying and `ai api` for API-only runs.
+- Standalone browser asset at `apps/web/public/client.js` so the web server can serve a real client/server split.
 - Environment overrides for local runtime paths and ports via `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, and `AI_API_URL`.
+- Review-created background reflection jobs and a worker path for review learning follow-ups.
 
 Still pending for later phases:
 
 - React/Fastify split.
 - Optional Qdrant and richer reranking.
-- MCP safety tooling polish and deeper review/learning agents.

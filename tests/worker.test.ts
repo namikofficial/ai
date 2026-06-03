@@ -24,12 +24,26 @@ test("worker processes queued plan jobs", async () => {
   assert.equal(store.listJobs(10).length, 2);
   assert.equal(await processNextJob(store), true);
   assert.equal(await processNextJob(store), true);
+  assert.equal(await processNextJob(store), true);
 
   const jobs = store.listJobs(10);
   assert.equal(jobs.every((job) => job.status === "completed"), true);
   assert.ok(store.listReviews(project.id, 10).length > 0);
   assert.ok(store.listProjectLessons(project.id, 20).some((lesson) => lesson.title.startsWith("Plan review")));
   assert.ok(store.listProjectLessons(project.id, 20).some((lesson) => lesson.title.startsWith("Reflection:")));
+
+  const review = store.createReview({
+    project: project.id,
+    title: "worker review",
+    plannedFiles: ["src/auth.ts"],
+    editedFiles: ["src/auth.ts", "src/session.ts"],
+    checks: ["typecheck"],
+  });
+
+  assert.equal(store.listJobs(10).some((job) => job.type === "review.reflect"), true);
+  assert.equal(await processNextJob(store), true);
+  assert.equal(store.listJobs(10).some((job) => job.status === "queued" && job.type === "review.reflect"), false);
+  assert.ok(store.listProjectLessons(project.id, 20).some((lesson) => lesson.title === `Review reflection: ${review.title}`));
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

@@ -4,6 +4,9 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
+import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { handleMcpRequest } from "../mcp/server/src/tools.ts";
+import { resolveConfig } from "../packages/config/src/index.ts";
 
 test("serves the split web shell and planner data routes", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-web-"));
@@ -123,6 +126,43 @@ test("serves the split web shell and planner data routes", async () => {
     const reviewDetailHtml = await reviewDetailResponse.text();
     assert.ok(reviewDetailHtml.includes("client.js"));
     assert.ok(reviewDetailHtml.includes("Loading /reviews/"));
+
+    const mcpStore = createStore(initializeStore(join(workspace, "ai.db")));
+    const mcpConfig = resolveConfig({
+      databasePath: join(workspace, "ai.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiUrl,
+      webPort,
+      apiPort,
+    });
+    const mcpCall = handleMcpRequest(mcpStore, mcpConfig, {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "ai_search_project",
+        arguments: {
+          project: createdJson.data.id,
+          query: "auth",
+        },
+      },
+    });
+    assert.equal(Boolean(mcpCall?.result), true);
+    mcpStore.db.close();
+
+    const mcpCallResponse = await fetch(`${apiUrl}/mcp/calls`, {
+      headers: { accept: "application/json" },
+    });
+    assert.equal(mcpCallResponse.ok, true);
+    const mcpCalls = (await mcpCallResponse.json()) as { status: string; data: Array<{ id: string }> };
+    assert.equal(mcpCalls.status, "ok");
+    assert.ok(mcpCalls.data.length > 0);
+
+    const mcpDetailResponse = await fetch(`${webUrl}/mcp/calls/${mcpCalls.data[0].id}`);
+    assert.equal(mcpDetailResponse.ok, true);
+    const mcpDetailHtml = await mcpDetailResponse.text();
+    assert.ok(mcpDetailHtml.includes("client.js"));
+    assert.ok(mcpDetailHtml.includes("Loading /mcp/calls/"));
   } finally {
     child.kill("SIGKILL");
     await new Promise((resolve) => child.once("exit", resolve));

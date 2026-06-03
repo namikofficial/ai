@@ -46,7 +46,7 @@ declare module "node:fs/promises" {
   export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>;
   export function mkdtemp(prefix: string): Promise<string>;
   export function readFile(
-    path: string,
+    path: string | URL,
     options?: { encoding?: BufferEncoding } | BufferEncoding
   ): Promise<string>;
   export function readdir(

@@ -135,6 +135,9 @@ export function createApiClient(options: ApiClientOptions) {
     getMcpCalls(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, "/mcp/calls");
     },
+    getMcpCall(callId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
+      return requestJson(options.baseUrl, `/mcp/calls/${callId}`);
+    },
     streamEvents(onEvent: (event: EventEnvelope) => void): () => void {
       const controller = new AbortController();
       fetch(new URL("/events/stream", options.baseUrl), { signal: controller.signal }).then(async (response) => {
