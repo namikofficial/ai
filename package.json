@@ -6,6 +6,10 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "dev": "node scripts/dev.mjs",
+    "dev:api": "node --experimental-strip-types apps/api/src/main.ts",
+    "dev:web": "node --experimental-strip-types apps/web/src/server.ts",
+    "dev:worker": "node --experimental-strip-types apps/worker/src/main.ts",
     "api": "node --experimental-strip-types apps/api/src/main.ts",
     "mcp": "node --experimental-strip-types mcp/server/src/main.ts",
     "web": "node --experimental-strip-types cli/ai/src/main.ts web",

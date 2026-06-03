@@ -17,6 +17,12 @@ This repo currently provides:
 ## Run
 
 ```bash
+pnpm dev
+```
+
+That boots the web cockpit and the worker using the checked-in [.env](/home/namik/Documents/code/ai/.env) defaults.
+
+```bash
 node --experimental-strip-types cli/ai/src/main.ts web --port 3000 --api-port 4242
 ```
 
@@ -37,4 +43,4 @@ node --experimental-strip-types cli/ai/src/main.ts worker
 
 - `ai web` starts the browser shell on port `3000` and the API on port `4242` by default.
 - The web shell is now a Vite React app in `apps/web`, while `ai web` still starts the browser shell plus the API for convenience.
-- `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, and `AI_API_URL` override the derived local runtime settings when you need a custom workspace layout.
+- `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, `AI_API_URL`, `AI_CLOUD_ENABLED`, `AI_QDRANT_ENABLED`, `AI_QDRANT_URL`, and `AI_QDRANT_COLLECTION` override the derived local runtime settings when you need a custom workspace layout.
