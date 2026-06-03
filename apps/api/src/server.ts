@@ -1497,10 +1497,33 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         return;
       }
       if (method === "GET" && path === "/planner") {
+        if (!isHtmlRequest(req)) {
+          sendJson(
+            res,
+            json("ok", {
+              tasks: store.listRecentTasks(40),
+              projects: store.listProjects(),
+              recentSessions: store.listSessions(20).filter((session) => session.mode === "plan"),
+              activeSessionCount: store.dashboardSnapshot().activeSessions,
+            }),
+          );
+          return;
+        }
         sendHtml(res, renderPlannerPage(store));
         return;
       }
       if (method === "GET" && path === "/handoff") {
+        if (!isHtmlRequest(req)) {
+          sendJson(
+            res,
+            json("ok", {
+              projects: store.listProjects(),
+              sessions: store.listSessions(20),
+              handoffs: store.listHandoffs(undefined, 20),
+            }),
+          );
+          return;
+        }
         sendHtml(res, renderHandoffPage(store));
         return;
       }
@@ -1513,10 +1536,34 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         return;
       }
       if (method === "GET" && path === "/memory") {
+        if (!isHtmlRequest(req)) {
+          sendJson(
+            res,
+            json("ok", {
+              projects: store.listProjects().map((project) => ({
+                project,
+                lessons: store.listProjectLessons(project.id, 5),
+                rules: store.listProjectRules(project.id, 5),
+                memory: store.listProjectMemory(project.id, 5),
+              })),
+            }),
+          );
+          return;
+        }
         sendHtml(res, renderMemoryPage(store));
         return;
       }
       if (method === "GET" && path === "/retrieval") {
+        if (!isHtmlRequest(req)) {
+          sendJson(
+            res,
+            json("ok", {
+              projects: store.listProjects(),
+              recentLessons: store.listRecentLessons(20),
+            }),
+          );
+          return;
+        }
         sendHtml(res, renderRetrievalPage(store));
         return;
       }

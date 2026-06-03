@@ -36,3 +36,4 @@ node --experimental-strip-types cli/ai/src/main.ts worker
 - `ai web` starts the browser shell on port `3000` and the API on port `4242` by default.
 - The web shell is still incremental and server-backed for now, so the first useful slice can run without external dependencies.
 - The plan still calls for a deeper React/Fastify split later; this scaffold keeps that boundary visible in the directory structure.
+- `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, and `AI_API_URL` override the derived local runtime settings when you need a custom workspace layout.

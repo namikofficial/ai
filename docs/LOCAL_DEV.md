@@ -29,3 +29,4 @@ node --experimental-strip-types cli/ai/src/main.ts worker
 - The server writes its SQLite database under `runtime/ai.db`.
 - The first slice uses the built-in `node:sqlite` module, so there is no external database dependency yet.
 - `ai web` starts both the browser shell and the API by default; `ai api` is available when you want the API alone.
+- Set `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, or `AI_API_URL` if you want to override the derived local runtime locations and ports.

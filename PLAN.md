@@ -1129,10 +1129,10 @@ Implemented in this bootstrap slice:
 - Live reindex and retrieval smoke against a freshly indexed workspace project.
 - Persisted task graphs with `/tasks` list/detail pages and task lifecycle routes.
 - Separate web shell startup on port `3000` with API proxying and `ai api` for API-only runs.
+- Environment overrides for local runtime paths and ports via `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, and `AI_API_URL`.
 
 Still pending for later phases:
 
 - React/Fastify split.
-- Planner, handoff, checks, memory, retrieval, models, and settings pages with full data wiring.
 - Optional Qdrant and richer reranking.
 - MCP safety tooling polish and deeper review/learning agents.

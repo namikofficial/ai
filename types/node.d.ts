@@ -94,6 +94,28 @@ declare module "node:fs" {
   ): string;
 }
 
+declare module "node:child_process" {
+  export interface ChildProcessLike {
+    stdout: {
+      setEncoding(encoding: BufferEncoding | "utf8"): void;
+      on(event: "data", listener: (chunk: string | Uint8Array) => void): void;
+    } | null;
+    stderr: {
+      setEncoding(encoding: BufferEncoding | "utf8"): void;
+      on(event: "data", listener: (chunk: string | Uint8Array) => void): void;
+    } | null;
+    exitCode: number | null;
+    kill(signal?: NodeJS.Signals | number | string): boolean;
+    once(event: "exit", listener: (...args: any[]) => void): void;
+  }
+
+  export function spawn(command: string, args?: string[], options?: {
+    cwd?: string;
+    env?: Record<string, string | undefined>;
+    stdio?: Array<"pipe" | "ignore" | "inherit">;
+  }): ChildProcessLike;
+}
+
 declare module "node:http" {
   export type Handler = (req: any, res: any) => void | Promise<void>;
   export function createServer(handler: Handler): {
