@@ -2,9 +2,12 @@ import { useEffect, useMemo, type ReactNode } from "react";
 import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { useWorkbenchStore } from "./store.ts";
 import {
+  AgentRunDetailPage,
+  AgentsPage,
   AskPage,
   ChecksPage,
   DashboardPage,
+  EvalPage,
   HandoffPage,
   MemoryPage,
   McpCallDetailPage,
@@ -14,11 +17,13 @@ import {
   ProjectDetailPage,
   ProjectsPage,
   RetrievalPage,
+  RetrievalQueryDetailPage,
   ReviewDetailPage,
   ReviewsPage,
   SessionDetailPage,
   SessionsPage,
   SettingsPage,
+  SkillsPage,
   TaskDetailPage,
   TasksPage,
 } from "./pages.tsx";
@@ -29,12 +34,15 @@ const navItems = [
   ["/projects", "Projects"],
   ["/sessions", "Sessions"],
   ["/tasks", "Tasks"],
+  ["/agents", "Agents"],
   ["/ask", "Ask"],
   ["/planner", "Planner"],
   ["/handoff", "Handoff"],
   ["/checks", "Checks"],
   ["/memory", "Memory"],
   ["/retrieval", "Retrieval"],
+  ["/skills", "Skills"],
+  ["/eval", "Eval"],
   ["/reviews", "Reviews"],
   ["/models", "Models"],
   ["/mcp", "MCP"],
@@ -46,12 +54,15 @@ const commandItems = [
   ["/projects", "Projects", "Indexed repos and health"],
   ["/sessions", "Sessions", "Traceable task history"],
   ["/tasks", "Tasks", "Task graph and lifecycle"],
+  ["/agents", "Agents", "Agent runs and context packs"],
   ["/ask", "Ask", "Retrieval-backed question answering"],
   ["/planner", "Planner", "Task graph generation"],
   ["/handoff", "Handoff", "Target-specific prompt export"],
   ["/checks", "Checks", "Allowlisted validation runs"],
-  ["/memory", "Memory", "Lessons and rules"],
-  ["/retrieval", "Retrieval", "Search and rerank view"],
+  ["/memory", "Memory", "Candidates, entries, and project rules"],
+  ["/retrieval", "Retrieval", "Search, recent queries, and misses"],
+  ["/skills", "Skills", "Promoted skills and pending candidates"],
+  ["/eval", "Eval", "Eval cases, answer evaluations, and outcomes"],
   ["/reviews", "Reviews", "Review summaries and risk checks"],
   ["/models", "Models", "Local model routing"],
   ["/mcp", "MCP", "Safe tool gateway"],
@@ -240,12 +251,17 @@ export function App() {
           <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
           <Route path="/tasks" element={<TasksPage />} />
           <Route path="/tasks/:taskId" element={<TaskDetailPage />} />
+          <Route path="/agents" element={<AgentsPage />} />
+          <Route path="/agents/runs/:runId" element={<AgentRunDetailPage />} />
           <Route path="/ask" element={<AskPage />} />
           <Route path="/planner" element={<PlannerPage />} />
           <Route path="/handoff" element={<HandoffPage />} />
           <Route path="/checks" element={<ChecksPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/retrieval" element={<RetrievalPage />} />
+          <Route path="/retrieval/queries/:queryId" element={<RetrievalQueryDetailPage />} />
+          <Route path="/skills" element={<SkillsPage />} />
+          <Route path="/eval" element={<EvalPage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/reviews/:reviewId" element={<ReviewDetailPage />} />
           <Route path="/models" element={<ModelsPage />} />

@@ -1153,9 +1153,72 @@ Implemented:
 - New CLI commands: `ai memory candidates|accept|reject|list`, `ai models list|health`, `ai trace conversation <session-id>`, `ai skills candidates|accept|reject`, `ai eval add|list|run` (CLI opens the local store directly; network-bound commands continue to route through the API client).
 - New tests in `tests/observability.test.ts` (7 tests): ask populates retrieval/conversation/agent/context/memory/eval tables; retrieval-miss recording; handoff records context pack + agent run; indexProject records indexer run; memory candidate accept/reject lifecycle; agent-protocol registry; agent-protocol required events.
 
+## 23. Observability API Slice (slice 2)
+
+Per the user's "do not jump to auto-agents; make the system observable and replayable first" directive, slice 2 exposes every observability table through the API so the web UI and external clients can read and review traces.
+
+Implemented:
+
+- Body-parser fix: `app.removeAllContentTypeParsers()` + explicit parsers for `application/json` (`parseAs: "string"`), `text/plain`, and `application/x-www-form-urlencoded`; `readJsonBody`/`readTextBody` now read from the fastify `request.body` first and fall back to the raw stream.
+- 18 new JSON routes in `apps/api/src/server.ts`:
+  - `GET /retrieval/queries?sessionId=&projectId=&limit=`
+  - `GET /retrieval/queries/:id` (returns rewrites, results, selected, misses, feedback)
+  - `GET /memory/candidates?status=&projectId=`
+  - `POST /memory/candidates/:id/accept` (body: `{ notes? }`)
+  - `POST /memory/candidates/:id/reject` (body: `{ reason? }`)
+  - `GET /memory/entries?projectId=&scope=`
+  - `GET /memory/facts?projectId=`
+  - `GET /memory/rules?projectId=`
+  - `GET /skills`, `GET /skills/candidates?status=`
+  - `POST /skills/candidates/:id/accept`, `POST /skills/candidates/:id/reject`
+  - `GET /models/providers`, `GET /models/calls?limit=`, `GET /models/health`
+  - `GET /agents/runs?sessionId=`, `GET /agents/runs/:id`, `GET /agents/handoffs?sessionId=`
+  - `GET /context/packs?sessionId=`, `GET /context/packs/:id` (returns items + budget events)
+  - `GET /conversations/:sessionId/messages`
+  - `GET /eval/cases?projectId=`, `POST /eval/cases`, `GET /eval/answers`, `GET /eval/outcomes?sessionId=`
+- New repos helpers: `agents.listAllHandoffs`, `evals.listAllOutcomes`, `evals.listAnswerEvaluations`.
+- 20 new typed methods in `packages/api-client/src/index.ts` covering every new route.
+- 5 new HTTP tests in `tests/observability-api.test.ts`: full trace of a real ask (retrieval query + rewrites + results + selected + runs + messages), memory candidate accept/reject, models/skills/context/eval endpoints clean, handoff records context pack + agent run + handoff row, retrieval query detail.
+
 Not yet implemented (next slices):
 
-- New API endpoints for observability detail views (currently CLI-only and direct-store).
+- Web detail pages for retrieval, memory, models, skills, eval that consume these new endpoints. → done in slice 3.
 - Real embeddings, real reranker, real model router.
 - Worker reflection job that promotes `memory_candidates` / `skill_candidates` and records `facts` automatically.
-- Web detail pages for retrieval, memory, models, skills, eval.
+
+## 24. Observability Web UI Slice (slice 3)
+
+Replaces the placeholder observability pages in `apps/web/src/pages.tsx` with real implementations that consume the slice 2 API routes, adds two new top-level pages (Skills, Eval, Agents) plus two detail subpages (Retrieval query detail, Agent run detail), and wires everything into the React Router surface and nav.
+
+### 24.1 Pages replaced
+
+- `MemoryPage`: three panels — pending candidates (Accept / Reject buttons), accepted entries table, project rules dropdown selector. Reads from `api.listMemoryCandidates({ status: "pending" })`, `api.listMemoryEntries`, and a `useResource` that calls `api.listProjects` + `api.listProjectRules`.
+- `RetrievalPage`: kept the search box; added "Recent Retrieval Queries" panel listing `api.listRetrievalQueries()` and linking to `/retrieval/queries/:queryId`, plus a "Missed Paths" panel derived from each query's `misses`.
+- `ModelsPage`: five panels — Providers, Profiles, Health (last call per provider), Recent Calls, Daily Usage. Reads from `api.getModelProviders`, `api.getModelCalls`, `api.getModelHealth`.
+
+### 24.2 Pages added
+
+- `SkillsPage`: Active Skills, Pending Candidates (Accept / Reject), Rejected Candidates. Reads `api.listSkills`, `api.listSkillCandidates({ status: "pending" })`, `api.listSkillCandidates({ status: "rejected" })`.
+- `EvalPage`: form to add a new eval case (project + question + expected substring), Cases list, Answer Evaluations (groundedness + citation coverage + contradiction), Session Outcomes. Uses `api.listEvalCases`, `api.listAnswerEvaluations`, `api.listSessionOutcomes`, `api.addEvalCase`.
+- `AgentsPage`: session picker + Agent Runs list (links to `/agents/runs/:runId`) + Context Packs. Uses `api.listSessions`, `api.listAgentRuns`, `api.listContextPacks`.
+- `RetrievalQueryDetailPage`: linked from retrieval page; shows the original query, rewrites, results, selected paths, misses, and any feedback. Uses `useParams` + `useResource` with `runId` dep.
+- `AgentRunDetailPage`: linked from agents page; shows run summary (agent, status, model role, session, task, started/finished), `input`/`output` JSON, and the agent's message history. Uses `useParams` + `useResource` with `runId` dep.
+
+### 24.3 Router & nav updates (`apps/web/src/App.tsx`)
+
+- Imported the 5 new page components in alphabetical order.
+- New routes: `/agents`, `/agents/runs/:runId`, `/retrieval/queries/:queryId`, `/skills`, `/eval`.
+- Added `/agents`, `/skills`, `/eval` to both `navItems` and `commandItems` (subpages are not in the main nav).
+
+### 24.4 Test surface
+
+- Extended `tests/web.test.ts`'s "Vite React shell and router surface" test to assert every new route is registered in `App.tsx` and every new page is exported from `pages.tsx` (AgentRunDetailPage, AgentsPage, EvalPage, RetrievalQueryDetailPage, SkillsPage, plus the existing MemoryPage, ModelsPage, RetrievalPage).
+- All 28 tests pass; typecheck is clean.
+
+### 24.5 Acceptance criteria (met)
+
+- Every observability API route from slice 2 is reachable from a web page.
+- A reviewer can accept/reject memory and skill candidates from the UI without touching the API.
+- A reviewer can drill from the retrieval page into a query's rewrites, selected paths, and misses.
+- A reviewer can drill from the agents page into a run's input/output/messages.
+- No new dependencies; all pages use the existing `Panel`, `Badge`, `EmptyState`, `KeyValueList`, `useResource` primitives.

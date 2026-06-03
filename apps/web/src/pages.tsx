@@ -906,27 +906,107 @@ function ChecksPage(): ReactNode {
 }
 
 function MemoryPage(): ReactNode {
-  const resource = useResource(() => api.status());
-  const status = resource.data?.data as any;
-  const projects = Array.isArray(status?.projects) ? (status.projects as Array<any>) : [];
+  const resource = useResource(() =>
+    Promise.all([
+      api.listMemoryCandidates({ status: "pending" }),
+      api.listMemoryEntries(),
+      api.listProjects(),
+    ]),
+  );
+  const candidates = (resource.data?.[0].data ?? []) as Array<Record<string, unknown>>;
+  const entries = (resource.data?.[1].data ?? []) as Array<Record<string, unknown>>;
+  const projects = (resource.data?.[2].data ?? []) as ProjectSummary[];
+  const [projectId, setProjectId] = useState("");
+  const [projectRules, setProjectRules] = useState<Array<Record<string, unknown>>>([]);
+
+  useEffect(() => {
+    if (!projectId && projects[0]?.id) setProjectId(projects[0].id);
+  }, [projectId, projects]);
+
+  useEffect(() => {
+    if (!projectId) {
+      setProjectRules([]);
+      return;
+    }
+    api.listProjectRules(projectId).then((response) => setProjectRules(response.data as Array<Record<string, unknown>>));
+  }, [projectId]);
+
+  const accept = async (id: string) => {
+    await api.acceptMemoryCandidate(id, "accepted from web");
+    resource.refresh();
+  };
+  const reject = async (id: string) => {
+    await api.rejectMemoryCandidate(id, "rejected from web");
+    resource.refresh();
+  };
 
   return (
-    <PageShell title="Memory" subtitle="Lessons and rules">
-      <Panel title="Projects" span={12}>
+    <PageShell title="Memory" subtitle="Memory candidates, entries, and project rules">
+      <Panel title="Pending Candidates" span={12}>
         <div className="list">
-          {projects.length > 0 ? (
-            projects.map((project) => (
-              <div className="list-item" key={project.id}>
+          {candidates.length > 0 ? (
+            candidates.map((c) => (
+              <div className="list-item" key={String(c.id)}>
                 <div className="row">
-                  <strong>{project.name}</strong>
-                  <Badge>{project.status}</Badge>
+                  <strong>{String(c.title ?? c.kind ?? c.id)}</strong>
+                  <Badge tone="warn">{String(c.kind ?? "candidate")}</Badge>
                 </div>
-                <div className="tiny">{project.path}</div>
+                <div className="tiny">{String(c.body ?? "")}</div>
+                <div className="tiny">
+                  confidence {Number(c.confidence ?? 0).toFixed(2)} · scope {String(c.scope ?? "project")}
+                </div>
+                <div className="row" style={{ marginTop: "0.4rem" }}>
+                  <button type="button" onClick={() => accept(String(c.id))}>
+                    Accept
+                  </button>
+                  <button type="button" onClick={() => reject(String(c.id))}>
+                    Reject
+                  </button>
+                </div>
               </div>
             ))
           ) : (
-            <EmptyState title="No memory yet" body="Lessons and rules surface when work is indexed and reviewed." />
+            <EmptyState title="No pending candidates" body="Asks, reviews, and reflection jobs create candidates here." />
           )}
+        </div>
+      </Panel>
+      <Panel title="Accepted Entries" span={8}>
+        <div className="list">
+          {entries.length > 0 ? (
+            entries.map((entry) => (
+              <div className="list-item" key={String(entry.id)}>
+                <div className="row">
+                  <strong>{String(entry.title ?? entry.kind ?? entry.id)}</strong>
+                  <Badge tone="good">{String(entry.kind ?? "entry")}</Badge>
+                </div>
+                <div className="tiny">{String(entry.body ?? "")}</div>
+                <div className="tiny">
+                  scope {String(entry.scope ?? "project")} · used {Number(entry.useCount ?? 0)} times
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No accepted entries" body="Accept a candidate to record a durable entry." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Project Rules" span={4}>
+        <div className="stack">
+          <select value={projectId} onChange={(event) => setProjectId(event.currentTarget.value)}>
+            {projects.length > 0 ? projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>) : <option value="">No project</option>}
+          </select>
+          <div className="list">
+            {projectRules.length > 0 ? (
+              projectRules.map((rule) => (
+                <div className="list-item" key={String(rule.id)}>
+                  <strong>{String(rule.title ?? rule.id)}</strong>
+                  <div className="tiny">{String(rule.body ?? "")}</div>
+                </div>
+              ))
+            ) : (
+              <EmptyState title="No rules" body="Project rules will appear here once the project memory grows." />
+            )}
+          </div>
         </div>
       </Panel>
     </PageShell>
@@ -934,24 +1014,45 @@ function MemoryPage(): ReactNode {
 }
 
 function RetrievalPage(): ReactNode {
-  const resource = useResource(() => Promise.all([api.listProjects(), api.status()]));
-  const projects = resource.data?.[0].data ?? [];
+  const resource = useResource(() =>
+    Promise.all([
+      api.listProjects(),
+      api.listSessions(),
+      api.listMemoryCandidates({ status: "pending" }),
+    ]),
+  );
+  const projects = (resource.data?.[0].data ?? []) as ProjectSummary[];
+  const sessions = (resource.data?.[1].data ?? []) as SessionRecord[];
+  const misses = ((resource.data?.[2].data ?? []) as Array<Record<string, unknown>>).filter(
+    (c) => c.kind === "retrieval_miss",
+  );
   const [project, setProject] = useState(projects[0]?.id ?? "");
+  const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
   const [query, setQuery] = useState("");
-  const [results, setResults] = useState<Array<any>>([]);
+  const [results, setResults] = useState<Array<Record<string, unknown>>>([]);
+  const [queries, setQueries] = useState<Array<Record<string, unknown>>>([]);
 
   useEffect(() => {
     if (!project && projects[0]?.id) setProject(projects[0].id);
-  }, [project, projects]);
+    if (!sessionId && sessions[0]?.id) setSessionId(sessions[0].id);
+  }, [project, projects, sessionId, sessions]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setQueries([]);
+      return;
+    }
+    api.listRetrievalQueries({ sessionId, limit: 20 }).then((response) => setQueries(response.data));
+  }, [sessionId]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const response = await api.searchRetrieval({ project, query, limit: 8 });
-    setResults(response.data as Array<any>);
+    setResults(response.data as Array<Record<string, unknown>>);
   };
 
   return (
-    <PageShell title="Retrieval" subtitle="Search and rerank view">
+    <PageShell title="Retrieval" subtitle="Search, recent queries, and misses">
       <Panel title="Search" span={6}>
         <form className="stack" onSubmit={submit}>
           <select value={project} onChange={(event) => setProject(event.currentTarget.value)}>
@@ -965,9 +1066,9 @@ function RetrievalPage(): ReactNode {
         <div className="list">
           {results.length > 0 ? (
             results.map((chunk) => (
-              <div className="list-item" key={chunk.id ?? `${chunk.path}-${chunk.startLine}`}>
+              <div className="list-item" key={String(chunk.id ?? `${chunk.path}-${chunk.startLine}`)}>
                 <div className="row">
-                  <strong>{chunk.path}</strong>
+                  <strong>{String(chunk.path ?? "")}</strong>
                   <Badge>score {Number(chunk.score ?? 0).toFixed(1)}</Badge>
                 </div>
                 <pre>{String(chunk.content ?? chunk.excerpt ?? "").slice(0, 260)}</pre>
@@ -975,6 +1076,171 @@ function RetrievalPage(): ReactNode {
             ))
           ) : (
             <EmptyState title="No results" body="Run a retrieval search against a project." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Recent Retrieval Queries" span={8}>
+        <div className="stack">
+          <select value={sessionId} onChange={(event) => setSessionId(event.currentTarget.value)}>
+            {sessions.length > 0 ? sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>) : <option value="">No sessions</option>}
+          </select>
+          <div className="list">
+            {queries.length > 0 ? (
+              queries.map((q) => (
+                <a className="list-item" href={`/retrieval/queries/${String(q.id)}`} key={String(q.id)}>
+                  <div className="row">
+                    <strong>{String(q.originalQuery ?? q.id)}</strong>
+                    <Badge tone="neutral">{String(q.intent ?? "?")}</Badge>
+                  </div>
+                  <div className="tiny">
+                    mode {String(q.mode ?? "?")} · depth {String(q.depth ?? "?")} · {String(q.createdAt ?? "")}
+                  </div>
+                </a>
+              ))
+            ) : (
+              <EmptyState title="No retrieval queries" body="Ask a question to create retrieval queries." />
+            )}
+          </div>
+        </div>
+      </Panel>
+      <Panel title="Missed Paths" span={4}>
+        <div className="list">
+          {misses.length > 0 ? (
+            misses.map((m) => (
+              <div className="list-item" key={String(m.id)}>
+                <strong>{String(m.title ?? m.id)}</strong>
+                <div className="tiny">{String(m.body ?? "")}</div>
+                <div className="tiny">
+                  confidence {Number(m.confidence ?? 0).toFixed(2)} · scope {String(m.scope ?? "project")}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No misses" body="Missed retrieval paths will surface here for review." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
+function RetrievalQueryDetailPage(): ReactNode {
+  const { queryId = "" } = useParams();
+  const resource = useResource(() => api.getRetrievalQuery(queryId), [queryId]);
+  const detail = resource.data?.data as
+    | {
+        query: Record<string, unknown>;
+        rewrites: Array<Record<string, unknown>>;
+        results: Array<Record<string, unknown>>;
+        selected: Array<Record<string, unknown>>;
+        misses: Array<Record<string, unknown>>;
+        feedback: Array<Record<string, unknown>>;
+      }
+    | undefined;
+  if (!detail) {
+    return (
+      <PageShell title="Retrieval Query" subtitle={queryId}>
+        <Panel title="Loading" span={12}>
+          <EmptyState title="Loading retrieval query" body="Fetching the trace from the API." />
+        </Panel>
+      </PageShell>
+    );
+  }
+  return (
+    <PageShell title="Retrieval Query" subtitle={String(detail.query.originalQuery ?? queryId)}>
+      <Panel title="Query" span={6}>
+        <KeyValueList
+          items={[
+            ["Original", String(detail.query.originalQuery ?? "")],
+            ["Intent", String(detail.query.intent ?? "?")],
+            ["Mode", String(detail.query.mode ?? "?")],
+            ["Depth", String(detail.query.depth ?? "?")],
+            ["Project", String(detail.query.projectId ?? "—")],
+            ["Session", String(detail.query.sessionId ?? "—")],
+            ["Created", String(detail.query.createdAt ?? "")],
+          ]}
+        />
+      </Panel>
+      <Panel title="Rewrites" span={6}>
+        <div className="list">
+          {detail.rewrites.length > 0 ? (
+            detail.rewrites.map((r) => (
+              <div className="list-item" key={String(r.id)}>
+                <strong>{String(r.variant ?? "")}</strong>
+                <div className="tiny">terms: {Array.isArray(r.terms) ? (r.terms as string[]).join(", ") : "—"}</div>
+                <div className="tiny">confidence {Number(r.confidence ?? 0).toFixed(2)}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No rewrites" body="Query rewrite did not run." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Results" span={8}>
+        <div className="list">
+          {detail.results.length > 0 ? (
+            detail.results.map((r) => (
+              <div className="list-item" key={String(r.id)}>
+                <div className="row">
+                  <strong>{String(r.path ?? "")}</strong>
+                  <Badge>score {Number(r.finalScore ?? r.baseScore ?? 0).toFixed(1)}</Badge>
+                </div>
+                <div className="tiny">
+                  source {String(r.source ?? "?")} · lines {String(r.startLine ?? "?")}-{String(r.endLine ?? "?")}
+                </div>
+                <div className="tiny">{String(r.excerpt ?? "").slice(0, 200)}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No results" body="Retrieval returned no chunks." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Selected Context" span={4}>
+        <div className="list">
+          {detail.selected.length > 0 ? (
+            detail.selected.map((s) => (
+              <div className="list-item" key={String(s.id)}>
+                <div className="row">
+                  <strong>rank {Number(s.rank ?? 0)}</strong>
+                  <Badge tone="good">{Number(s.tokenCount ?? 0)} tokens</Badge>
+                </div>
+                <div className="tiny">{String(s.excerpt ?? "").slice(0, 160)}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="Nothing selected" body="No chunks made it into the context pack." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Misses" span={6}>
+        <div className="list">
+          {detail.misses.length > 0 ? (
+            detail.misses.map((m) => (
+              <div className="list-item" key={String(m.id)}>
+                <strong>{String(m.missedPath ?? m.id)}</strong>
+                <div className="tiny">{String(m.notes ?? "")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No misses" body="No missed paths recorded for this query." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Feedback" span={6}>
+        <div className="list">
+          {detail.feedback.length > 0 ? (
+            detail.feedback.map((f) => (
+              <div className="list-item" key={String(f.id)}>
+                <div className="row">
+                  <strong>{String(f.kind ?? "feedback")}</strong>
+                  <Badge>{String(f.rating ?? "?")}</Badge>
+                </div>
+                <div className="tiny">{String(f.notes ?? "")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No feedback" body="Feedback is recorded when a query is rated." />
           )}
         </div>
       </Panel>
@@ -1074,11 +1340,97 @@ function ReviewDetailPage(): ReactNode {
 }
 
 function ModelsPage(): ReactNode {
-  const resource = useResource(() => api.getModels());
-  const usage = resource.data?.data.usage ?? [];
+  const resource = useResource(() =>
+    Promise.all([api.getModels(), api.getModelProviders(), api.getModelHealth(), api.getModelCalls(30)]),
+  );
+  const usage = (resource.data?.[0].data?.usage ?? []) as Array<{ day: string; modelName: string; promptTokens: number; completionTokens: number; requests: number }>;
+  const providers = (resource.data?.[1].data?.providers ?? []) as Array<Record<string, unknown>>;
+  const profiles = (resource.data?.[1].data?.profiles ?? []) as Array<Record<string, unknown>>;
+  const healthProviders = (resource.data?.[2].data?.providers ?? []) as Array<Record<string, unknown>>;
+  const calls = (resource.data?.[3].data ?? []) as Array<Record<string, unknown>>;
+
   return (
-    <PageShell title="Models" subtitle="Local model routing and usage">
-      <Panel title="Usage" span={12}>
+    <PageShell title="Models" subtitle="Local model routing, providers, and recent calls">
+      <Panel title="Providers" span={6}>
+        <div className="list">
+          {providers.length > 0 ? (
+            providers.map((provider) => (
+              <div className="list-item" key={String(provider.id)}>
+                <div className="row">
+                  <strong>{String(provider.name ?? provider.id)}</strong>
+                  <Badge tone="good">{String(provider.localOnly ? "local" : "cloud")}</Badge>
+                </div>
+                <div className="tiny">kind {String(provider.kind ?? "?")} · {String(provider.baseUrl ?? "no base url")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No providers" body="Register a model provider to see routing options." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Profiles" span={6}>
+        <div className="list">
+          {profiles.length > 0 ? (
+            profiles.map((profile) => (
+              <div className="list-item" key={String(profile.id)}>
+                <div className="row">
+                  <strong>{String(profile.modelName ?? profile.id)}</strong>
+                  <Badge tone="neutral">{String(profile.role ?? "?")}</Badge>
+                </div>
+                <div className="tiny">
+                  ctx {String(profile.contextWindow ?? "?")} · max out {String(profile.maxOutputTokens ?? "?")} · quality {Number(profile.qualityScore ?? 0).toFixed(2)}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No profiles" body="Profiles are created from providers." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Health (last call per provider)" span={6}>
+        <div className="list">
+          {healthProviders.length > 0 ? (
+            healthProviders.map((provider) => {
+              const last = provider.lastCall as Record<string, unknown> | null;
+              return (
+                <div className="list-item" key={String(provider.id)}>
+                  <div className="row">
+                    <strong>{String(provider.name ?? provider.id)}</strong>
+                    <Badge tone={last ? "good" : "neutral"}>{last ? "called" : "idle"}</Badge>
+                  </div>
+                  <div className="tiny">
+                    {last
+                      ? `latency ${Number(last.latencyMs ?? 0)}ms · prompt ${Number(last.promptTokens ?? 0)} · completion ${Number(last.completionTokens ?? 0)}`
+                      : "no calls recorded yet"}
+                  </div>
+                </div>
+              );
+            })
+          ) : (
+            <EmptyState title="No providers" body="No model providers registered." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Recent Calls" span={6}>
+        <div className="list">
+          {calls.length > 0 ? (
+            calls.map((call) => (
+              <div className="list-item" key={String(call.id)}>
+                <div className="row">
+                  <strong>{String(call.role ?? "call")}</strong>
+                  <Badge tone={call.success === false ? "bad" : "good"}>{String(call.success === false ? "failed" : "ok")}</Badge>
+                </div>
+                <div className="tiny">
+                  profile {String(call.profileId ?? "?")} · prompt {Number(call.promptTokens ?? 0)} · completion {Number(call.completionTokens ?? 0)} · {Number(call.latencyMs ?? 0)}ms
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No calls" body="Model calls will appear here as they happen." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Daily Usage" span={12}>
         <div className="list">
           {usage.length > 0 ? (
             usage.map((item) => (
@@ -1094,6 +1446,315 @@ function ModelsPage(): ReactNode {
             ))
           ) : (
             <EmptyState title="No usage yet" body="Model usage will appear here once calls are recorded." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
+function SkillsPage(): ReactNode {
+  const resource = useResource(() => Promise.all([api.listSkills(), api.listSkillCandidates({ status: "pending" }), api.listSkillCandidates({ status: "rejected" })]));
+  const skills = (resource.data?.[0].data ?? []) as Array<Record<string, unknown>>;
+  const pending = (resource.data?.[1].data ?? []) as Array<Record<string, unknown>>;
+  const rejected = (resource.data?.[2].data ?? []) as Array<Record<string, unknown>>;
+  const accept = async (id: string) => {
+    await api.acceptSkillCandidate(id);
+    resource.refresh();
+  };
+  const reject = async (id: string) => {
+    await api.rejectSkillCandidate(id, "rejected from web");
+    resource.refresh();
+  };
+  return (
+    <PageShell title="Skills" subtitle="Promoted skills, pending candidates, and rejections">
+      <Panel title="Active Skills" span={6}>
+        <div className="list">
+          {skills.length > 0 ? (
+            skills.map((skill) => (
+              <div className="list-item" key={String(skill.id)}>
+                <div className="row">
+                  <strong>{String(skill.title ?? skill.id)}</strong>
+                  <Badge tone="good">{String(skill.status ?? "active")}</Badge>
+                </div>
+                <div className="tiny">{String(skill.body ?? skill.description ?? "")}</div>
+                <div className="tiny">
+                  used {Number(skill.useCount ?? 0)} times · last {String(skill.lastUsedAt ?? "never")}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No active skills" body="Accept a skill candidate to record a skill." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Pending Candidates" span={6}>
+        <div className="list">
+          {pending.length > 0 ? (
+            pending.map((candidate) => (
+              <div className="list-item" key={String(candidate.id)}>
+                <div className="row">
+                  <strong>{String(candidate.title ?? candidate.id)}</strong>
+                  <Badge tone="warn">pending</Badge>
+                </div>
+                <div className="tiny">{String(candidate.body ?? candidate.description ?? "")}</div>
+                <div className="row" style={{ marginTop: "0.4rem" }}>
+                  <button type="button" onClick={() => accept(String(candidate.id))}>
+                    Accept
+                  </button>
+                  <button type="button" onClick={() => reject(String(candidate.id))}>
+                    Reject
+                  </button>
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No pending candidates" body="Reflection jobs and explicit suggestions create candidates." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Rejected Candidates" span={12}>
+        <div className="list">
+          {rejected.length > 0 ? (
+            rejected.map((candidate) => (
+              <div className="list-item" key={String(candidate.id)}>
+                <div className="row">
+                  <strong>{String(candidate.title ?? candidate.id)}</strong>
+                  <Badge tone="bad">rejected</Badge>
+                </div>
+                <div className="tiny">{String(candidate.body ?? candidate.description ?? "")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No rejections" body="Rejected candidates accumulate here." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
+function EvalPage(): ReactNode {
+  const resource = useResource(() =>
+    Promise.all([api.listEvalCases(), api.listAnswerEvaluations(), api.listSessionOutcomes()]),
+  );
+  const cases = (resource.data?.[0].data ?? []) as Array<Record<string, unknown>>;
+  const answers = (resource.data?.[1].data ?? []) as Array<Record<string, unknown>>;
+  const outcomes = (resource.data?.[2].data ?? []) as Array<Record<string, unknown>>;
+  const [projectId, setProjectId] = useState("");
+  const [projectOptions, setProjectOptions] = useState<Array<{ id: string; name: string }>>([]);
+  const [question, setQuestion] = useState("");
+  const [expected, setExpected] = useState("");
+
+  useEffect(() => {
+    api.listProjects().then((response) => {
+      setProjectOptions(response.data);
+      if (!projectId && response.data[0]?.id) setProjectId(response.data[0].id);
+    });
+  }, [projectId]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!question) return;
+    await api.addEvalCase({ projectId: projectId || undefined, question, expectedAnswerContains: expected || undefined });
+    setQuestion("");
+    setExpected("");
+    resource.refresh();
+  };
+
+  return (
+    <PageShell title="Evaluation" subtitle="Eval cases, answer evaluations, and session outcomes">
+      <Panel title="Add Eval Case" span={6}>
+        <form className="stack" onSubmit={submit}>
+          <select value={projectId} onChange={(event) => setProjectId(event.currentTarget.value)}>
+            <option value="">No project</option>
+            {projectOptions.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+          </select>
+          <input value={question} onChange={(event) => setQuestion(event.currentTarget.value)} placeholder="what is in handleLogin?" />
+          <input value={expected} onChange={(event) => setExpected(event.currentTarget.value)} placeholder="expected substring" />
+          <button type="submit">Add case</button>
+        </form>
+      </Panel>
+      <Panel title="Cases" span={6}>
+        <div className="list">
+          {cases.length > 0 ? (
+            cases.map((c) => (
+              <div className="list-item" key={String(c.id)}>
+                <strong>{String(c.question ?? c.id)}</strong>
+                <div className="tiny">expects: {String(c.expectedAnswerContains ?? "—")}</div>
+                <div className="tiny">difficulty {String(c.difficulty ?? "standard")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No cases" body="Add a case to start evaluating answers." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Answer Evaluations" span={8}>
+        <div className="list">
+          {answers.length > 0 ? (
+            answers.map((a) => (
+              <div className="list-item" key={String(a.id)}>
+                <div className="row">
+                  <strong>{String(a.sessionId ?? a.id)}</strong>
+                  <Badge tone={Number(a.groundedness ?? 0) >= 0.5 ? "good" : "warn"}>
+                    grounded {Number(a.groundedness ?? 0).toFixed(2)}
+                  </Badge>
+                </div>
+                <div className="tiny">
+                  citation coverage {Number(a.citationCoverage ?? 0).toFixed(2)} · contradiction {Number(a.contradiction ?? 0).toFixed(2)}
+                </div>
+                <div className="tiny">{String(a.notes ?? "")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No answer evaluations" body="Each ask records a groundedness score here." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Session Outcomes" span={4}>
+        <div className="list">
+          {outcomes.length > 0 ? (
+            outcomes.map((o) => (
+              <div className="list-item" key={String(o.id)}>
+                <div className="row">
+                  <strong>{String(o.outcome ?? "?")}</strong>
+                  <Badge tone={o.outcome === "success" ? "good" : o.outcome === "failed" ? "bad" : "warn"}>
+                    score {Number(o.score ?? 0).toFixed(2)}
+                  </Badge>
+                </div>
+                <div className="tiny">session {String(o.sessionId ?? "—")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No outcomes" body="Session outcomes show up as asks complete." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
+function AgentsPage(): ReactNode {
+  const resource = useResource(() => api.listSessions());
+  const sessions = (resource.data?.data ?? []) as SessionRecord[];
+  const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
+  const [runs, setRuns] = useState<Array<Record<string, unknown>>>([]);
+  const [packs, setPacks] = useState<Array<Record<string, unknown>>>([]);
+
+  useEffect(() => {
+    if (!sessionId && sessions[0]?.id) setSessionId(sessions[0].id);
+  }, [sessionId, sessions]);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setRuns([]);
+      setPacks([]);
+      return;
+    }
+    api.listAgentRuns(sessionId).then((response) => setRuns(response.data));
+    api.listContextPacks(sessionId).then((response) => setPacks(response.data));
+  }, [sessionId]);
+
+  return (
+    <PageShell title="Agents" subtitle="Agent runs and context packs for any session">
+      <Panel title="Session" span={12}>
+        <select value={sessionId} onChange={(event) => setSessionId(event.currentTarget.value)}>
+          {sessions.length > 0 ? sessions.map((session) => <option key={session.id} value={session.id}>{session.title}</option>) : <option value="">No sessions</option>}
+        </select>
+      </Panel>
+      <Panel title="Agent Runs" span={8}>
+        <div className="list">
+          {runs.length > 0 ? (
+            runs.map((run) => (
+              <a className="list-item" href={`/agents/runs/${String(run.id)}`} key={String(run.id)}>
+                <div className="row">
+                  <strong>{String(run.agent ?? "?")}</strong>
+                  <Badge tone={run.status === "completed" ? "good" : run.status === "failed" ? "bad" : "neutral"}>
+                    {String(run.status ?? "?")}
+                  </Badge>
+                </div>
+                <div className="tiny">
+                  role {String(run.modelRole ?? "?")} · {String(run.startedAt ?? "")}
+                </div>
+              </a>
+            ))
+          ) : (
+            <EmptyState title="No runs" body="Asks and handoffs create agent runs." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Context Packs" span={4}>
+        <div className="list">
+          {packs.length > 0 ? (
+            packs.map((pack) => (
+              <div className="list-item" key={String(pack.id)}>
+                <div className="row">
+                  <strong>{String(pack.reason ?? "pack")}</strong>
+                  <Badge>{Number(pack.usedTokens ?? 0)} tokens</Badge>
+                </div>
+                <div className="tiny">budget {Number(pack.budgetTokens ?? 0)}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No packs" body="Context packs appear after retrieval." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
+function AgentRunDetailPage(): ReactNode {
+  const { runId = "" } = useParams();
+  const resource = useResource(() => api.getAgentRun(runId), [runId]);
+  const detail = resource.data?.data as
+    | { run: Record<string, unknown>; messages: Array<Record<string, unknown>> }
+    | undefined;
+  if (!detail) {
+    return (
+      <PageShell title="Agent Run" subtitle={runId}>
+        <Panel title="Loading" span={12}>
+          <EmptyState title="Loading agent run" body="Fetching the run trace." />
+        </Panel>
+      </PageShell>
+    );
+  }
+  return (
+    <PageShell title="Agent Run" subtitle={String(detail.run.agent ?? runId)}>
+      <Panel title="Run Summary" span={6}>
+        <KeyValueList
+          items={[
+            ["Agent", String(detail.run.agent ?? "?")],
+            ["Status", String(detail.run.status ?? "?")],
+            ["Model Role", String(detail.run.modelRole ?? "?")],
+            ["Session", String(detail.run.sessionId ?? "—")],
+            ["Task", String(detail.run.taskId ?? "—")],
+            ["Started", String(detail.run.startedAt ?? "")],
+            ["Finished", String(detail.run.finishedAt ?? "—")],
+          ]}
+        />
+      </Panel>
+      <Panel title="Output" span={6}>
+        <pre>{JSON.stringify(detail.run.output ?? {}, null, 2)}</pre>
+      </Panel>
+      <Panel title="Input" span={6}>
+        <pre>{JSON.stringify(detail.run.input ?? {}, null, 2)}</pre>
+      </Panel>
+      <Panel title="Messages" span={6}>
+        <div className="list">
+          {detail.messages.length > 0 ? (
+            detail.messages.map((m) => (
+              <div className="list-item" key={String(m.id)}>
+                <div className="row">
+                  <strong>{String(m.role ?? "msg")}</strong>
+                  <span className="tiny">{String(m.createdAt ?? "")}</span>
+                </div>
+                <pre>{String(m.content ?? "").slice(0, 400)}</pre>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No messages" body="Agent messages will appear here." />
           )}
         </div>
       </Panel>
@@ -1174,9 +1835,12 @@ function SettingsPage(): ReactNode {
 }
 
 export {
+  AgentRunDetailPage,
+  AgentsPage,
   AskPage,
   ChecksPage,
   DashboardPage,
+  EvalPage,
   HandoffPage,
   MemoryPage,
   McpCallDetailPage,
@@ -1186,11 +1850,13 @@ export {
   ProjectDetailPage,
   ProjectsPage,
   RetrievalPage,
+  RetrievalQueryDetailPage,
   ReviewDetailPage,
   ReviewsPage,
   SessionDetailPage,
   SessionsPage,
   SettingsPage,
+  SkillsPage,
   TaskDetailPage,
   TasksPage,
 };

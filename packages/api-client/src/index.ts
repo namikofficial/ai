@@ -168,6 +168,116 @@ export function createApiClient(options: ApiClientOptions) {
     getMcpCall(callId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
       return requestJson(options.baseUrl, `/mcp/calls/${callId}`);
     },
+    listRetrievalQueries(input: { sessionId?: string; projectId?: string; limit?: number }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const params = new URLSearchParams();
+      if (input.sessionId) params.set("sessionId", input.sessionId);
+      if (input.projectId) params.set("projectId", input.projectId);
+      if (input.limit) params.set("limit", String(input.limit));
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return requestJson(options.baseUrl, `/retrieval/queries${suffix}`);
+    },
+    getRetrievalQuery(id: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/retrieval/queries/${id}`);
+    },
+    listMemoryCandidates(input: { status?: "pending" | "accepted" | "rejected"; projectId?: string }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const params = new URLSearchParams();
+      if (input.status) params.set("status", input.status);
+      if (input.projectId) params.set("projectId", input.projectId);
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return requestJson(options.baseUrl, `/memory/candidates${suffix}`);
+    },
+    acceptMemoryCandidate(id: string, notes?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/memory/candidates/${id}/accept`, {
+        method: "POST",
+        body: JSON.stringify({ notes: notes ?? null }),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    rejectMemoryCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/memory/candidates/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason ?? null }),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    listMemoryEntries(input?: { projectId?: string; scope?: "global" | "project" | "repo" | "path" }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const params = new URLSearchParams();
+      if (input?.projectId) params.set("projectId", input.projectId);
+      if (input?.scope) params.set("scope", input.scope);
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return requestJson(options.baseUrl, `/memory/entries${suffix}`);
+    },
+    listMemoryFacts(projectId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/memory/facts?projectId=${encodeURIComponent(projectId)}`);
+    },
+    listProjectRules(projectId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/memory/rules?projectId=${encodeURIComponent(projectId)}`);
+    },
+    listSkillCandidates(input?: { status?: "pending" | "active" | "deprecated" | "rejected" }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const params = new URLSearchParams();
+      if (input?.status) params.set("status", input.status);
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return requestJson(options.baseUrl, `/skills/candidates${suffix}`);
+    },
+    acceptSkillCandidate(id: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/skills/candidates/${id}/accept`, { method: "POST" });
+    },
+    rejectSkillCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/skills/candidates/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason: reason ?? null }),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    listSkills(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/skills`);
+    },
+    getModelProviders(): Promise<{ status: "ok"; data: { providers: Array<Record<string, unknown>>; profiles: Array<Record<string, unknown>> } }> {
+      return requestJson(options.baseUrl, `/models/providers`);
+    },
+    getModelCalls(limit = 50): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/models/calls?limit=${limit}`);
+    },
+    getModelHealth(): Promise<{ status: "ok"; data: { providers: Array<Record<string, unknown>>; recentCalls: Array<Record<string, unknown>> } }> {
+      return requestJson(options.baseUrl, `/models/health`);
+    },
+    listAgentRuns(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/agents/runs?sessionId=${encodeURIComponent(sessionId)}`);
+    },
+    getAgentRun(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/agents/runs/${runId}`);
+    },
+    listAgentHandoffs(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+      return requestJson(options.baseUrl, `/agents/handoffs${suffix}`);
+    },
+    listContextPacks(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/context/packs?sessionId=${encodeURIComponent(sessionId)}`);
+    },
+    getContextPack(packId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/context/packs/${packId}`);
+    },
+    listConversationMessages(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/conversations/${encodeURIComponent(sessionId)}`);
+    },
+    listEvalCases(projectId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+      return requestJson(options.baseUrl, `/eval/cases${suffix}`);
+    },
+    addEvalCase(input: { projectId?: string; question: string; expectedAnswerContains?: string; expectedFiles?: string[]; tags?: string[] }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/eval/cases`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    listAnswerEvaluations(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/eval/answers`);
+    },
+    listSessionOutcomes(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
+      return requestJson(options.baseUrl, `/eval/outcomes${suffix}`);
+    },
     streamEvents(onEvent: (event: EventEnvelope) => void): () => void {
       const controller = new AbortController();
       fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(async (response) => {

@@ -13,8 +13,41 @@ test("defines the Vite React shell and router surface", async () => {
   assert.ok(indexHtml.includes("/src/main.tsx"));
 
   const appSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/App.tsx", "utf8");
-  for (const path of ["/dashboard", "/projects", "/sessions", "/tasks", "/ask", "/planner", "/handoff", "/checks", "/memory", "/retrieval", "/reviews", "/models", "/mcp", "/settings"]) {
+  for (const path of [
+    "/dashboard",
+    "/projects",
+    "/sessions",
+    "/tasks",
+    "/agents",
+    "/ask",
+    "/planner",
+    "/handoff",
+    "/checks",
+    "/memory",
+    "/retrieval",
+    "/retrieval/queries",
+    "/skills",
+    "/eval",
+    "/reviews",
+    "/models",
+    "/mcp",
+    "/settings",
+  ]) {
     assert.ok(appSource.includes(path), `expected router surface to include ${path}`);
+  }
+
+  const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
+  for (const name of [
+    "AgentRunDetailPage",
+    "AgentsPage",
+    "EvalPage",
+    "MemoryPage",
+    "ModelsPage",
+    "RetrievalPage",
+    "RetrievalQueryDetailPage",
+    "SkillsPage",
+  ]) {
+    assert.ok(pagesSource.includes(name), `expected pages module to export ${name}`);
   }
 
   await rm(workspace, { recursive: true, force: true });
