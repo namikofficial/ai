@@ -365,7 +365,79 @@ async function renderReviews(root) {
   renderSection(root, [
     '<section class="panel" data-span="6"><h3>Create Review</h3><form data-endpoint="/reviews" data-state-key="reviewResult" data-reload="false" class="stack"><select name="project">' + (projects.length ? projects.map((project) => '<option value="' + esc(project.id) + '">' + esc(project.name) + '</option>').join('') : '<option value="">Add a project first</option>') + '</select><input name="sessionId" placeholder="optional session id" /><input name="title" placeholder="review title" /><input name="plannedFiles" placeholder="planned/file1.ts, planned/file2.ts" /><input name="editedFiles" placeholder="edited/file1.ts, edited/file2.ts" /><input name="checks" placeholder="typecheck, tests" /><textarea name="notes" placeholder="review notes"></textarea><button type="submit">Create review</button></form></section>',
     '<section class="panel" data-span="6"><h3>Latest Review</h3>' + (result ? '<div class="list-item"><strong>' + esc(result.title) + '</strong><div class="tiny">' + esc(result.summary) + '</div><div class="tiny">Next: ' + esc(result.nextStep) + '</div></div>' : '<div class="list-item"><div class="tiny">Create a review to capture scope creep, missing tests, and risks.</div></div>') + '</section>',
-    '<section class="panel" data-span="12"><h3>Review History</h3>' + list(reviews, (review) => '<div class="list-item"><div class="row"><strong>' + esc(review.title) + '</strong><span class="badge">' + esc(review.createdAt) + '</span></div><div class="tiny">' + esc(review.summary) + '</div></div>') + '</section>',
+    '<section class="panel" data-span="12"><h3>Review History</h3>' + list(reviews, (review) => '<a href="/reviews/' + esc(review.id) + '" style="display:block"><div class="list-item"><div class="row"><strong>' + esc(review.title) + '</strong><span class="badge">' + esc(review.createdAt) + '</span></div><div class="tiny">' + esc(review.summary) + '</div></div></a>') + '</section>',
+  ].join(''));
+}
+
+async function renderReviewDetail(root, reviewId) {
+  const [review, projects, sessions] = await Promise.all([
+    api('/reviews/' + encodeURIComponent(reviewId)),
+    api('/projects'),
+    api('/sessions'),
+  ]);
+  if (!review) {
+    renderSection(root, '<section class="panel" data-span="12"><h3>Review not found</h3><div class="tiny">No review found for ' + esc(reviewId) + '.</div></section>');
+    return;
+  }
+  const project = projects.find((item) => item.id === review.projectId) || null;
+  const session = sessions.find((item) => item.id === review.sessionId) || null;
+  const plannedFiles = safeParseList(review.plannedFilesJson);
+  const editedFiles = safeParseList(review.editedFilesJson);
+  const checks = safeParseList(review.checksJson);
+  const scopeCreep = safeParseList(review.scopeCreepJson);
+  const missingTests = safeParseList(review.missingTestsJson);
+  const riskyChanges = safeParseList(review.riskyChangesJson);
+  renderSection(root, [
+    '<section class="panel" data-span="6"><h3>Review Summary</h3>' + list([
+      ['Title', review.title],
+      ['Project', project ? project.name : review.projectId || 'unknown'],
+      ['Session', session ? session.title : review.sessionId || 'none'],
+      ['Created', review.createdAt],
+      ['Updated', review.updatedAt],
+    ], ([label, value]) => '<div class="list-item"><div class="tiny">' + esc(label) + '</div><div>' + esc(value) + '</div></div>') + '</section>',
+    '<section class="panel" data-span="6"><h3>Summary</h3><pre>' + esc(review.summary) + '</pre></section>',
+    '<section class="panel" data-span="4"><h3>Planned Files</h3>' + list(plannedFiles, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Edited Files</h3>' + list(editedFiles, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Checks</h3>' + list(checks, (check) => '<div class="list-item">' + esc(check) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Scope Creep</h3>' + list(scopeCreep, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Missing Tests</h3>' + list(missingTests, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Risky Changes</h3>' + list(riskyChanges, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+  ].join(''));
+}
+
+async function renderReviewDetail(root, reviewId) {
+  const [review, projects, sessions] = await Promise.all([
+    api('/reviews/' + encodeURIComponent(reviewId)),
+    api('/projects'),
+    api('/sessions'),
+  ]);
+  if (!review) {
+    renderSection(root, '<section class="panel" data-span="12"><h3>Review not found</h3><div class="tiny">No review found for ' + esc(reviewId) + '.</div></section>');
+    return;
+  }
+  const project = projects.find((item) => item.id === review.projectId) || null;
+  const session = sessions.find((item) => item.id === review.sessionId) || null;
+  const plannedFiles = Array.isArray(review.plannedFilesJson ? JSON.parse(review.plannedFilesJson) : []) ? JSON.parse(review.plannedFilesJson) : [];
+  const editedFiles = Array.isArray(review.editedFilesJson ? JSON.parse(review.editedFilesJson) : []) ? JSON.parse(review.editedFilesJson) : [];
+  const checks = Array.isArray(review.checksJson ? JSON.parse(review.checksJson) : []) ? JSON.parse(review.checksJson) : [];
+  const scopeCreep = Array.isArray(review.scopeCreepJson ? JSON.parse(review.scopeCreepJson) : []) ? JSON.parse(review.scopeCreepJson) : [];
+  const missingTests = Array.isArray(review.missingTestsJson ? JSON.parse(review.missingTestsJson) : []) ? JSON.parse(review.missingTestsJson) : [];
+  const riskyChanges = Array.isArray(review.riskyChangesJson ? JSON.parse(review.riskyChangesJson) : []) ? JSON.parse(review.riskyChangesJson) : [];
+  renderSection(root, [
+    '<section class="panel" data-span="6"><h3>Review Summary</h3>' + list([
+      ['Title', review.title],
+      ['Project', project ? project.name : review.projectId || 'unknown'],
+      ['Session', session ? session.title : review.sessionId || 'none'],
+      ['Created', review.createdAt],
+      ['Updated', review.updatedAt],
+    ], ([label, value]) => '<div class="list-item"><div class="tiny">' + esc(label) + '</div><div>' + esc(value) + '</div></div>') + '</section>',
+    '<section class="panel" data-span="6"><h3>Summary</h3><pre>' + esc(review.summary) + '</pre></section>',
+    '<section class="panel" data-span="4"><h3>Planned Files</h3>' + list(plannedFiles, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Edited Files</h3>' + list(editedFiles, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Checks</h3>' + list(checks, (check) => '<div class="list-item">' + esc(check) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Scope Creep</h3>' + list(scopeCreep, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Missing Tests</h3>' + list(missingTests, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
+    '<section class="panel" data-span="4"><h3>Risky Changes</h3>' + list(riskyChanges, (file) => '<div class="list-item">' + esc(file) + '</div>') + '</section>',
   ].join(''));
 }
 
@@ -458,6 +530,10 @@ async function renderApp() {
     await renderReviews(root);
     return;
   }
+  if (parts[0] === 'reviews' && parts.length === 2) {
+    await renderReviewDetail(root, decodeURIComponent(parts[1]));
+    return;
+  }
   if (path === '/models') {
     await renderModels(root);
     return;
@@ -512,6 +588,7 @@ function isSpaRoute(path: string): boolean {
   if (/^\/projects\/[^/]+$/.test(path)) return true;
   if (/^\/sessions\/[^/]+$/.test(path)) return true;
   if (/^\/tasks\/[^/]+$/.test(path)) return true;
+  if (/^\/reviews\/[^/]+$/.test(path)) return true;
   return false;
 }
 

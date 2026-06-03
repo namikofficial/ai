@@ -1128,6 +1128,7 @@ Implemented in this bootstrap slice:
 - Session model/profile routing plus env-aware settings snapshots and a best-effort FTS-backed retrieval index with heuristic fallback.
 - Live reindex and retrieval smoke against a freshly indexed workspace project.
 - Persisted task graphs with `/tasks` list/detail pages and task lifecycle routes.
+- Review history with `/reviews` list and `/reviews/:id` detail pages.
 - Separate web shell startup on port `3000` with API proxying and `ai api` for API-only runs.
 - Environment overrides for local runtime paths and ports via `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, and `AI_API_URL`.
 

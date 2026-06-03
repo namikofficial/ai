@@ -792,7 +792,7 @@ function renderReviewsPage(
     ),
     renderCard(
       "Review History",
-      `<div class="list">${reviews.length > 0 ? reviews.map((review) => `<div class="list-item"><div class="row"><strong>${escapeHtml(review.title)}</strong><span class="badge">${escapeHtml(review.createdAt)}</span></div><div class="tiny">${escapeHtml(review.summary)}</div></div>`).join("") : renderEmptyState("No reviews yet", "Review history will accumulate here.")}</div>`,
+      `<div class="list">${reviews.length > 0 ? reviews.map((review) => `<a href="/reviews/${encodeURIComponent(review.id)}" style="display:block"><div class="list-item"><div class="row"><strong>${escapeHtml(review.title)}</strong><span class="badge">${escapeHtml(review.createdAt)}</span></div><div class="tiny">${escapeHtml(review.summary)}</div></div></a>`).join("") : renderEmptyState("No reviews yet", "Review history will accumulate here.")}</div>`,
       12,
     ),
   ].join("");
@@ -804,6 +804,61 @@ function renderReviewsPage(
     sessionCount: store.listSessions(1000).length,
     activeSessionCount: store.dashboardSnapshot().activeSessions,
     liveStatus: options.result ? "reviewed" : "ready",
+  });
+}
+
+function renderReviewDetailPage(store: ReturnType<typeof createStore>, reviewId: string): string {
+  const review = store.getReview(reviewId);
+  if (!review) {
+    return pageShell("Review not found", `/reviews/${reviewId}`, {
+      contentHtml: renderCard("Missing review", `No review found for <code>${escapeHtml(reviewId)}</code>.`),
+      projects: store.listProjects(),
+      projectCount: store.listProjects().length,
+      sessionCount: store.listSessions(1000).length,
+      activeSessionCount: store.dashboardSnapshot().activeSessions,
+      liveStatus: "missing",
+    });
+  }
+
+  const plannedFiles = safeParseList(review.plannedFilesJson);
+  const editedFiles = safeParseList(review.editedFilesJson);
+  const checks = safeParseList(review.checksJson);
+  const scopeCreep = safeParseList(review.scopeCreepJson);
+  const missingTests = safeParseList(review.missingTestsJson);
+  const riskyChanges = safeParseList(review.riskyChangesJson);
+  const project = review.projectId ? store.getProject(review.projectId) : null;
+  const session = review.sessionId ? store.getSession(review.sessionId) : null;
+
+  const contentHtml = [
+    renderCard(
+      "Review Summary",
+      renderKeyValueList([
+        ["Title", review.title],
+        ["Project", project ? project.name : review.projectId ?? "unknown"],
+        ["Session", session ? session.title : review.sessionId ?? "none"],
+        ["Created", review.createdAt],
+        ["Updated", review.updatedAt],
+      ]),
+      6,
+    ),
+    renderCard("Summary", `<pre>${escapeHtml(review.summary)}</pre>`, 6),
+    renderCard("Planned Files", plannedFiles.length > 0 ? `<div class="list">${plannedFiles.map((file) => `<div class="list-item">${escapeHtml(file)}</div>`).join("")}</div>` : renderEmptyState("No planned files", "The review did not capture planned files."), 4),
+    renderCard("Edited Files", editedFiles.length > 0 ? `<div class="list">${editedFiles.map((file) => `<div class="list-item">${escapeHtml(file)}</div>`).join("")}</div>` : renderEmptyState("No edited files", "The review did not capture edited files."), 4),
+    renderCard("Checks", checks.length > 0 ? `<div class="list">${checks.map((check) => `<div class="list-item">${escapeHtml(check)}</div>`).join("")}</div>` : renderEmptyState("No checks", "The review did not capture validation checks."), 4),
+    renderCard("Scope Creep", scopeCreep.length > 0 ? `<div class="list">${scopeCreep.map((file) => `<div class="list-item">${escapeHtml(file)}</div>`).join("")}</div>` : renderEmptyState("No scope creep", "Nothing extra slipped into the change set."), 4),
+    renderCard("Missing Tests", missingTests.length > 0 ? `<div class="list">${missingTests.map((file) => `<div class="list-item">${escapeHtml(file)}</div>`).join("")}</div>` : renderEmptyState("No missing tests", "The review did not flag missing tests."), 4),
+    renderCard("Risky Changes", riskyChanges.length > 0 ? `<div class="list">${riskyChanges.map((file) => `<div class="list-item">${escapeHtml(file)}</div>`).join("")}</div>` : renderEmptyState("No risky changes", "Nothing high-risk was detected."), 4),
+  ].join("");
+
+  return pageShell(review.title, `/reviews/${review.id}`, {
+    contentHtml,
+    rightPanelHtml: renderCard("Recent Trace", renderEventFeed(store.listEvents(session?.id ?? undefined, 40))),
+    activeProjectId: project?.id ?? null,
+    projects: store.listProjects(),
+    projectCount: store.listProjects().length,
+    sessionCount: store.listSessions(1000).length,
+    activeSessionCount: store.dashboardSnapshot().activeSessions,
+    liveStatus: "ready",
   });
 }
 
@@ -1574,6 +1629,17 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         }
         sendHtml(res, renderReviewsPage(store));
         return;
+      }
+      if (path.startsWith("/reviews/")) {
+        const reviewId = decodeURIComponent(path.slice("/reviews/".length)).split("/")[0];
+        if (method === "GET") {
+          if (!isHtmlRequest(req)) {
+            sendJson(res, json("ok", store.getReview(reviewId)));
+            return;
+          }
+          sendHtml(res, renderReviewDetailPage(store, reviewId));
+          return;
+        }
       }
       if (method === "GET" && path === "/models") {
         if (!isHtmlRequest(req)) {

@@ -785,6 +785,25 @@ export function createStore(db: DatabaseSync) {
         updatedAt: asString(row.updated_at),
       }));
     },
+    getReview(reviewId: string): ReviewRecord | null {
+      const row = db.prepare("SELECT * FROM reviews WHERE id = ? LIMIT 1").get(reviewId) as Row | undefined;
+      if (!row) return null;
+      return {
+        id: asString(row.id),
+        projectId: row.project_id == null ? null : asString(row.project_id),
+        sessionId: row.session_id == null ? null : asString(row.session_id),
+        title: asString(row.title),
+        summary: asString(row.summary),
+        plannedFilesJson: asString(row.planned_files_json),
+        editedFilesJson: asString(row.edited_files_json),
+        checksJson: asString(row.checks_json),
+        scopeCreepJson: asString(row.scope_creep_json),
+        missingTestsJson: asString(row.missing_tests_json),
+        riskyChangesJson: asString(row.risky_changes_json),
+        createdAt: asString(row.created_at),
+        updatedAt: asString(row.updated_at),
+      };
+    },
     createReview(input: ReviewRequest): ReviewResponse {
       const project = store.getProject(input.project);
       if (!project) {

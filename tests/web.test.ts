@@ -88,6 +88,24 @@ test("serves the split web shell and planner data routes", async () => {
     assert.ok(plannerData.data.projects.length >= 1);
     assert.ok(plannerData.data.tasks.length >= 1);
 
+    const reviewResponse = await fetch(`${apiUrl}/reviews`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body: JSON.stringify({
+        project: createdJson.data.id,
+        title: "review detail smoke",
+        plannedFiles: ["src/auth.ts"],
+        editedFiles: ["src/auth.ts", "src/session.ts"],
+        checks: ["typecheck"],
+      }),
+    });
+    assert.equal(reviewResponse.ok, true);
+    const reviewJson = (await reviewResponse.json()) as { status: string; data: { id: string } };
+    assert.equal(reviewJson.status, "ok");
+
     const shellResponse = await fetch(`${webUrl}/planner`);
     assert.equal(shellResponse.ok, true);
     const shellHtml = await shellResponse.text();
@@ -99,6 +117,12 @@ test("serves the split web shell and planner data routes", async () => {
     const projectHtml = await projectResponse.text();
     assert.ok(projectHtml.includes("client.js"));
     assert.ok(projectHtml.includes("Loading /projects/"));
+
+    const reviewDetailResponse = await fetch(`${webUrl}/reviews/${reviewJson.data.id}`);
+    assert.equal(reviewDetailResponse.ok, true);
+    const reviewDetailHtml = await reviewDetailResponse.text();
+    assert.ok(reviewDetailHtml.includes("client.js"));
+    assert.ok(reviewDetailHtml.includes("Loading /reviews/"));
   } finally {
     child.kill("SIGKILL");
     await new Promise((resolve) => child.once("exit", resolve));

@@ -119,6 +119,9 @@ export function createApiClient(options: ApiClientOptions) {
     listReviews(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, "/reviews");
     },
+    getReview(reviewId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
+      return requestJson(options.baseUrl, `/reviews/${reviewId}`);
+    },
     createReview(input: ReviewRequest): Promise<{ status: "ok"; data: ReviewResponse }> {
       return requestJson(options.baseUrl, "/reviews", {
         method: "POST",

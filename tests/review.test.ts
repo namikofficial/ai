@@ -26,6 +26,7 @@ test("creates a durable review record", async () => {
   assert.equal(review.projectId, project.id);
   assert.ok(review.scopeCreep.includes("src/session.ts"));
   assert.ok(store.listReviews(project.id, 10).length > 0);
+  assert.equal(store.getReview(review.id)?.title, "auth cleanup review");
   assert.ok(store.listProjectLessons(project.id, 10).some((lesson) => lesson.title === "auth cleanup review"));
 
   store.db.close();
