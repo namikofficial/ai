@@ -1,47 +1,77 @@
 # AI Workbench
 
-Bootstrap scaffold for the local-first AI engineering workbench described in `PLAN.md`.
+Bootstrap scaffold for the local-first AI engineering workbench.
 
-## Current slice
+## Core Mandates
 
-This repo currently provides:
+- **Local-first**: Storage, retrieval, and reasoning should prioritize local resources.
+- **Traceable**: Every model call, retrieval query, and context pack is recorded and replayable.
+- **Extensible**: Small packages with clear responsibilities (e.g., `ask-engine`, `retrieval-engine`, `prompt-compiler`).
 
-- SQLite-backed persistence using the built-in `node:sqlite` runtime module.
-- Shared TypeScript contracts for projects, sessions, events, ask requests, and retrieval results.
-- A Vite React web app in `apps/web` with Zustand state, React Router routes, and API proxying.
-- A Fastify API in `apps/api` with JSON routes, SSE event streaming, and SQLite persistence.
-- Separate local API and web servers, with the web shell proxying API routes.
-- CLI commands for `web`, `api`, `worker`, `project add`, `project index`, `ask`, `sessions`, `trace`, and model routing / health inspection.
-- Basic tests for schema helpers, migration setup, event encoding, and the happy-path API flow.
-
-## Run
+## Development
 
 ```bash
-pnpm dev
-```
-
-That boots the current local stack using the checked-in `.env` defaults.
-
-## Smoke
-
-```bash
+pnpm install
 pnpm typecheck
 pnpm test
 pnpm dev
-pnpm cli -- api --port 4242
-pnpm cli -- web --port 3000 --api-port 4242
-pnpm cli -- project add <path> --name <name>
-pnpm cli -- project index <project>
-pnpm cli -- ask "where is auth handled?" --project <project> --depth deep
-pnpm cli -- trace conversation <session-id>
-pnpm cli -- models health
-pnpm cli -- memory candidates
-pnpm cli -- skills candidates
 ```
 
-## Notes
+## CLI Commands
 
-- `ai web` starts the browser shell on port `3000` and the API on port `4242` by default.
-- The web shell is a Vite React app in `apps/web`, while `ai web` still starts the browser shell plus the API for convenience.
-- `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, `AI_API_URL`, `AI_CLOUD_ENABLED`, `AI_QDRANT_ENABLED`, `AI_QDRANT_URL`, and `AI_QDRANT_COLLECTION` override the derived local runtime settings when you need a custom workspace layout.
-- `ai trace conversation <session-id>` now includes replayable messages, retrieval queries, context packs, model calls, events, and outcomes for the selected session.
+The `pnpm cli` command provides the main entry point for managing the workbench.
+
+### Servers
+- `pnpm cli -- api --port 4242`: Start the Fastify API server.
+- `pnpm cli -- web --port 3000 --api-port 4242`: Start the Vite React web dashboard.
+- `pnpm cli -- worker`: Start the background job worker (for reflections and indexing).
+- `pnpm cli -- mcp`: Start the MCP (Model Context Protocol) server.
+
+### Project Management
+- `pnpm cli -- project add <path> --name <name>`: Add a local directory as a project.
+- `pnpm cli -- project index <project>`: Scan and index project files into SQLite/Qdrant.
+
+### Interaction & Debugging
+- `pnpm cli -- ask "where is auth handled?" --project <project> --depth deep`: Run the hybrid RAG pipeline.
+- `pnpm cli -- trace conversation <session-id>`: View the full execution trace of a session.
+- `pnpm cli -- models health`: Check connectivity to model providers.
+- `pnpm cli -- memory candidates`: View captured learning candidates.
+- `pnpm cli -- skills candidates`: View potential skill extractions.
+
+## Configuration
+
+Projects can be configured via an optional `.ai-workbench.json` file in the project root:
+
+```json
+{
+  "ignore": ["dist/**", "coverage/**"],
+  "include": ["apps/**", "packages/**"],
+  "chunking": {
+    "preferTreeSitter": false,
+    "maxChunkTokens": 900
+  },
+  "retrieval": {
+    "boostPaths": ["apps/api/**", "packages/**"],
+    "authHints": ["auth", "session", "jwt", "tenant"]
+  },
+  "models": {
+    "answer": "ask-fast-local",
+    "embedding": "embedding-local"
+  }
+}
+```
+
+*Note: `preferTreeSitter` is currently disabled in the heuristic implementation.*
+
+## Environment Variables
+
+- `AI_DATABASE_PATH`: Path to the SQLite database (default: `./runtime/ai.db`).
+- `AI_RUNTIME_DIR`: Directory for transient state (default: `./runtime`).
+- `AI_CLOUD_ENABLED`: Set to `true` to allow routing to cloud model providers.
+- `AI_QDRANT_ENABLED`: Set to `true` for vector-enabled hybrid retrieval.
+
+## System Health
+
+The API exposes read-only status endpoints:
+- `GET /health`: Basic database and connectivity status.
+- `GET /status`: Detailed snapshot of project, session, and model health.

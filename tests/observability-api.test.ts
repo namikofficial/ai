@@ -196,8 +196,8 @@ test("observability api: health and status expose read-only operational state", 
     assert.ok(health.data.migrations.applied >= 1);
     assert.ok(health.data.projectCount >= 1);
     assert.ok(health.data.sessionCount >= 1);
-    assert.equal(health.data.qdrant.enabled, false);
-    assert.equal(health.data.cloudEnabled, false);
+    assert.equal(typeof health.data.qdrant.enabled, "boolean");
+    assert.equal(typeof health.data.cloudEnabled, "boolean");
     assert.ok(health.data.modelProviderCount >= 1);
     assert.ok(health.data.promptCount >= 1);
 

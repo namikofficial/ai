@@ -1,4 +1,5 @@
 import { mkdir } from "node:fs/promises";
+import * as path from "node:path";
 import fastify from "fastify";
 import type {
   AskRequest,
@@ -188,9 +189,14 @@ function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: Conf
     url: config.qdrantUrl,
     collection: config.qdrantCollection,
   };
+  // Redact database path for safety
+  const redactedDatabasePath = config.databasePath ? `.../${path.basename(config.databasePath)}` : null;
+  const redactedRuntimeDir = config.runtimeDir ? `.../${path.basename(config.runtimeDir)}` : null;
+
   return {
     uptime: process.uptime(),
-    databasePath: config.databasePath,
+    databasePath: redactedDatabasePath,
+    runtimeDir: redactedRuntimeDir,
     databaseReachable,
     migrations: {
       applied: migrationsApplied.count,

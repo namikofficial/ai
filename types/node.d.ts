@@ -95,6 +95,14 @@ declare module "node:fs" {
     path: string,
     options?: { encoding?: BufferEncoding } | BufferEncoding,
   ): string;
+  export function writeFileSync(
+    path: string,
+    data: string | Uint8Array,
+    options?: { encoding?: string }
+  ): void;
+  export function mkdirSync(path: string, options?: { recursive?: boolean }): void;
+  export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void;
+  export function existsSync(path: string): boolean;
 }
 
 declare module "node:child_process" {

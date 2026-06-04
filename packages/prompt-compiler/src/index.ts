@@ -108,12 +108,26 @@ function normalizeMessageRole(role: string): PromptMessage["role"] {
   return role === "system" || role === "assistant" || role === "user" ? role : "assistant";
 }
 
+import { redactSecrets } from "../../safety/src/index.ts";
+
 export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
   const messages: PromptMessage[] = [];
   const includedContext: PromptContextItem[] = [];
   const omittedContext: Array<{ item: unknown; reason: string }> = [];
   const safetyNotes: string[] = [];
-  const selectedContextPack = input.selectedContextPack ?? input.contextPackItems ?? [];
+  const rawContextItems = input.selectedContextPack ?? input.contextPackItems ?? [];
+
+  // Omit duplicate context by sourceId
+  const seenSourceIds = new Set<string>();
+  const selectedContextPack: PromptContextItem[] = [];
+  for (const item of rawContextItems) {
+    if (item.sourceId && seenSourceIds.has(item.sourceId)) {
+      omittedContext.push({ item, reason: "duplicate sourceId" });
+      continue;
+    }
+    if (item.sourceId) seenSourceIds.add(item.sourceId);
+    selectedContextPack.push(item);
+  }
 
   messages.push({
     role: "system",
@@ -128,7 +142,12 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
     messages.push({ role: "system", content: `Project Rules:\n${input.projectRules.map(normalizeRule).join("\n")}` });
   }
 
-  messages.push({ role: "user", content: input.userRequest });
+  // Redact secrets from user request
+  const redactedUserRequest = redactSecrets(input.userRequest);
+  if (redactedUserRequest.redactions.length > 0) {
+    safetyNotes.push(`Redacted ${redactedUserRequest.redactions.length} secrets from user request.`);
+  }
+  messages.push({ role: "user", content: redactedUserRequest.text });
 
   if (input.previousMessages?.length) {
     messages.push(
@@ -166,7 +185,13 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
 
   if (input.retrievalChunks?.length) {
     const chunkContent = input.retrievalChunks
-      .map((chunk) => `- ${chunk.path}:${chunk.startLine}-${chunk.endLine}\n\`\`\`\n${chunk.content}\n\`\`\``)
+      .map((chunk) => {
+        const redacted = redactSecrets(chunk.content);
+        if (redacted.redactions.length > 0) {
+          safetyNotes.push(`Redacted secrets from chunk ${chunk.id} (${chunk.path})`);
+        }
+        return `- ${chunk.path}:${chunk.startLine}-${chunk.endLine}\n\`\`\`\n${redacted.text}\n\`\`\``;
+      })
       .join("\n\n");
     messages.push({ role: "system", content: `Retrieval Chunks:\n${chunkContent}` });
     includedContext.push(
@@ -177,7 +202,7 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
         sourceId: chunk.id,
         rank: index,
         tokenCount: estimateTokensFromText(chunk.content),
-        excerpt: chunk.content,
+        excerpt: redactSecrets(chunk.content).text,
         included: true,
         omissionReason: null,
         createdAt: new Date().toISOString(),
@@ -187,7 +212,13 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
 
   if (selectedContextPack.length > 0) {
     const contextContent = selectedContextPack
-      .map((item) => `Kind: ${item.kind}\nExcerpt:\n\`\`\`\n${item.excerpt}\n\`\`\``)
+      .map((item) => {
+        const redacted = redactSecrets(item.excerpt);
+        if (redacted.redactions.length > 0) {
+          safetyNotes.push(`Redacted secrets from context pack item ${item.kind} (source: ${item.sourceId})`);
+        }
+        return `Kind: ${item.kind}\nExcerpt:\n\`\`\`\n${redacted.text}\n\`\`\``;
+      })
       .join("\n\n");
     messages.push({ role: "system", content: `Selected Context Pack:\n${contextContent}` });
     includedContext.push(...selectedContextPack);
