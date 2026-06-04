@@ -20,28 +20,28 @@ This repo currently provides:
 pnpm dev
 ```
 
-That boots the web cockpit and the worker using the checked-in [.env](/home/namik/Documents/code/ai/.env) defaults.
+That boots the current local stack using the checked-in `.env` defaults.
+
+## Smoke
 
 ```bash
-node --experimental-strip-types cli/ai/src/main.ts web --port 3000 --api-port 4242
-```
-
-Other common commands:
-
-```bash
-node --experimental-strip-types cli/ai/src/main.ts api --port 4242
-node --experimental-strip-types cli/ai/src/main.ts project add ~/Documents/code/noxcrm
-node --experimental-strip-types cli/ai/src/main.ts project index noxcrm
-node --experimental-strip-types cli/ai/src/main.ts ask "where is auth handled?" --project noxcrm
-node --experimental-strip-types cli/ai/src/main.ts sessions
-node --experimental-strip-types cli/ai/src/main.ts trace <session-id>
-node --experimental-strip-types cli/ai/src/main.ts mcp
-node --experimental-strip-types cli/ai/src/main.ts worker
+pnpm typecheck
+pnpm test
+pnpm dev
+pnpm cli -- api --port 4242
+pnpm cli -- web --port 3000 --api-port 4242
+pnpm cli -- project add <path> --name <name>
+pnpm cli -- project index <project>
+pnpm cli -- ask "where is auth handled?" --project <project> --depth deep
+pnpm cli -- trace conversation <session-id>
+pnpm cli -- models health
+pnpm cli -- memory candidates
+pnpm cli -- skills candidates
 ```
 
 ## Notes
 
 - `ai web` starts the browser shell on port `3000` and the API on port `4242` by default.
-- The web shell is now a Vite React app in `apps/web`, while `ai web` still starts the browser shell plus the API for convenience.
+- The web shell is a Vite React app in `apps/web`, while `ai web` still starts the browser shell plus the API for convenience.
 - `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, `AI_API_URL`, `AI_CLOUD_ENABLED`, `AI_QDRANT_ENABLED`, `AI_QDRANT_URL`, and `AI_QDRANT_COLLECTION` override the derived local runtime settings when you need a custom workspace layout.
 - `ai trace conversation <session-id>` now includes replayable messages, retrieval queries, context packs, model calls, events, and outcomes for the selected session.

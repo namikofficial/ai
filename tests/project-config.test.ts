@@ -6,6 +6,27 @@ import { join } from "node:path";
 import { resolveProjectConfig } from "../packages/config/src/index.ts";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
 
+test("project config loader returns safe defaults when no config file exists", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-project-config-defaults-"));
+  try {
+    const project = join(workspace, "project");
+    await mkdir(project, { recursive: true });
+
+    const config = resolveProjectConfig(project);
+    assert.equal(config.sourcePath, null);
+    assert.deepEqual(config.ignore, []);
+    assert.deepEqual(config.include, []);
+    assert.equal(config.chunking.preferTreeSitter, true);
+    assert.equal(config.chunking.maxChunkTokens, 900);
+    assert.deepEqual(config.retrieval.boostPaths, []);
+    assert.deepEqual(config.retrieval.authHints, []);
+    assert.equal(config.models.answer, null);
+    assert.equal(config.models.embedding, null);
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("project config loader supports local workbench config filenames", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-project-config-"));
   try {
@@ -39,6 +60,67 @@ test("project config loader supports local workbench config filenames", async ()
       assert.equal(config.models.answer, item.answer);
       assert.equal(config.models.embedding, "embedding-local");
     }
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("project config loader reads ignore/include/chunking/retrieval/models from .ai-workbench.json", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-project-config-json-"));
+  try {
+    const project = join(workspace, "project");
+    await mkdir(project, { recursive: true });
+    await writeFile(
+      join(project, ".ai-workbench.json"),
+      JSON.stringify(
+        {
+          ignore: ["dist/**", "coverage/**"],
+          include: ["apps/**", "packages/**"],
+          chunking: {
+            preferTreeSitter: false,
+            maxChunkTokens: 1234,
+          },
+          retrieval: {
+            boostPaths: ["apps/api/**"],
+            authHints: ["auth", "session", "jwt"],
+          },
+          models: {
+            answer: "ask-deep-local",
+            embedding: "embedding-local",
+          },
+        },
+        null,
+        2,
+      ),
+    );
+
+    const config = resolveProjectConfig(project);
+    assert.equal(config.sourcePath, join(project, ".ai-workbench.json"));
+    assert.deepEqual(config.ignore, ["dist/**", "coverage/**"]);
+    assert.deepEqual(config.include, ["apps/**", "packages/**"]);
+    assert.equal(config.chunking.preferTreeSitter, false);
+    assert.equal(config.chunking.maxChunkTokens, 1234);
+    assert.deepEqual(config.retrieval.boostPaths, ["apps/api/**"]);
+    assert.deepEqual(config.retrieval.authHints, ["auth", "session", "jwt"]);
+    assert.equal(config.models.answer, "ask-deep-local");
+    assert.equal(config.models.embedding, "embedding-local");
+  } finally {
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("project config loader ignores invalid or missing config files without crashing", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-project-config-invalid-"));
+  try {
+    const project = join(workspace, "project");
+    await mkdir(project, { recursive: true });
+    await writeFile(join(project, ".ai-workbench.json"), "{ invalid json");
+
+    const config = resolveProjectConfig(project);
+    assert.equal(config.sourcePath, null);
+    assert.deepEqual(config.ignore, []);
+    assert.deepEqual(config.include, []);
+    assert.equal(config.models.answer, null);
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }

@@ -139,6 +139,63 @@ test("observability api: retrieval queries endpoints return populated data", asy
   }
 });
 
+test("observability api: health and status expose read-only operational state", async () => {
+  const ctx = await startTestServer();
+  try {
+    const add = await postJson<{ status: "ok"; data: { id: string } }>(ctx.request, "/projects", {
+      path: join(ctx.workspace, "sample"),
+      name: "sample",
+    });
+    await postJson(ctx.request, `/projects/${add.data.id}/index`, {});
+    await postJson(ctx.request, "/ask", {
+      project: add.data.id,
+      question: "where is auth handled?",
+      mode: "local",
+      depth: "standard",
+    });
+
+    const health = await getJson<{
+      status: "ok";
+      data: {
+        databaseReachable: boolean;
+        migrations: { applied: number };
+        projectCount: number;
+        sessionCount: number;
+        qdrant: { enabled: boolean; url: string | null; collection: string };
+        cloudEnabled: boolean;
+        modelProviderCount: number;
+        promptCount: number;
+      };
+    }>(ctx.request, "/health");
+    assert.equal(health.data.databaseReachable, true);
+    assert.ok(health.data.migrations.applied >= 1);
+    assert.ok(health.data.projectCount >= 1);
+    assert.ok(health.data.sessionCount >= 1);
+    assert.equal(health.data.qdrant.enabled, false);
+    assert.equal(health.data.cloudEnabled, false);
+    assert.ok(health.data.modelProviderCount >= 1);
+    assert.ok(health.data.promptCount >= 1);
+
+    const status = await getJson<{
+      status: "ok";
+      data: {
+        health: {
+          databaseReachable: boolean;
+          migrations: { applied: number };
+          projectCount: number;
+          sessionCount: number;
+        };
+        summary: { projects: number; activeSessions: number; sessions: number };
+      };
+    }>(ctx.request, "/status");
+    assert.equal(status.data.health.databaseReachable, true);
+    assert.ok(status.data.health.migrations.applied >= 1);
+    assert.ok(status.data.summary.projects >= 1);
+  } finally {
+    await ctx.close();
+  }
+});
+
 test("observability api: conversations and agent runs expose full session trace", async () => {
   const ctx = await startTestServer();
   try {

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { resolveConfig } from "../packages/config/src/index.ts";
+import { readEmbeddingConfig } from "../packages/indexer/src/config.ts";
 
 test("uses separate web and api defaults", () => {
   const config = resolveConfig();
@@ -62,5 +63,73 @@ test("honors runtime env overrides", () => {
     else process.env.AI_QDRANT_URL = previousQdrantUrl;
     if (previousQdrantCollection === undefined) delete process.env.AI_QDRANT_COLLECTION;
     else process.env.AI_QDRANT_COLLECTION = previousQdrantCollection;
+  }
+});
+
+test("embedding config defaults to heuristic safely", () => {
+  const previousProvider = process.env.AI_EMBEDDING_PROVIDER;
+  const previousModel = process.env.AI_EMBEDDING_MODEL;
+  const previousDim = process.env.AI_EMBEDDING_DIM;
+  const previousBatch = process.env.AI_EMBEDDING_BATCH_SIZE;
+  const previousCloudEnabled = process.env.AI_CLOUD_ENABLED;
+
+  delete process.env.AI_EMBEDDING_PROVIDER;
+  delete process.env.AI_EMBEDDING_MODEL;
+  delete process.env.AI_EMBEDDING_DIM;
+  delete process.env.AI_EMBEDDING_BATCH_SIZE;
+  delete process.env.AI_CLOUD_ENABLED;
+
+  try {
+    const config = readEmbeddingConfig({ env: {} });
+    assert.equal(config.provider, "heuristic");
+    assert.equal(config.model, "heuristic-embedding");
+    assert.equal(config.dimension, 32);
+    assert.equal(config.batchSize, 32);
+    assert.equal(config.cloudEnabled, false);
+  } finally {
+    if (previousProvider === undefined) delete process.env.AI_EMBEDDING_PROVIDER;
+    else process.env.AI_EMBEDDING_PROVIDER = previousProvider;
+    if (previousModel === undefined) delete process.env.AI_EMBEDDING_MODEL;
+    else process.env.AI_EMBEDDING_MODEL = previousModel;
+    if (previousDim === undefined) delete process.env.AI_EMBEDDING_DIM;
+    else process.env.AI_EMBEDDING_DIM = previousDim;
+    if (previousBatch === undefined) delete process.env.AI_EMBEDDING_BATCH_SIZE;
+    else process.env.AI_EMBEDDING_BATCH_SIZE = previousBatch;
+    if (previousCloudEnabled === undefined) delete process.env.AI_CLOUD_ENABLED;
+    else process.env.AI_CLOUD_ENABLED = previousCloudEnabled;
+  }
+});
+
+test("cloud embedding providers fall back to heuristic when cloud is disabled", () => {
+  const previousProvider = process.env.AI_EMBEDDING_PROVIDER;
+  const previousModel = process.env.AI_EMBEDDING_MODEL;
+  const previousDim = process.env.AI_EMBEDDING_DIM;
+  const previousBatch = process.env.AI_EMBEDDING_BATCH_SIZE;
+  const previousCloudEnabled = process.env.AI_CLOUD_ENABLED;
+
+  process.env.AI_EMBEDDING_PROVIDER = "openai_compat";
+  process.env.AI_EMBEDDING_MODEL = "openai-embedding";
+  process.env.AI_EMBEDDING_DIM = "1536";
+  process.env.AI_EMBEDDING_BATCH_SIZE = "16";
+  process.env.AI_CLOUD_ENABLED = "false";
+
+  try {
+    const config = readEmbeddingConfig();
+    assert.equal(config.provider, "heuristic");
+    assert.equal(config.model, "openai-embedding");
+    assert.equal(config.dimension, 1536);
+    assert.equal(config.batchSize, 16);
+    assert.equal(config.cloudEnabled, false);
+  } finally {
+    if (previousProvider === undefined) delete process.env.AI_EMBEDDING_PROVIDER;
+    else process.env.AI_EMBEDDING_PROVIDER = previousProvider;
+    if (previousModel === undefined) delete process.env.AI_EMBEDDING_MODEL;
+    else process.env.AI_EMBEDDING_MODEL = previousModel;
+    if (previousDim === undefined) delete process.env.AI_EMBEDDING_DIM;
+    else process.env.AI_EMBEDDING_DIM = previousDim;
+    if (previousBatch === undefined) delete process.env.AI_EMBEDDING_BATCH_SIZE;
+    else process.env.AI_EMBEDDING_BATCH_SIZE = previousBatch;
+    if (previousCloudEnabled === undefined) delete process.env.AI_CLOUD_ENABLED;
+    else process.env.AI_CLOUD_ENABLED = previousCloudEnabled;
   }
 });

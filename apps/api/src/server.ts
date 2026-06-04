@@ -191,6 +191,48 @@ function buildSessionTraceData(store: ReturnType<typeof createStore>, sessionId:
   };
 }
 
+function readCount(store: ReturnType<typeof createStore>, sql: string): { count: number; ok: boolean } {
+  try {
+    const row = store.db.prepare(sql).get() as { count?: number } | undefined;
+    return { count: typeof row?.count === "number" ? row.count : 0, ok: true };
+  } catch {
+    return { count: 0, ok: false };
+  }
+}
+
+function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: ConfigSnapshot): Record<string, unknown> {
+  const migrationsApplied = readCount(store, "SELECT COUNT(*) AS count FROM schema_migrations");
+  const projectCount = readCount(store, "SELECT COUNT(*) AS count FROM projects");
+  const sessionCount = readCount(store, "SELECT COUNT(*) AS count FROM agent_sessions");
+  const modelProviderCount = readCount(store, "SELECT COUNT(*) AS count FROM model_providers");
+  const promptCount = readCount(store, "SELECT COUNT(*) AS count FROM compiled_prompts");
+  const databaseReachable =
+    migrationsApplied.ok &&
+    projectCount.ok &&
+    sessionCount.ok &&
+    modelProviderCount.ok &&
+    promptCount.ok;
+  const qdrant = {
+    enabled: config.qdrantEnabled,
+    url: config.qdrantUrl,
+    collection: config.qdrantCollection,
+  };
+  return {
+    uptime: process.uptime(),
+    databasePath: config.databasePath,
+    databaseReachable,
+    migrations: {
+      applied: migrationsApplied.count,
+    },
+    projectCount: projectCount.count,
+    sessionCount: sessionCount.count,
+    qdrant,
+    cloudEnabled: config.cloudEnabled,
+    modelProviderCount: modelProviderCount.count,
+    promptCount: promptCount.count,
+  };
+}
+
 function buildSessionTimeline(store: ReturnType<typeof createStore>, sessionId: string): SessionTimelineResponse | null {
   const session = store.getSession(sessionId);
   if (!session) {
@@ -1561,7 +1603,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       try {
       if (method === "GET" && path === "/health") {
-        sendJson(res, json("ok", { uptime: process.uptime(), databasePath: config.databasePath }));
+        sendJson(res, json("ok", buildHealthSnapshot(store, config)));
         return;
       }
 
@@ -1584,10 +1626,11 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       if (method === "GET" && path === "/status") {
         const dashboard = store.dashboardSnapshot();
+        const health = buildHealthSnapshot(store, config);
         sendJson(
           res,
           json("ok", {
-            health: { uptime: process.uptime(), databasePath: config.databasePath },
+            health,
             config: {
               ...config,
               projects: store.listProjects().length,

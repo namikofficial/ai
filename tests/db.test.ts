@@ -148,6 +148,47 @@ test("falls back when qdrant is enabled but unavailable", async () => {
   }
 });
 
+test("keeps indexing and FTS working when qdrant is disabled", async () => {
+  const previousQdrantEnabled = process.env.AI_QDRANT_ENABLED;
+  const previousQdrantUrl = process.env.AI_QDRANT_URL;
+  const previousQdrantCollection = process.env.AI_QDRANT_COLLECTION;
+
+  process.env.AI_QDRANT_ENABLED = "false";
+  process.env.AI_QDRANT_URL = "http://127.0.0.1:1";
+  process.env.AI_QDRANT_COLLECTION = "ai-disabled";
+
+  const dir = await mkdtemp(join(tmpdir(), "ai-db-disabled-"));
+  const dbPath = join(dir, "ai.db");
+  await mkdir(join(dir, "src"), { recursive: true });
+  await writeFile(
+    join(dir, "README.md"),
+    [
+      "# Disabled Qdrant Project",
+      "",
+      "This README should still be indexed locally.",
+    ].join("\n"),
+  );
+
+  try {
+    const store = createStore(initializeStore(dbPath));
+    const project = store.createProject({ path: dir, name: "qdrant-disabled" });
+    await store.indexProject(project.id);
+
+    const chunks = store.searchChunks(project.id, "README", { limit: 4 });
+    assert.ok(chunks.length > 0, "indexing should still work without qdrant");
+    assert.equal(chunks[0].path, "README.md");
+    store.db.close();
+  } finally {
+    if (previousQdrantEnabled === undefined) delete process.env.AI_QDRANT_ENABLED;
+    else process.env.AI_QDRANT_ENABLED = previousQdrantEnabled;
+    if (previousQdrantUrl === undefined) delete process.env.AI_QDRANT_URL;
+    else process.env.AI_QDRANT_URL = previousQdrantUrl;
+    if (previousQdrantCollection === undefined) delete process.env.AI_QDRANT_COLLECTION;
+    else process.env.AI_QDRANT_COLLECTION = previousQdrantCollection;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("uses FTS fallback when qdrant collection dimension mismatches embedding dimension", async () => {
   const previousQdrantEnabled = process.env.AI_QDRANT_ENABLED;
   const previousQdrantUrl = process.env.AI_QDRANT_URL;
