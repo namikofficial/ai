@@ -108,60 +108,67 @@ function applyReflectionOutput(
   const session = store.getSession(sessionId);
   const projectId = session?.projectId ?? null;
   let memoryCandidates = 0;
-  for (const candidate of output.memoryCandidates) {
-    store.memory.createCandidate({
-      projectId,
-      sessionId,
-      kind: candidate.kind,
-      title: candidate.title,
-      body: candidate.body,
-      evidence: candidate.evidence as unknown as Array<Record<string, unknown>>,
-      confidence: candidate.confidence,
-      scope: candidate.scope,
-    });
-    memoryCandidates += 1;
-  }
   let skillCandidates = 0;
-  for (const candidate of output.skillCandidates) {
-    store.skills.createCandidate({
-      projectId,
-      title: candidate.title,
-      triggerTerms: candidate.triggerTerms,
-      applicableProjects: projectId ? [projectId] : [],
-      steps: candidate.steps,
-      requiredContext: candidate.requiredContext,
-      commands: candidate.commands,
-      safetyNotes: candidate.safetyNotes,
-      validation: candidate.validation,
-      exampleSessionId: candidate.exampleSessionId,
-      sourceKind: candidate.sourceKind,
-      confidence: candidate.confidence,
-    });
-    skillCandidates += 1;
-  }
   let facts = 0;
-  for (const fact of output.facts) {
-    store.memory.recordFact({
-      projectId,
-      key: fact.key,
-      value: fact.value,
-      kind: fact.kind,
-      confidence: fact.confidence,
-      sourceKind: fact.sourceKind,
-      sources: fact.sources.map((source) => ({ kind: source.kind, ref: source.ref, excerpt: source.excerpt })),
-    });
-    facts += 1;
-  }
   let retrievalFeedback = 0;
-  for (const feedback of output.retrievalFeedback) {
-    store.retrieval.recordFeedback({
-      retrievalQueryId: feedback.retrievalQueryId,
-      chunkId: feedback.chunkId,
-      rating: feedback.rating,
-      missedPath: feedback.missedPath,
-      notes: feedback.notes,
-    });
-    retrievalFeedback += 1;
+  store.db.exec("BEGIN");
+  try {
+    for (const candidate of output.memoryCandidates) {
+      store.memory.createCandidate({
+        projectId,
+        sessionId,
+        kind: candidate.kind,
+        title: candidate.title,
+        body: candidate.body,
+        evidence: candidate.evidence as unknown as Array<Record<string, unknown>>,
+        confidence: candidate.confidence,
+        scope: candidate.scope,
+      });
+      memoryCandidates += 1;
+    }
+    for (const candidate of output.skillCandidates) {
+      store.skills.createCandidate({
+        projectId,
+        title: candidate.title,
+        triggerTerms: candidate.triggerTerms,
+        applicableProjects: projectId ? [projectId] : [],
+        steps: candidate.steps,
+        requiredContext: candidate.requiredContext,
+        commands: candidate.commands,
+        safetyNotes: candidate.safetyNotes,
+        validation: candidate.validation,
+        exampleSessionId: candidate.exampleSessionId,
+        sourceKind: candidate.sourceKind,
+        confidence: candidate.confidence,
+      });
+      skillCandidates += 1;
+    }
+    for (const fact of output.facts) {
+      store.memory.recordFact({
+        projectId,
+        key: fact.key,
+        value: fact.value,
+        kind: fact.kind,
+        confidence: fact.confidence,
+        sourceKind: fact.sourceKind,
+        sources: fact.sources.map((source) => ({ kind: source.kind, ref: source.ref, excerpt: source.excerpt })),
+      });
+      facts += 1;
+    }
+    for (const feedback of output.retrievalFeedback) {
+      store.retrieval.recordFeedback({
+        retrievalQueryId: feedback.retrievalQueryId,
+        chunkId: feedback.chunkId,
+        rating: feedback.rating,
+        missedPath: feedback.missedPath,
+        notes: feedback.notes,
+      });
+      retrievalFeedback += 1;
+    }
+    store.db.exec("COMMIT");
+  } catch (error) {
+    store.db.exec("ROLLBACK");
+    throw error;
   }
   return { memoryCandidates, skillCandidates, facts, staleFacts: output.staleFacts.length, retrievalFeedback };
 }
