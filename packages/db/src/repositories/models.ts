@@ -435,24 +435,31 @@ export function createModelsRepo(db: DatabaseSync) {
         createdAt: ts,
       };
       const day = ts.slice(0, 10);
-      const existing = db
-        .prepare("SELECT * FROM model_usage_daily WHERE day = ? AND model_name = ? LIMIT 1")
-        .get(day, input.profileId) as ModelUsageDailyRow | undefined;
-      if (!existing) {
-        db.prepare(
-          `INSERT INTO model_usage_daily (
-            day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).run(day, input.profileId, record.promptTokens, record.completionTokens, 1, ts, ts);
-      } else {
-        db.prepare(
-          `UPDATE model_usage_daily
-             SET prompt_tokens = prompt_tokens + ?,
-                 completion_tokens = completion_tokens + ?,
-                 requests = requests + ?,
-                 updated_at = ?
-           WHERE day = ? AND model_name = ?`,
-        ).run(record.promptTokens, record.completionTokens, 1, ts, day, input.profileId);
+      const updated = db.prepare(
+        `UPDATE model_usage_daily
+           SET prompt_tokens = prompt_tokens + ?,
+               completion_tokens = completion_tokens + ?,
+               requests = requests + ?,
+               updated_at = ?
+         WHERE day = ? AND model_name = ?`,
+      ).run(record.promptTokens, record.completionTokens, 1, ts, day, input.profileId);
+      if (updated.changes === 0) {
+        try {
+          db.prepare(
+            `INSERT INTO model_usage_daily (
+              day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          ).run(day, input.profileId, record.promptTokens, record.completionTokens, 1, ts, ts);
+        } catch (error) {
+          db.prepare(
+            `UPDATE model_usage_daily
+               SET prompt_tokens = prompt_tokens + ?,
+                   completion_tokens = completion_tokens + ?,
+                   requests = requests + ?,
+                   updated_at = ?
+             WHERE day = ? AND model_name = ?`,
+          ).run(record.promptTokens, record.completionTokens, 1, ts, day, input.profileId);
+        }
       }
       return record;
     },
@@ -465,26 +472,7 @@ export function createModelsRepo(db: DatabaseSync) {
     }): void {
       const day = input.day ?? now().slice(0, 10);
       const ts = now();
-      const existing = db
-        .prepare("SELECT * FROM model_usage_daily WHERE day = ? AND model_name = ? LIMIT 1")
-        .get(day, input.modelName) as ModelUsageDailyRow | undefined;
-      if (!existing) {
-        db.prepare(
-          `INSERT INTO model_usage_daily (
-            day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        ).run(
-          day,
-          input.modelName,
-          input.promptTokens ?? 0,
-          input.completionTokens ?? 0,
-          input.requests ?? 0,
-          ts,
-          ts,
-        );
-        return;
-      }
-      db.prepare(
+      const updated = db.prepare(
         `UPDATE model_usage_daily
            SET prompt_tokens = prompt_tokens + ?,
                completion_tokens = completion_tokens + ?,
@@ -499,6 +487,39 @@ export function createModelsRepo(db: DatabaseSync) {
         day,
         input.modelName,
       );
+      if (updated.changes === 0) {
+        try {
+          db.prepare(
+            `INSERT INTO model_usage_daily (
+              day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            day,
+            input.modelName,
+            input.promptTokens ?? 0,
+            input.completionTokens ?? 0,
+            input.requests ?? 0,
+            ts,
+            ts,
+          );
+        } catch {
+          db.prepare(
+            `UPDATE model_usage_daily
+               SET prompt_tokens = prompt_tokens + ?,
+                   completion_tokens = completion_tokens + ?,
+                   requests = requests + ?,
+                   updated_at = ?
+             WHERE day = ? AND model_name = ?`,
+          ).run(
+            input.promptTokens ?? 0,
+            input.completionTokens ?? 0,
+            input.requests ?? 0,
+            ts,
+            day,
+            input.modelName,
+          );
+        }
+      }
     },
     listUsageDaily(limit = 50): Array<{ day: string; modelName: string; promptTokens: number; completionTokens: number; requests: number }> {
       const rows = db

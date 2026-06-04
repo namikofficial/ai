@@ -5,6 +5,7 @@ import { startWorkbenchWeb } from "../../../apps/web/src/server.ts";
 import { startWorkbenchWorker } from "../../../apps/worker/src/worker.ts";
 import { startMcpServer } from "../../../mcp/server/src/stdio.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
+import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 
 function printUsage(): void {
   console.log(`ai commands:
@@ -380,16 +381,29 @@ if (process.argv[2] === "memory") {
       process.exit(1);
     });
 } else if (process.argv[2] === "models") {
-  withDirectStore((store) => {
+  withDirectStore(async (store) => {
     const sub = process.argv[3] ?? "list";
+    const config = resolveConfig({});
+    const runtime = createModelRuntime({
+      providers: store.models.listProviders().map((provider) => ({
+        id: provider.id,
+        kind: provider.kind,
+        displayName: provider.displayName,
+        baseUrl: provider.baseUrl,
+        apiKeyEnv: provider.apiKeyEnv,
+        enabled: provider.enabled,
+      })),
+      profiles: store.models.listProfiles(),
+      cloudEnabled: config.cloudEnabled,
+    });
     if (sub === "list") {
       printJson({ providers: store.models.listProviders(), profiles: store.models.listProfiles(), routes: store.listModelRoutes(50) });
       return;
     }
     if (sub === "health") {
-      const providers = store.models.listProviders();
+      const health = await Promise.all(store.models.listProviders().map((provider) => runtime.health(provider.id)));
       const calls = store.models.listAllCalls(50);
-      printJson({ providers, recentCalls: calls, routes: store.listModelRoutes(50), usageDaily: store.models.listUsageDaily(50) });
+      printJson({ providers: store.models.listProviders(), health, recentCalls: calls, routes: store.listModelRoutes(50), usageDaily: store.models.listUsageDaily(50) });
       return;
     }
     if (sub === "route") {
@@ -400,10 +414,27 @@ if (process.argv[2] === "memory") {
       const depth = process.argv.find((arg) => arg.startsWith("--depth="))?.split("=")[1];
       const question = process.argv.find((arg) => arg.startsWith("--question="))?.split("=").slice(1).join("=");
       const goal = process.argv.find((arg) => arg.startsWith("--goal="))?.split("=").slice(1).join("=");
+      const routeDecision = runtime.route({
+        role: taskPattern.includes("plan")
+          ? "planner"
+          : taskPattern.includes("handoff")
+            ? "coder_handoff"
+            : taskPattern.includes("check")
+              ? "reviewer"
+              : "answer",
+        mode: mode === "local" || mode === "cloud" || mode === "hybrid" ? mode : "any",
+        cloudEnabled: config.cloudEnabled,
+        details: {
+          risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
+          depth: depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
+          question,
+          goal,
+        },
+      });
       const route = store.recordModelRoute({
         taskPattern,
         mode: mode === "local" || mode === "cloud" || mode === "hybrid" ? mode : "any",
-        selectedProfileId: store.recommendModelProfile(
+        selectedProfileId: routeDecision.profileId ?? store.recommendModelProfile(
           taskPattern.includes("plan") ? "plan" : taskPattern.includes("handoff") ? "handoff" : taskPattern.includes("check") ? "check" : "ask",
           {
             risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
@@ -412,32 +443,60 @@ if (process.argv[2] === "memory") {
             goal,
           },
         ),
-        reason: `cli:${taskPattern}`,
+        fallbackProfileId: routeDecision.fallbackProfileId,
+        reason: routeDecision.reason,
       });
-      printJson({ route, profile: store.models.getProfile(route.selectedProfileId) });
+      printJson({ route, profile: store.models.getProfile(route.selectedProfileId), decision: routeDecision });
       return;
     }
     if (sub === "call") {
       const role = process.argv.find((arg) => arg.startsWith("--role="))?.split("=").slice(1).join("=") ?? "summarizer";
       const prompt = process.argv.find((arg) => arg.startsWith("--prompt="))?.split("=").slice(1).join("=") ?? "";
       const profileId = process.argv.find((arg) => arg.startsWith("--profile-id="))?.split("=").slice(1).join("=") ?? null;
+      const roleForRouting =
+        role === "planner"
+          ? "planner"
+          : role === "coder_handoff"
+            ? "coder_handoff"
+            : role === "reflection"
+              ? "reflection"
+              : role === "query_rewrite"
+                ? "query_rewrite"
+                : role === "retrieval_judge"
+                  ? "retrieval_judge"
+                  : "summarizer";
       const chosenProfileId =
         profileId ??
-        store.recommendModelProfile(
-          role === "planner" ? "plan" : role === "coder_handoff" ? "handoff" : role === "reflection" ? "reflect" : "ask",
-          { question: prompt },
-        );
-      const call = store.models.recordCall({
-        profileId: chosenProfileId,
-        role: role as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
-        promptTokens: Math.ceil(prompt.length / 4),
-        completionTokens: Math.ceil(prompt.length / 8),
-        latencyMs: 0,
-        status: "ok",
-        request: { prompt, role },
-        response: { text: prompt ? `Recorded model call for ${role}.` : "Recorded empty model call." },
+        runtime.route({
+          role: roleForRouting as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
+          mode: "local",
+          cloudEnabled: config.cloudEnabled,
+          details: { question: prompt },
+        }).profileId ??
+        store.recommendModelProfile("ask", { question: prompt });
+      const callProfile = chosenProfileId ? store.models.getProfile(chosenProfileId) : null;
+      if (!callProfile) {
+        throw new Error("No model profile available for the requested role");
+      }
+      const result = await runtime.invoke(callProfile.id, {
+        role: roleForRouting as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
+        messages: [
+          { role: "system", content: "You are a local model runtime." },
+          { role: "user", content: prompt },
+        ],
+        metadata: { source: "cli", role },
       });
-      printJson({ call, profile: store.models.getProfile(chosenProfileId) });
+      const call = store.models.recordCall({
+        profileId: callProfile.id,
+        role: roleForRouting as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
+        promptTokens: result.promptTokens,
+        completionTokens: result.completionTokens,
+        latencyMs: result.latencyMs,
+        status: "ok",
+        request: { prompt, role, profileId: callProfile.id },
+        response: { text: result.text, usage: result.usage ?? null },
+      });
+      printJson({ call, profile: callProfile, result });
       return;
     }
     throw new Error(`unknown models subcommand: ${sub}`);
