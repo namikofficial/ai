@@ -331,6 +331,17 @@ export function createStore(db: DatabaseSync) {
     return runtime;
   }
 
+  async function resolveModelProfile(
+    routeInput: Parameters<ModelRuntime["route"]>[0],
+    legacyProfileId: string,
+  ): Promise<{ decision: Awaited<ReturnType<ModelRuntime["route"]>>; profileId: string }> {
+    const decision = await getRuntime().route(routeInput);
+    return {
+      decision,
+      profileId: decision.profileId ?? decision.fallbackProfileId ?? legacyProfileId,
+    };
+  }
+
   async function invokeModel(profileId: string, request: ModelInvokeRequest, options: ModelInvokeOptions = {}): Promise<ModelInvokeResult> {
     const runtime = getRuntime();
     return runtime.invoke(profileId, request, {
@@ -1153,14 +1164,16 @@ export function createStore(db: DatabaseSync) {
       const project = store.getProject(input.project);
       if (!project) throw new Error(`Unknown project: ${input.project}`);
       const risk = input.risk ?? "medium";
-      const routeDecision = getRuntime().route({
-        role: "planner",
-        mode: "local",
-        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-        details: { risk, goal: input.goal, contextTokens: Math.max(2048, Math.min(32_768, input.goal.length * 64)) },
-        fallbackProfileId: "planner-balanced-local",
-      });
-      const selectedPlannerProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile("plan", { risk, goal: input.goal });
+      const { decision: routeDecision, profileId: selectedPlannerProfile } = await resolveModelProfile(
+        {
+          role: "planner",
+          mode: "local",
+          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+          details: { risk, goal: input.goal, contextTokens: Math.max(2048, Math.min(32_768, input.goal.length * 64)) },
+          fallbackProfileId: "planner-balanced-local",
+        },
+        selectModelProfile("plan", { risk, goal: input.goal }),
+      );
       const session = store.createSession({
         projectId: project.id,
         title: `Plan: ${input.goal.slice(0, 60)}`,
@@ -1261,6 +1274,7 @@ export function createStore(db: DatabaseSync) {
       };
       let plannerModelCallId: string | null = null;
       try {
+        store.appendEvent(createEvent("model.called", { role: "planner", profileId: plannerProfileId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
         await invokeModel(
           plannerProfileId,
           {
@@ -1281,6 +1295,7 @@ export function createStore(db: DatabaseSync) {
         plannerModelCallId = modelsRepo.listCalls(session.id, 200)
           .filter((call) => call.role === "planner" && call.profileId === plannerProfileId)
           .at(-1)?.id ?? null;
+        store.appendEvent(createEvent("model.completed", { role: "planner", profileId: plannerProfileId, requestId: plannerModelCallId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
       } catch (error) {
         store.appendEvent(
           createEvent(
@@ -1290,8 +1305,6 @@ export function createStore(db: DatabaseSync) {
           ),
         );
       }
-      store.appendEvent(createEvent("model.called", { role: "planner", profileId: plannerProfileId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
-      store.appendEvent(createEvent("model.completed", { role: "planner", profileId: plannerProfileId, requestId: plannerModelCallId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
       store.appendEvent(
         createEvent("task.created", { title: "Plan generated", goal: input.goal }, { sessionId: session.id, projectId: project.id, agent: "planner" }),
       );
@@ -1446,6 +1459,7 @@ export function createStore(db: DatabaseSync) {
       const handoffProfileId = modelsRepo.getProfile("handoff-local")?.id ?? "handoff-local";
       let handoffModelCallId: string | null = null;
       try {
+        store.appendEvent(createEvent("model.called", { role: "coder_handoff", profileId: handoffProfileId, compiledId: compiled.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
         await invokeModel(
           handoffProfileId,
           {
@@ -1468,6 +1482,7 @@ export function createStore(db: DatabaseSync) {
         handoffModelCallId = modelsRepo.listCalls(session.id, 200)
           .filter((call) => call.role === "coder_handoff" && call.profileId === handoffProfileId)
           .at(-1)?.id ?? null;
+        store.appendEvent(createEvent("model.completed", { role: "coder_handoff", profileId: handoffProfileId, requestId: handoffModelCallId, compiledId: compiled.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
       } catch (error) {
         store.appendEvent(
           createEvent(
@@ -1477,8 +1492,6 @@ export function createStore(db: DatabaseSync) {
           ),
         );
       }
-      store.appendEvent(createEvent("model.called", { role: "coder_handoff", profileId: handoffProfileId, compiledId: compiled.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
-      store.appendEvent(createEvent("model.completed", { role: "coder_handoff", profileId: handoffProfileId, requestId: handoffModelCallId, compiledId: compiled.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
       const handoffAgentRun = agentsRepo.createRun({
         sessionId: session.id,
         taskId: session.activeTaskId,
@@ -1554,14 +1567,16 @@ export function createStore(db: DatabaseSync) {
       if (!project) {
         throw new Error(`Unknown project: ${projectIdentifier}`);
       }
-      const routeDecision = getRuntime().route({
-        role: "embedding",
-        mode: "local",
-        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-        details: { goal: project.path, contextTokens: 1024 },
-        fallbackProfileId: "embedding-local",
-      });
-      const selectedEmbeddingProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile("index", { goal: project.path });
+      const { decision: routeDecision, profileId: selectedEmbeddingProfile } = await resolveModelProfile(
+        {
+          role: "embedding",
+          mode: "local",
+          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+          details: { goal: project.path, contextTokens: 1024 },
+          fallbackProfileId: "embedding-local",
+        },
+        selectModelProfile("index", { goal: project.path }),
+      );
 
       const session = store.createSession({
         projectId: project.id,
@@ -1732,18 +1747,20 @@ export function createStore(db: DatabaseSync) {
       }
       const mode = input.mode ?? "local";
       const depth = input.depth ?? "standard";
-      const routeDecision = getRuntime().route({
-        role: "answer",
-        mode,
-        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-        details: {
-          depth,
-          question: input.question,
-          contextTokens: depth === "deep" ? 8192 : depth === "shallow" ? 2048 : 4096,
+      const { decision: routeDecision, profileId: selectedAnswerProfile } = await resolveModelProfile(
+        {
+          role: "answer",
+          mode,
+          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+          details: {
+            depth,
+            question: input.question,
+            contextTokens: depth === "deep" ? 8192 : depth === "shallow" ? 2048 : 4096,
+          },
+          fallbackProfileId: "ask-fast-local",
         },
-        fallbackProfileId: "ask-fast-local",
-      });
-      const selectedAnswerProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile(mode, { depth, question: input.question });
+        selectModelProfile(mode, { depth, question: input.question }),
+      );
 
       const session = store.createSession({
         projectId: project.id,
@@ -1817,6 +1834,7 @@ export function createStore(db: DatabaseSync) {
       );
       let queryRewriteCallId: string | null = null;
       try {
+        store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteProfileId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
         await invokeModel(
           queryRewriteProfileId,
           {
@@ -1838,6 +1856,7 @@ export function createStore(db: DatabaseSync) {
         queryRewriteCallId = modelsRepo.listCalls(session.id, 200)
           .filter((call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id)
           .at(-1)?.id ?? null;
+        store.appendEvent(createEvent("model.completed", { role: "query_rewrite", profileId: queryRewriteProfileId, requestId: queryRewriteCallId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       } catch (error) {
         store.appendEvent(
           createEvent(
@@ -1847,8 +1866,6 @@ export function createStore(db: DatabaseSync) {
           ),
         );
       }
-      store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteProfileId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      store.appendEvent(createEvent("model.completed", { role: "query_rewrite", profileId: queryRewriteProfileId, requestId: queryRewriteCallId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       agentsRepo.appendMessage({
         agentRunId: retrievalAgentRun.id,
         direction: "internal",
@@ -1989,6 +2006,7 @@ export function createStore(db: DatabaseSync) {
       };
       let retrievalJudgeCallId: string | null = null;
       try {
+        store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
         await invokeModel(
           retrievalJudgeProfileId,
           {
@@ -2012,6 +2030,7 @@ export function createStore(db: DatabaseSync) {
         retrievalJudgeCallId = modelsRepo.listCalls(session.id, 200)
           .filter((call) => call.role === "retrieval_judge" && call.taskId === retrievalAgentRun.id && call.retrievalQueryId === retrievalQuery.id)
           .at(-1)?.id ?? null;
+        store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, requestId: retrievalJudgeCallId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       } catch (error) {
         store.appendEvent(
           createEvent(
@@ -2021,8 +2040,6 @@ export function createStore(db: DatabaseSync) {
           ),
         );
       }
-      store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, requestId: retrievalJudgeCallId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       agentsRepo.updateRun(retrievalAgentRun.id, {
         status: "completed",
         finishedAt: now(),
@@ -2076,8 +2093,16 @@ export function createStore(db: DatabaseSync) {
       let answerCallId: string | null = null;
       if (selected.length === 0) {
         answer = buildAskFallbackAnswer(project.name, input.question);
+        store.appendEvent(
+          createEvent(
+            "answer.fallback",
+            { reason: insufficientReason, question: input.question, confidence },
+            { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "info" },
+          ),
+        );
       } else {
         try {
+          store.appendEvent(createEvent("model.called", { role: "answer", profileId: answerProfileId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
           const result = await invokeModel(
             answerProfileId,
             {
@@ -2106,6 +2131,7 @@ export function createStore(db: DatabaseSync) {
           );
           answerCallId = matchingCalls.at(-1)?.id ?? null;
           answer = buildAnswerFromCompiledPrompt(compiledAnswer, result.text, citations, confidence);
+          store.appendEvent(createEvent("model.completed", { role: "answer", profileId: answerProfileId, requestId: answerCallId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
         } catch (error) {
           answer = buildAskSynthesisFailure(input.question);
           store.appendEvent(
@@ -2117,8 +2143,6 @@ export function createStore(db: DatabaseSync) {
           );
         }
       }
-      store.appendEvent(createEvent("model.called", { role: "answer", profileId: answerProfileId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
-      store.appendEvent(createEvent("model.completed", { role: "answer", profileId: answerProfileId, requestId: answerCallId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
 
       const retrievalCompleted = createEvent(
         chunks.length === 0 ? "retrieval.low_confidence" : "retrieval.completed",

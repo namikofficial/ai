@@ -347,3 +347,5 @@ export function renderContextForPrompt(input: BuildContextPackOutput): string {
   }
   return lines.join("\n").trim();
 }
+
+export type ContextPackItem = ContextPackItemRecord;

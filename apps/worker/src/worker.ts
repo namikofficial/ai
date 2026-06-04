@@ -112,7 +112,7 @@ async function recordReflectionModelTrace(
   const compiled = compilePrompt({
     mode: "reflection",
     role: "reflection",
-    contextPackId: input.contextPacks.at(-1)?.id ?? null,
+    contextPackId: input.contextPacks.at(-1)?.id ?? undefined,
     userRequest: `Reflect on completed session ${sessionId}: ${input.session.userGoal}`,
     previousMessages: input.conversation,
     projectRules: input.existingRules,

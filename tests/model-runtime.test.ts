@@ -87,11 +87,11 @@ test("model-runtime: routes locally and blocks cloud when disabled", async () =>
     cloudEnabled: false,
   });
 
-  const localDecision = runtime.route({ role: "answer", mode: "local", cloudEnabled: false });
+  const localDecision = await runtime.route({ role: "answer", mode: "local", cloudEnabled: false });
   assert.equal(localDecision.profileId, "ask-fast-local");
   assert.equal(localDecision.blocked, false);
 
-  const cloudDecision = runtime.route({ role: "answer", mode: "cloud", cloudEnabled: false });
+  const cloudDecision = await runtime.route({ role: "answer", mode: "cloud", cloudEnabled: false });
   assert.equal(cloudDecision.profileId, null);
   assert.equal(cloudDecision.blocked, true);
   assert.equal(cloudDecision.fallbackProfileId, "ask-fast-local");
@@ -101,7 +101,7 @@ test("model-runtime: routes locally and blocks cloud when disabled", async () =>
   assert.equal(health[1].status, "disabled");
 });
 
-test("model-runtime: route scoring prefers deeper local profiles for larger context need", () => {
+test("model-runtime: route scoring prefers deeper local profiles for larger context need", async () => {
   const runtime = createModelRuntime({
     providers: [
       { id: "provider_local", kind: "heuristic", displayName: "Local", baseUrl: null, apiKeyEnv: null, enabled: true },
@@ -147,7 +147,7 @@ test("model-runtime: route scoring prefers deeper local profiles for larger cont
     cloudEnabled: false,
   });
 
-  const decision = runtime.route({
+  const decision = await runtime.route({
     role: "answer",
     mode: "local",
     cloudEnabled: false,

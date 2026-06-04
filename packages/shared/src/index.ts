@@ -298,6 +298,7 @@ export type EventType =
   | "model.called"
   | "model.completed"
   | "model.failed"
+  | "answer.fallback"
   | "check.started"
   | "check.completed"
   | "check.failed"

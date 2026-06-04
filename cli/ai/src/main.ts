@@ -477,7 +477,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       const depth = process.argv.find((arg) => arg.startsWith("--depth="))?.split("=")[1];
       const question = process.argv.find((arg) => arg.startsWith("--question="))?.split("=").slice(1).join("=");
       const goal = process.argv.find((arg) => arg.startsWith("--goal="))?.split("=").slice(1).join("=");
-      const routeDecision = runtime.route({
+      const routeDecision = await runtime.route({
         role: taskPattern.includes("plan")
           ? "planner"
           : taskPattern.includes("handoff")
@@ -530,12 +530,12 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
                   : "summarizer";
       const chosenProfileId =
         profileId ??
-        runtime.route({
+        (await runtime.route({
           role: roleForRouting as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
           mode: "local",
           cloudEnabled: config.cloudEnabled,
           details: { question: prompt },
-        }).profileId ??
+        })).profileId ??
         store.recommendModelProfile("ask", { question: prompt });
       const callProfile = chosenProfileId ? store.models.getProfile(chosenProfileId) : null;
       if (!callProfile) {
