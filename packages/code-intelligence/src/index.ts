@@ -3,6 +3,7 @@ import type { CodeEdgeRecord, CodeSymbolRecord } from "../../shared/src/index.ts
 
 export type CodeSymbol = CodeSymbolRecord;
 export type CodeEdge = CodeEdgeRecord;
+export type CodeIntelligenceResult = ExtractCodeSymbolsResult;
 
 export interface CodeChunkSpan {
   id: string;
@@ -102,7 +103,7 @@ function findBlockEnd(sourceLines: string[], startIndex: number, language: strin
       if (raw.trim().length === 0) continue;
       const indent = raw.match(/^\s*/)?.[0].length ?? 0;
       if (indent <= startIndent && !raw.trim().startsWith("#")) {
-        return index;
+        return Math.max(startIndex, index - 1);
       }
     }
     return sourceLines.length - 1;
@@ -315,9 +316,20 @@ function scanPython(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; ed
     if (!trimmed) continue;
     const indent = line.match(/^\s*/)?.[0].length ?? 0;
 
-    const importMatch = trimmed.match(/^(from\s+[\w.]+\s+)?import\s+(.+)/);
+    const fromImportMatch = trimmed.match(/^from\s+([.\w]+)\s+import\s+(.+)/);
+    if (fromImportMatch) {
+      const modulePath = fromImportMatch[1] ?? "";
+      const imported = normalizeWhitespace(fromImportMatch[2] ?? "");
+      symbols.push(makeSymbol(input, "import", modulePath, index + 1, index + 1, {
+        signature: trimmed,
+        metadata: { imported, modulePath },
+      }));
+      continue;
+    }
+
+    const importMatch = trimmed.match(/^import\s+(.+)/);
     if (importMatch) {
-      const imported = normalizeWhitespace(importMatch[2] ?? "");
+      const imported = normalizeWhitespace(importMatch[1] ?? "");
       symbols.push(makeSymbol(input, "import", imported, index + 1, index + 1, {
         signature: trimmed,
         metadata: { imported },
@@ -568,7 +580,7 @@ export function resolveLocalReference(path: string, specifier: string): string |
   return localFilePathVariants(normalized).find((candidate) => /\.[a-z0-9]+$/i.test(candidate)) ?? null;
 }
 
-export function extractCodeSymbols(input: ExtractCodeSymbolsInput): ExtractCodeSymbolsResult {
+export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeIntelligenceResult {
   const language = guessFileLanguage(input.path, input.language);
   let result: { symbols: CodeSymbol[]; edges: CodeEdge[] } = { symbols: [], edges: [] };
   switch (language) {
@@ -616,14 +628,18 @@ export function extractCodeSymbols(input: ExtractCodeSymbolsInput): ExtractCodeS
   };
 }
 
+export function extractCodeSymbols(input: ExtractCodeSymbolsInput): CodeIntelligenceResult {
+  return extractCodeIntelligence(input);
+}
+
 export function linkSymbolsToChunks(symbols: CodeSymbol[], chunks: CodeChunkSpan[]): {
   links: Array<{ symbolId: string; chunkId: string; overlapLines: number }>;
-  metadataByChunkId: Map<string, Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null }>>;
+  metadataByChunkId: Map<string, Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null; confidence: number }>>;
 } {
   const links: Array<{ symbolId: string; chunkId: string; overlapLines: number }> = [];
-  const metadataByChunkId = new Map<string, Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null }>>();
+  const metadataByChunkId = new Map<string, Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null; confidence: number }>>();
   for (const chunk of chunks) {
-    const symbolMetadata: Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null }> = [];
+    const symbolMetadata: Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null; confidence: number }> = [];
     for (const symbol of symbols) {
       const overlapStart = Math.max(symbol.startLine, chunk.startLine);
       const overlapEnd = Math.min(symbol.endLine, chunk.endLine);
@@ -636,6 +652,7 @@ export function linkSymbolsToChunks(symbols: CodeSymbol[], chunks: CodeChunkSpan
         name: symbol.name,
         qualifiedName: symbol.qualifiedName,
         signature: symbol.signature,
+        confidence: 0.9,
       });
     }
     if (symbolMetadata.length > 0) {

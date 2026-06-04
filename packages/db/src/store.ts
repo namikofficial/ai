@@ -26,6 +26,7 @@ import {
 import { searchProjectChunks } from "../../retrieval-engine/src/search.ts";
 import {
   createAgentsRepo,
+  createCodeIntelligenceRepo,
   createContextRepo,
   createConversationRepo,
   createEvalRepo,
@@ -288,6 +289,7 @@ export function createStore(db: DatabaseSync) {
   } | null = null;
 
   const conversationRepo = createConversationRepo(db);
+  const codeIntelligenceRepo = createCodeIntelligenceRepo(db);
   const retrievalRepo = createRetrievalRepo(db);
   const modelsRepo = createModelsRepo(db);
   const agentsRepo = createAgentsRepo(db);
@@ -1848,6 +1850,7 @@ export function createStore(db: DatabaseSync) {
       return store.listSessions(100);
     },
     conversation: conversationRepo,
+    codeIntelligence: codeIntelligenceRepo,
     retrieval: retrievalRepo,
     models: modelsRepo,
     agents: agentsRepo,

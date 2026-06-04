@@ -162,6 +162,7 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
       const symbol = symbolEntry.row;
       const symbolId = asString(symbol.id);
       const symbolMetadata = safeParseJson(asString(symbol.metadata_json));
+      const symbolBoost = Math.min(2.5, Math.max(0.5, symbolEntry.score * 0.5));
       const symbolChunkRows = chunkRows.all(projectId, symbolId, projectId) as Array<Record<string, unknown>>;
       for (const row of symbolChunkRows) {
         const content = asString(row.content);
@@ -177,7 +178,7 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
           startLine: toNumberOrZero(row.start_line),
           endLine: toNumberOrZero(row.end_line),
           tokenCount: toNumberOrZero(row.token_count),
-          score: chunkScore + symbolEntry.score + (toNumberOrZero(row.overlap_lines) / 10),
+          score: chunkScore + symbolBoost + (toNumberOrZero(row.overlap_lines) / 10),
           metadata: {
             ...metadata,
             codeSymbols: [
@@ -192,7 +193,8 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
             ],
             symbolMatch: {
               symbolId,
-              score: symbolEntry.score,
+              score: symbolBoost,
+              reason: "symbol-match",
             },
           },
         });
@@ -219,7 +221,7 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
             startLine: toNumberOrZero(row.start_line),
             endLine: toNumberOrZero(row.end_line),
             tokenCount: toNumberOrZero(row.token_count),
-            score: chunkScore + (symbolEntry.score * 0.5) + toNumberOrZero(edge.confidence ?? 0),
+            score: chunkScore + (symbolBoost * 0.5) + toNumberOrZero(edge.confidence ?? 0),
             metadata: {
               ...metadata,
               graphExpansion: {

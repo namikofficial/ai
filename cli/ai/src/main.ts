@@ -23,6 +23,8 @@ function printUsage(): void {
   ai project add <path> [--name <name>]
   ai project index <project>
   ai project graph <project>
+  ai project symbols <project> [--query <text>] [--limit <n>]
+  ai project symbol <symbol-id>
   ai ask "<question>" --project <project>
   ai context explain "<question>" --project <project>
   ai config show --project <project>
@@ -86,6 +88,11 @@ function parseArgs(argv: string[]) {
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function openLocalStore() {
+  const config = resolveConfig();
+  return createStore(initializeStore(config.databasePath));
 }
 
 function parseJson<T>(value: string | null): T | null {
@@ -301,6 +308,50 @@ async function run(): Promise<void> {
       }
       const result = await client.getProjectGraph(project);
       printJson(result);
+      return;
+    }
+    if (subcommand === "symbols") {
+      const projectIdentifier = positionals.shift();
+      if (!projectIdentifier) {
+        throw new Error("project symbols requires a project identifier");
+      }
+      const store = openLocalStore();
+      try {
+        const project = store.getProject(projectIdentifier);
+        if (!project) {
+          throw new Error(`Unknown project: ${projectIdentifier}`);
+        }
+        const symbols = store.codeIntelligence.listSymbols(project.id, options.query ?? null, Number(options.limit ?? 50) || 50);
+        printJson({
+          project,
+          query: options.query ?? null,
+          limit: Number(options.limit ?? 50) || 50,
+          symbols,
+        });
+      } finally {
+        store.db.close();
+      }
+      return;
+    }
+    if (subcommand === "symbol") {
+      const symbolId = positionals.shift();
+      if (!symbolId) {
+        throw new Error("project symbol requires a symbol id");
+      }
+      const store = openLocalStore();
+      try {
+        const symbol = store.codeIntelligence.getSymbol(symbolId);
+        if (!symbol) {
+          throw new Error(`Unknown symbol: ${symbolId}`);
+        }
+        printJson({
+          symbol,
+          chunks: store.codeIntelligence.listSymbolChunks(symbolId),
+          edges: store.codeIntelligence.listEdgesForSymbol(symbolId),
+        });
+      } finally {
+        store.db.close();
+      }
       return;
     }
   }

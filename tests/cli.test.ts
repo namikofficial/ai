@@ -105,6 +105,70 @@ test("ai retrieval explain runs the full pipeline and prints ranked/selected/dro
   assert.ok(output.ranked.length >= 1, "expected at least one ranked chunk");
 });
 
+test("ai project symbols and symbol inspect code intelligence rows", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-cli-symbols-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, ".ai-workbench.json"),
+    JSON.stringify({
+      include: ["src/**"],
+      codeIntelligence: {
+        enabled: true,
+      },
+    }),
+  );
+  await writeFile(
+    join(repo, "src", "auth.ts"),
+    [
+      "export function handleLogin() {",
+      "  return { ok: true };",
+      "}",
+    ].join("\n"),
+  );
+
+  const dbPath = join(workspace, "ai.db");
+  const runtimeDir = join(workspace, "runtime");
+  const store = createStore(initializeStore(dbPath));
+  const project = store.createProject({ path: repo, name: "repo" });
+  await store.indexProject(project.id);
+  const symbols = store.codeIntelligence.listSymbols(project.id, "handleLogin", 10);
+  assert.ok(symbols.length > 0);
+  const symbolId = symbols[0]!.id;
+  store.db.close();
+
+  const list = await runCli(
+    {
+      AI_DATABASE_PATH: dbPath,
+      AI_RUNTIME_DIR: runtimeDir,
+    },
+    ["project", "symbols", project.id, "--query", "handleLogin"],
+  );
+  assert.equal(list.exitCode, 0, `project symbols failed: ${list.stderr}`);
+  const listOutput = JSON.parse(list.stdout) as { project: { id: string }; symbols: Array<{ id: string }> };
+  assert.equal(listOutput.project.id, project.id);
+  assert.ok(listOutput.symbols.some((symbol) => symbol.id === symbolId));
+
+  const single = await runCli(
+    {
+      AI_DATABASE_PATH: dbPath,
+      AI_RUNTIME_DIR: runtimeDir,
+    },
+    ["project", "symbol", symbolId],
+  );
+  assert.equal(single.exitCode, 0, `project symbol failed: ${single.stderr}`);
+  const singleOutput = JSON.parse(single.stdout) as {
+    symbol: { id: string; name: string };
+    chunks: Array<{ symbolId: string }>;
+    edges: unknown[];
+  };
+  assert.equal(singleOutput.symbol.id, symbolId);
+  assert.equal(singleOutput.symbol.name, "handleLogin");
+  assert.ok(singleOutput.chunks.length > 0);
+
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("ai models list and health run via direct store", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-cli-models-"));
   const dbPath = join(workspace, "ai.db");

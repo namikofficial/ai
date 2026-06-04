@@ -3,12 +3,13 @@ import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractCodeSymbols, linkSymbolsToChunks } from "../packages/code-intelligence/src/index.ts";
+import { extractCodeIntelligence, linkSymbolsToChunks } from "../packages/code-intelligence/src/index.ts";
 import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { indexProject } from "../packages/indexer/src/index.ts";
 import { searchProjectChunks } from "../packages/retrieval-engine/src/search.ts";
 
-test("code-intelligence: extracts symbols and links them to chunks", () => {
-  const result = extractCodeSymbols({
+test("code-intelligence: extracts TypeScript symbols and links them to chunks", () => {
+  const result = extractCodeIntelligence({
     projectId: "p1",
     fileId: "f1",
     path: "src/auth.ts",
@@ -39,12 +40,45 @@ test("code-intelligence: extracts symbols and links them to chunks", () => {
   const links = linkSymbolsToChunks(result.symbols, chunks);
   assert.ok(links.links.length > 0);
   assert.ok(links.metadataByChunkId.has("c1") || links.metadataByChunkId.has("c2"));
+  assert.ok(Array.from(links.metadataByChunkId.values()).flat().every((entry) => entry.confidence > 0));
+});
+
+test("code-intelligence: extracts Python symbols with fallback parsing", () => {
+  const result = extractCodeIntelligence({
+    projectId: "p1",
+    fileId: "f2",
+    path: "src/auth.py",
+    language: "python",
+    content: [
+      "from .router import router",
+      "",
+      "class AuthService:",
+      "    def login(self, user):",
+      "        return user",
+      "",
+      "def handle_login(user):",
+      "    return router",
+    ].join("\n"),
+  });
+
+  assert.ok(result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService"));
+  assert.ok(result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handle_login"));
+  assert.ok(result.symbols.some((symbol) => symbol.kind === "import"));
 });
 
 test("code-intelligence: indexing reuses changed-file ids and refreshes symbol rows", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-code-intel-"));
   const repo = join(workspace, "repo");
   await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, ".ai-workbench.json"),
+    JSON.stringify({
+      include: ["src/**"],
+      codeIntelligence: {
+        enabled: true,
+      },
+    }),
+  );
   await writeFile(
     join(repo, "src", "auth.ts"),
     [
@@ -89,10 +123,66 @@ test("code-intelligence: indexing reuses changed-file ids and refreshes symbol r
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("code-intelligence: indexer continues when symbol extraction fails", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-code-intel-fail-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, "src", "auth.ts"),
+    [
+      "export function handleLogin() {",
+      "  return { ok: true };",
+      "}",
+    ].join("\n"),
+  );
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "repo" });
+  const result = await indexProject({
+    db: store.db,
+    projectId: project.id,
+    projectPath: repo,
+    projectConfig: {
+      ignore: [],
+      include: ["src/**"],
+      chunking: { preferTreeSitter: true, maxChunkTokens: 900 },
+      codeIntelligence: { enabled: true },
+      retrieval: { boostPaths: [], authHints: [] },
+      models: { answer: null, embedding: null },
+    },
+    qdrant: null,
+    embedBatch: async () => ({ embeddings: [[0, 0, 0]], dimensions: 3, modelName: "mock", providerId: "mock" }),
+    embeddingModel: "mock",
+    embeddingProvider: "mock",
+    embeddingDimension: 3,
+    codeIntelligenceExtractor: () => {
+      throw new Error("boom");
+    },
+    onWarning: () => undefined,
+  });
+
+  assert.equal(result.filesIndexed, 1);
+  assert.equal(result.chunksIndexed, 1);
+  const symbolCount = store.db.prepare("SELECT COUNT(*) AS count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number };
+  assert.equal(symbolCount.count, 0);
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("code-intelligence: retrieval uses symbol and graph signals", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-code-search-"));
   const repo = join(workspace, "repo");
   await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, ".ai-workbench.json"),
+    JSON.stringify({
+      include: ["src/**"],
+      codeIntelligence: {
+        enabled: true,
+      },
+    }),
+  );
   await writeFile(
     join(repo, "src", "auth.ts"),
     [

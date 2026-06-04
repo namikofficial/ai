@@ -1,6 +1,7 @@
 export { createAgentsRepo, type AgentsRepo } from "./agents.ts";
 export { createContextRepo, type ContextRepo } from "./context.ts";
 export { createConversationRepo, type ConversationRepo } from "./conversation.ts";
+export { createCodeIntelligenceRepo, type CodeIntelligenceRepo } from "./code-intelligence.ts";
 export { createEvalRepo, type EvalRepo } from "./eval.ts";
 export { createMemoryRepo, type MemoryRepo } from "./memory.ts";
 export { createModelsRepo, type ModelsRepo } from "./models.ts";

@@ -78,6 +78,72 @@ test("retrieval-engine: searchProjectChunks returns heuristic, FTS, and qdrant-s
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("retrieval-engine: searchProjectChunks works when no symbols exist", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-search-no-symbols-"));
+  await mkdir(join(workspace, "src"), { recursive: true });
+  await writeFile(join(workspace, "src", "plain.ts"), "export const plain = 1;\n");
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: workspace, name: "no-symbols" });
+  await store.indexProject(project.id);
+
+  const results = searchProjectChunks({
+    db: store.db,
+    projectId: project.id,
+    query: "plain",
+    limit: 4,
+    qdrantSettings: null,
+  });
+
+  assert.ok(results.length > 0);
+  assert.ok(results.every((chunk) => !("symbolMatch" in chunk.metadata) || chunk.metadata.symbolMatch == null));
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
+
+test("retrieval-engine: searchProjectChunks gives a symbol-match boost when code symbols are indexed", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-search-symbol-boost-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, ".ai-workbench.json"),
+    JSON.stringify({
+      include: ["src/**"],
+      codeIntelligence: {
+        enabled: true,
+      },
+    }),
+  );
+  await writeFile(
+    join(repo, "src", "auth.ts"),
+    [
+      "export function handleLogin() {",
+      "  return { ok: true };",
+      "}",
+    ].join("\n"),
+  );
+  await writeFile(join(repo, "src", "misc.ts"), "export const misc = 1;\n");
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "symbol-boost" });
+  await store.indexProject(project.id);
+
+  const results = searchProjectChunks({
+    db: store.db,
+    projectId: project.id,
+    query: "what does handleLogin do?",
+    limit: 4,
+    qdrantSettings: null,
+  });
+
+  assert.ok(results.length > 0);
+  assert.ok(results.some((chunk) => (chunk.metadata as { symbolMatch?: { reason?: string } }).symbolMatch?.reason === "symbol-match"));
+  assert.equal(results[0]?.path, "src/auth.ts");
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("retrieval-engine: buildRetrievalPipelineInput keeps lexical and vector candidates separate", () => {
   const chunk = {
     id: "chunk-1",

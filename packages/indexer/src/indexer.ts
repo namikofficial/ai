@@ -10,7 +10,14 @@ import { qdrantPointForChunk, syncSearchIndexForFile, type QdrantClient, type Qd
 import { createId } from "../../shared/src/index.ts";
 import { chunkContent, hashContent, isFileSizeIndexable } from "./chunk.ts";
 import { inferLanguage, isProbablyTextFile, isReadableFile, safeReadText, walkFiles } from "./walk.ts";
-import { buildProjectContextGraph, extractCodeSymbols, linkSymbolsToChunks, resolveLocalReference, type CodeChunkSpan } from "../../code-intelligence/src/index.ts";
+import {
+  buildProjectContextGraph,
+  extractCodeIntelligence,
+  linkSymbolsToChunks,
+  resolveLocalReference,
+  type CodeChunkSpan,
+  type CodeIntelligenceResult,
+} from "../../code-intelligence/src/index.ts";
 
 export interface IndexFileResult {
   path: string;
@@ -43,6 +50,7 @@ export interface IndexProjectOptions {
     ignore: string[];
     include: string[];
     chunking: { preferTreeSitter: boolean; maxChunkTokens: number };
+    codeIntelligence: { enabled: boolean };
     retrieval: { boostPaths: string[]; authHints: string[] };
     models: { answer: string | null; embedding: string | null };
   } | null;
@@ -54,6 +62,7 @@ export interface IndexProjectOptions {
   language?: string | null;
   onWarning?: (warning: { kind: string; path: string; detail: string }) => void;
   onProgress?: (progress: { filesIndexed: number; chunksIndexed: number }) => void;
+  codeIntelligenceExtractor?: (input: Parameters<typeof extractCodeIntelligence>[0]) => CodeIntelligenceResult;
 }
 
 interface ExistingFileRow {
@@ -102,6 +111,8 @@ function globMatch(value: string, pattern: string): boolean {
 
 export async function indexProject(options: IndexProjectOptions): Promise<IndexProjectResult> {
   const { db, projectId, projectPath, projectConfig, qdrant, embedBatch, embeddingModel, embeddingProvider, embeddingDimension, onWarning, onProgress } = options;
+  const codeIntelligenceEnabled = projectConfig?.codeIntelligence?.enabled ?? false;
+  const extractIntelligence = options.codeIntelligenceExtractor ?? extractCodeIntelligence;
   const files = (await walkFiles(projectPath)).filter((path) => {
     const normalized = normalize(relative(projectPath, path));
     const ignore = projectConfig?.ignore ?? [];
@@ -210,15 +221,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       tokenCount: chunk.tokenCount,
       content: chunk.content,
     }));
-    const code = extractCodeSymbols({
-      projectId,
-      fileId,
-      path: relativePath,
-      language,
-      content,
-    });
-    const chunkLinks = linkSymbolsToChunks(code.symbols, chunkRows);
-    const existingSymbolRows = previous
+    const existingSymbolRows = codeIntelligenceEnabled && previous
       ? (db.prepare("SELECT id FROM code_symbols WHERE project_id = ? AND file_id = ?").all(projectId, fileId) as Array<{ id: string }>)
       : [];
     if (existingSymbolRows.length > 0) {
@@ -230,41 +233,68 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
         db.prepare(`DELETE FROM code_edges WHERE project_id = ? AND (from_symbol_id IN (${placeholders}) OR to_symbol_id IN (${placeholders}))`).run(projectId, ...oldIds, ...oldIds);
       }
     }
+    let code: CodeIntelligenceResult | null = null;
+    if (codeIntelligenceEnabled) {
+      try {
+        code = extractIntelligence({
+          projectId,
+          fileId,
+          path: relativePath,
+          language,
+          content,
+        });
+      } catch (error) {
+        code = null;
+        onWarning?.({
+          kind: "code-intelligence-failed",
+          path: relativePath,
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const chunkLinks = code
+      ? linkSymbolsToChunks(code.symbols, chunkRows)
+      : {
+          links: [],
+          metadataByChunkId: new Map<string, Array<{ id: string; kind: string; name: string; qualifiedName: string; signature: string | null; confidence: number }>>(),
+        };
     deleteChunks.run(documentId);
 
     upsertFile.run(fileId, projectId, relativePath, language, byteLength, contentHash, 1, 0, ts, ts, ts);
     upsertDocument.run(documentId, projectId, fileId, relativePath, contentHash, chunks.length, ts, ts, ts);
 
-    for (const symbol of code.symbols) {
-      insertSymbol.run(
-        symbol.id,
-        projectId,
-        fileId,
-        relativePath,
-        symbol.language,
-        symbol.kind,
-        symbol.name,
-        symbol.qualifiedName,
-        symbol.startLine,
-        symbol.endLine,
-        symbol.signature,
-        symbol.doc,
-        JSON.stringify(symbol.metadata),
-        ts,
-        ts,
-      );
-    }
-    for (const edge of code.edges) {
-      insertEdge.run(
-        edge.id,
-        projectId,
-        edge.fromSymbolId,
-        edge.toSymbolId,
-        edge.kind,
-        edge.confidence,
-        JSON.stringify(edge.metadata),
-        ts,
-      );
+    if (code) {
+      for (const symbol of code.symbols) {
+        insertSymbol.run(
+          symbol.id,
+          projectId,
+          fileId,
+          relativePath,
+          symbol.language,
+          symbol.kind,
+          symbol.name,
+          symbol.qualifiedName,
+          symbol.startLine,
+          symbol.endLine,
+          symbol.signature,
+          symbol.doc,
+          JSON.stringify(symbol.metadata),
+          ts,
+          ts,
+        );
+      }
+      for (const edge of code.edges) {
+        insertEdge.run(
+          edge.id,
+          projectId,
+          edge.fromSymbolId,
+          edge.toSymbolId,
+          edge.kind,
+          edge.confidence,
+          JSON.stringify(edge.metadata),
+          ts,
+        );
+      }
     }
 
     const embeddingInput = chunks.map((chunk) => `${relativePath}\n${chunk.content}`);
@@ -310,20 +340,22 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
         embeddingResult.dimensions || null,
         embeddingResult.providerId,
       );
-      for (const symbol of code.symbols) {
-        if (chunkLinks.links.some((link) => link.symbolId === symbol.id && link.chunkId === chunk.id)) {
-          const overlaps = chunkLinks.links.filter((link) => link.symbolId === symbol.id && link.chunkId === chunk.id);
-          insertSymbolChunk.run(
-            createId("cs"),
-            projectId,
-            fileId,
-            symbol.id,
-            chunk.id,
-            chunk.startLine,
-            chunk.endLine,
-            overlaps[0]?.overlapLines ?? 0,
-            ts,
-          );
+      if (code) {
+        for (const symbol of code.symbols) {
+          if (chunkLinks.links.some((link) => link.symbolId === symbol.id && link.chunkId === chunk.id)) {
+            const overlaps = chunkLinks.links.filter((link) => link.symbolId === symbol.id && link.chunkId === chunk.id);
+            insertSymbolChunk.run(
+              createId("cs"),
+              projectId,
+              fileId,
+              symbol.id,
+              chunk.id,
+              chunk.startLine,
+              chunk.endLine,
+              overlaps[0]?.overlapLines ?? 0,
+              ts,
+            );
+          }
         }
       }
       if (qdrant && vector.length > 0) {
@@ -353,39 +385,41 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
   }
 
   try {
-    const importRows = db
-      .prepare("SELECT id, path, metadata_json FROM code_symbols WHERE project_id = ? AND kind = 'import'")
-      .all(projectId) as Array<Record<string, unknown>>;
-    const targetRows = db
-      .prepare("SELECT id, path, name, qualified_name, kind FROM code_symbols WHERE project_id = ? AND kind != 'import'")
-      .all(projectId) as Array<Record<string, unknown>>;
-    for (const importRow of importRows) {
-      const sourcePath = String(importRow.path);
-      const metadata = JSON.parse(String(importRow.metadata_json || "{}")) as Record<string, unknown>;
-      const modulePath = String(metadata.modulePath ?? metadata.imported ?? "");
-      const resolvedPath = resolveLocalReference(sourcePath, modulePath);
-      if (!resolvedPath) continue;
-      const importedNames = String(metadata.imported ?? "")
-        .split(/[^A-Za-z0-9_$]+/g)
-        .filter((token) => token.length > 0);
-      const targetForPath = targetRows.filter((row) => String(row.path) === resolvedPath);
-      if (targetForPath.length === 0) continue;
-      const bestTarget = importedNames.length > 0
-        ? targetForPath.find((row) => importedNames.includes(String(row.name)))
-          ?? targetForPath.find((row) => importedNames.some((name) => String(row.qualified_name).includes(name)))
-          ?? targetForPath[0]
-        : targetForPath[0];
-      if (!bestTarget) continue;
-      insertEdge.run(
-        createId("edge"),
-        projectId,
-        String(importRow.id),
-        String(bestTarget.id),
-        "imports",
-        0.8,
-        JSON.stringify({ modulePath, resolvedPath, sourcePath }),
-        ts,
-      );
+    if (codeIntelligenceEnabled) {
+      const importRows = db
+        .prepare("SELECT id, path, metadata_json FROM code_symbols WHERE project_id = ? AND kind = 'import'")
+        .all(projectId) as Array<Record<string, unknown>>;
+      const targetRows = db
+        .prepare("SELECT id, path, name, qualified_name, kind FROM code_symbols WHERE project_id = ? AND kind != 'import'")
+        .all(projectId) as Array<Record<string, unknown>>;
+      for (const importRow of importRows) {
+        const sourcePath = String(importRow.path);
+        const metadata = JSON.parse(String(importRow.metadata_json || "{}")) as Record<string, unknown>;
+        const modulePath = String(metadata.modulePath ?? metadata.imported ?? "");
+        const resolvedPath = resolveLocalReference(sourcePath, modulePath);
+        if (!resolvedPath) continue;
+        const importedNames = String(metadata.imported ?? "")
+          .split(/[^A-Za-z0-9_$]+/g)
+          .filter((token) => token.length > 0);
+        const targetForPath = targetRows.filter((row) => String(row.path) === resolvedPath);
+        if (targetForPath.length === 0) continue;
+        const bestTarget = importedNames.length > 0
+          ? targetForPath.find((row) => importedNames.includes(String(row.name)))
+            ?? targetForPath.find((row) => importedNames.some((name) => String(row.qualified_name).includes(name)))
+            ?? targetForPath[0]
+          : targetForPath[0];
+        if (!bestTarget) continue;
+        insertEdge.run(
+          createId("edge"),
+          projectId,
+          String(importRow.id),
+          String(bestTarget.id),
+          "imports",
+          0.8,
+          JSON.stringify({ modulePath, resolvedPath, sourcePath }),
+          ts,
+        );
+      }
     }
   } catch {
     // Import resolution is best-effort and should never block indexing.

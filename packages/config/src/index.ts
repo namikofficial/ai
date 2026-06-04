@@ -18,6 +18,9 @@ export interface ProjectConfig {
     preferTreeSitter: boolean;
     maxChunkTokens: number;
   };
+  codeIntelligence: {
+    enabled: boolean;
+  };
   retrieval: {
     boostPaths: string[];
     authHints: string[];
@@ -149,6 +152,9 @@ export function resolveProjectConfig(projectPath: string): ProjectConfig {
     chunking: {
       preferTreeSitter: hasConfig ? readBoolean((raw.chunking as Record<string, unknown> | undefined)?.preferTreeSitter, true) : true,
       maxChunkTokens: hasConfig ? readNumber((raw.chunking as Record<string, unknown> | undefined)?.maxChunkTokens, 900) : 900,
+    },
+    codeIntelligence: {
+      enabled: hasConfig ? readBoolean((raw.codeIntelligence as Record<string, unknown> | undefined)?.enabled, false) : false,
     },
     retrieval: {
       boostPaths: hasConfig ? readStringArray((raw.retrieval as Record<string, unknown> | undefined)?.boostPaths ?? ["apps/api/**", "packages/**"]) : [],

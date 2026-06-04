@@ -18,6 +18,7 @@ test("project config loader returns safe defaults when no config file exists", a
     assert.deepEqual(config.include, []);
     assert.equal(config.chunking.preferTreeSitter, true);
     assert.equal(config.chunking.maxChunkTokens, 900);
+    assert.equal(config.codeIntelligence.enabled, false);
     assert.deepEqual(config.retrieval.boostPaths, []);
     assert.deepEqual(config.retrieval.authHints, []);
     assert.equal(config.models.answer, null);
@@ -44,6 +45,9 @@ test("project config loader supports local workbench config filenames", async ()
         JSON.stringify(
           {
             include: item.include,
+            codeIntelligence: {
+              enabled: true,
+            },
             models: {
               answer: item.answer,
               embedding: "embedding-local",
@@ -80,6 +84,9 @@ test("project config loader reads ignore/include/chunking/retrieval/models from 
             preferTreeSitter: false,
             maxChunkTokens: 1234,
           },
+          codeIntelligence: {
+            enabled: true,
+          },
           retrieval: {
             boostPaths: ["apps/api/**"],
             authHints: ["auth", "session", "jwt"],
@@ -100,6 +107,7 @@ test("project config loader reads ignore/include/chunking/retrieval/models from 
     assert.deepEqual(config.include, ["apps/**", "packages/**"]);
     assert.equal(config.chunking.preferTreeSitter, false);
     assert.equal(config.chunking.maxChunkTokens, 1234);
+    assert.equal(config.codeIntelligence.enabled, true);
     assert.deepEqual(config.retrieval.boostPaths, ["apps/api/**"]);
     assert.deepEqual(config.retrieval.authHints, ["auth", "session", "jwt"]);
     assert.equal(config.models.answer, "ask-deep-local");
@@ -135,6 +143,9 @@ test("project graph and context explain expose code-aware selection details", as
     JSON.stringify(
       {
         include: ["src/**"],
+        codeIntelligence: {
+          enabled: true,
+        },
         retrieval: {
           boostPaths: ["src/**"],
           authHints: ["auth", "session"],
