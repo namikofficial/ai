@@ -499,6 +499,7 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
       const checks = store.listCheckRuns(200);
       const answerEvaluations = store.evals.listAnswerEvaluations(200);
       const outcomes = store.evals.listOutcomes(sessionId, 20);
+      const compiledPrompts = store.listCompiledPrompts(sessionId, 200);
       return {
         session,
         conversation: store.conversation.listMessages(sessionId, 500),
@@ -526,6 +527,7 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
         checks,
         answerEvaluations,
         outcomes,
+        compiledPrompts,
         events: store.listEvents(sessionId, asNumber(args.limit, 500)),
       };
     }

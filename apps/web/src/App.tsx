@@ -13,6 +13,8 @@ import {
   McpCallDetailPage,
   McpPage,
   ModelsPage,
+  PromptDetailPage,
+  PromptsPage,
   PlannerPage,
   ProjectDetailPage,
   ProjectsPage,
@@ -36,6 +38,7 @@ const navItems = [
   ["/tasks", "Tasks"],
   ["/agents", "Agents"],
   ["/ask", "Ask"],
+  ["/prompts", "Prompts"],
   ["/planner", "Planner"],
   ["/handoff", "Handoff"],
   ["/checks", "Checks"],
@@ -56,6 +59,7 @@ const commandItems = [
   ["/tasks", "Tasks", "Task graph and lifecycle"],
   ["/agents", "Agents", "Agent runs and context packs"],
   ["/ask", "Ask", "Retrieval-backed question answering"],
+  ["/prompts", "Prompts", "Compiled prompt traces and replay"],
   ["/planner", "Planner", "Task graph generation"],
   ["/handoff", "Handoff", "Target-specific prompt export"],
   ["/checks", "Checks", "Allowlisted validation runs"],
@@ -254,6 +258,8 @@ export function App() {
           <Route path="/agents" element={<AgentsPage />} />
           <Route path="/agents/runs/:runId" element={<AgentRunDetailPage />} />
           <Route path="/ask" element={<AskPage />} />
+          <Route path="/prompts" element={<PromptsPage />} />
+          <Route path="/prompts/:promptId" element={<PromptDetailPage />} />
           <Route path="/planner" element={<PlannerPage />} />
           <Route path="/handoff" element={<HandoffPage />} />
           <Route path="/checks" element={<ChecksPage />} />

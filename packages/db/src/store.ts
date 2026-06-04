@@ -9,17 +9,11 @@ import { seedDefaultModelCatalog } from "../../model-runtime/src/default-catalog
 import { createModelRuntime, selectModelProfile } from "../../model-runtime/src/index.ts";
 import type { ModelInvokeOptions, ModelInvokeRequest, ModelInvokeResult, ModelRuntime } from "../../model-runtime/src/index.ts";
 import { buildContextPack } from "../../context-engine/src/index.ts";
-import {
-  buildAskAnswerPrompt,
-  buildAskCitations,
-  buildAskFallbackAnswer,
-  buildAskQueryRewritePrompt,
-  buildAskRetrievalJudgePrompt,
-  buildAskSynthesisFailure,
-} from "../../ask-engine/src/index.ts";
+import { runAskWorkflow } from "../../ask-engine/src/index.ts";
 import { reflect as reflectEngine } from "../../reflection-engine/src/index.ts";
 import { indexProject as runIndexerProject } from "../../indexer/src/index.ts";
-import { buildAnswerFromCompiledPrompt, compilePrompt } from "../../prompt-compiler/src/index.ts";
+import { readEmbeddingConfig } from "../../indexer/src/config.ts";
+import { compilePrompt } from "../../prompt-compiler/src/index.ts";
 import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import {
@@ -35,6 +29,7 @@ import {
   createEvalRepo,
   createMemoryRepo,
   createModelsRepo,
+  createPromptRepo,
   createRetrievalRepo,
   createSkillsRepo,
 } from "./repositories/index.ts";
@@ -44,6 +39,7 @@ import type {
   AskResponse,
   CheckRunSummary,
   ConfigSnapshot,
+  CompiledPromptRecord,
   DashboardSnapshot,
   EventEnvelope,
   EventType,
@@ -74,14 +70,9 @@ import type {
   TaskStatus,
 } from "../../shared/src/index.ts";
 import {
-  analyzeQuery,
   buildFtsQuery,
-  classifyIntent,
   rankChunk,
-  rewriteQuery,
-  runRetrievalPipeline,
 } from "../../retrieval-engine/src/index.ts";
-import { buildRetrievalPipelineInput } from "../../retrieval-engine/src/index.ts";
 import { createEvent, createId, slugifyName } from "../../shared/src/index.ts";
 
 type Row = Record<string, unknown>;
@@ -302,6 +293,7 @@ export function createStore(db: DatabaseSync) {
   const memoryRepo = createMemoryRepo(db);
   const skillsRepo = createSkillsRepo(db);
   const evalRepo = createEvalRepo(db);
+  const promptRepo = createPromptRepo(db);
 
   seedDefaultModelCatalog(modelsRepo);
 
@@ -1260,6 +1252,11 @@ export function createStore(db: DatabaseSync) {
         },
         metadata: { sessionId: session.id, projectId: project.id, files },
       });
+      store.recordCompiledPrompt({
+        compiledPrompt: compiledPlanner,
+        sessionId: session.id,
+        taskId: persistedTaskGraph[0]?.id ?? null,
+      });
       const response: PlanResponse = {
         sessionId: session.id,
         projectId: project.id,
@@ -1438,6 +1435,12 @@ export function createStore(db: DatabaseSync) {
         metadata: { target: input.target, sessionId: session.id, contextPackId: contextPack.id },
         tokenBudget: 4096,
       });
+      store.recordCompiledPrompt({
+        compiledPrompt: compiled,
+        sessionId: session.id,
+        taskId: session.activeTaskId,
+        contextPackId: contextPack.id,
+      });
       const prompt = compiled.messages.map((m) => `${m.role}: ${m.content}`).join("\n\n");
       const selectedContext = {
         filesToInspect: files.slice(0, 4),
@@ -1550,13 +1553,14 @@ export function createStore(db: DatabaseSync) {
       };
     },
     searchChunks(projectId: string, query: string, options: SearchOptions = {}): RetrievalChunk[] {
+      const embeddingConfig = readEmbeddingConfig({ cloudEnabled: process.env.AI_CLOUD_ENABLED === "true" });
       return searchProjectChunks({
         db,
         projectId,
         query,
         limit: options.limit ?? 8,
         qdrantSettings: getActiveQdrantSettings(),
-        queryVectorDimension: 32,
+        queryVectorDimension: embeddingConfig.dimension,
       });
     },
     async addOrUpdateProject(input: ProjectCreateInput): Promise<ProjectSummary> {
@@ -1628,9 +1632,15 @@ export function createStore(db: DatabaseSync) {
       push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
 
       const embeddingProfileId = session.modelProfile ?? "embedding-local";
+      const embeddingConfig = readEmbeddingConfig({ cloudEnabled: process.env.AI_CLOUD_ENABLED === "true" });
       const qdrantSettings = getActiveQdrantSettings();
       const embeddingProfile = modelsRepo.getProfile(embeddingProfileId);
-      const qdrantClient = qdrantSettings ? new QdrantClient({ settings: qdrantSettings, initialDimension: 0 }) : null;
+      const qdrantClient = qdrantSettings ? new QdrantClient({ settings: qdrantSettings, initialDimension: embeddingConfig.dimension }) : null;
+      qdrantClient?.setDimension(embeddingConfig.dimension);
+      const qdrantDimensionState = qdrantClient?.probe() ?? null;
+      if (qdrantDimensionState && qdrantDimensionState.status === "mismatch") {
+        disableQdrant();
+      }
       const indexSummary = await runIndexerProject({
         db,
         projectId: project.id,
@@ -1639,7 +1649,7 @@ export function createStore(db: DatabaseSync) {
         embedBatch: async (inputs) => {
           return getRuntime().embed(
             embeddingProfileId,
-            { input: inputs },
+            { input: inputs, modelName: embeddingConfig.model },
             {
               sessionId: session.id,
               taskId: task.id,
@@ -1649,9 +1659,9 @@ export function createStore(db: DatabaseSync) {
             },
           );
         },
-        embeddingModel: embeddingProfile?.modelName ?? "embedding-local",
+        embeddingModel: embeddingProfile?.modelName ?? embeddingConfig.model,
         embeddingProvider: embeddingProfile?.providerId ?? "provider_heuristic_local",
-        embeddingDimension: 0,
+        embeddingDimension: embeddingConfig.dimension,
       });
       if (indexSummary.qdrantFailed) {
         disableQdrant();
@@ -1740,501 +1750,42 @@ export function createStore(db: DatabaseSync) {
       });
       return { id, ...input, createdAt: ts, updatedAt: ts };
     },
+    recordCompiledPrompt(input: {
+      compiledPrompt: CompiledPrompt;
+      sessionId?: string | null;
+      taskId?: string | null;
+      retrievalQueryId?: string | null;
+      contextPackId?: string | null;
+    }): CompiledPromptRecord {
+      return promptRepo.recordCompiledPrompt({
+        id: input.compiledPrompt.id,
+        sessionId: input.sessionId ?? null,
+        taskId: input.taskId ?? null,
+        retrievalQueryId: input.retrievalQueryId ?? null,
+        contextPackId: input.contextPackId ?? input.compiledPrompt.contextPackId ?? null,
+        mode: input.compiledPrompt.mode,
+        role: input.compiledPrompt.role,
+        messagesJson: JSON.stringify(input.compiledPrompt.messages),
+        estimatedTokens: input.compiledPrompt.estimatedTokens,
+        includedContextJson: JSON.stringify(input.compiledPrompt.includedContext),
+        omittedContextJson: JSON.stringify(input.compiledPrompt.omittedContext),
+        safetyNotesJson: JSON.stringify(input.compiledPrompt.safetyNotes),
+        outputSchemaJson: input.compiledPrompt.outputSchema == null ? null : JSON.stringify(input.compiledPrompt.outputSchema),
+      });
+    },
+    listCompiledPrompts(sessionId?: string | null, limit = 50): CompiledPromptRecord[] {
+      return promptRepo.listCompiledPrompts(sessionId ?? null, limit);
+    },
+    getCompiledPrompt(promptId: string): CompiledPromptRecord | null {
+      return promptRepo.getCompiledPrompt(promptId);
+    },
     async ask(input: AskRequest): Promise<AskResponse> {
-      const project = store.getProject(input.project);
-      if (!project) {
-        throw new Error(`Unknown project: ${input.project}`);
-      }
-      const mode = input.mode ?? "local";
-      const depth = input.depth ?? "standard";
-      const { decision: routeDecision, profileId: selectedAnswerProfile } = await resolveModelProfile(
-        {
-          role: "answer",
-          mode,
-          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-          details: {
-            depth,
-            question: input.question,
-            contextTokens: depth === "deep" ? 8192 : depth === "shallow" ? 2048 : 4096,
-          },
-          fallbackProfileId: "ask-fast-local",
-        },
-        selectModelProfile(mode, { depth, question: input.question }),
-      );
-
-      const session = store.createSession({
-        projectId: project.id,
-        title: `Ask: ${input.question.slice(0, 60)}`,
-        userGoal: input.question,
-        mode,
-        modelProfile: selectedAnswerProfile,
-        source: "cli",
+      return runAskWorkflow({
+        store,
+        runtime: getRuntime(),
+        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+        input,
       });
-      modelsRepo.recordRoute({
-        taskPattern: "ask",
-        mode,
-        selectedProfileId: selectedAnswerProfile,
-        fallbackProfileId: routeDecision.fallbackProfileId,
-        reason: `${routeDecision.reason}; depth=${depth}; blocked=${routeDecision.blocked}`,
-      });
-
-      const userMessage = conversationRepo.appendMessage({
-        sessionId: session.id,
-        projectId: project.id,
-        role: "user",
-        agent: "user",
-        content: input.question,
-        meta: { mode, depth },
-      });
-
-      const retrievalAgentRun = agentsRepo.createRun({
-        sessionId: session.id,
-        projectId: project.id,
-        agent: "retrieval_agent",
-        role: "retrieval-pipeline",
-        modelRole: "retrieval_judge",
-        risk: "low",
-        input: { question: input.question, projectId: project.id, mode, depth },
-      });
-
-      const analysis = analyzeQuery(input.question);
-      const rewritten = rewriteQuery(input.question, analysis);
-      const retrievalQuery = retrievalRepo.createQuery({
-        sessionId: session.id,
-        projectId: project.id,
-        originalQuery: input.question,
-        intent: classifyIntent(input.question, mode),
-        mode,
-        depth,
-        rewrittenQuery: rewritten.variant,
-        analysis,
-      });
-      if (rewritten.variant !== input.question.trim()) {
-        retrievalRepo.updateRewrittenQuery(retrievalQuery.id, rewritten.variant);
-      }
-      if (rewritten.terms.length > 0) {
-        retrievalRepo.createRewrite({
-          retrievalQueryId: retrievalQuery.id,
-          variant: rewritten.variant,
-          terms: rewritten.terms,
-          pathHints: rewritten.pathHints,
-          symbolHints: rewritten.symbolHints,
-          score: 1.0,
-        });
-      }
-      const queryRewriteProfileId = modelsRepo.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
-      const queryRewritePrompt = compilePrompt(
-        buildAskQueryRewritePrompt({
-          question: input.question,
-          retrievalQueryId: retrievalQuery.id,
-          intent: retrievalQuery.intent,
-          mode,
-          analysis,
-        }),
-      );
-      let queryRewriteCallId: string | null = null;
-      try {
-        store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteProfileId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-        await invokeModel(
-          queryRewriteProfileId,
-          {
-            role: "query_rewrite",
-            messages: queryRewritePrompt.messages,
-            temperature: 0,
-            maxOutputTokens: modelsRepo.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
-            metadata: {
-              compiledPrompt: queryRewritePrompt,
-              retrievalQueryId: retrievalQuery.id,
-              deterministicRewrite: rewritten,
-            },
-          },
-          {
-            sessionId: session.id,
-            retrievalQueryId: retrievalQuery.id,
-          },
-        );
-        queryRewriteCallId = modelsRepo.listCalls(session.id, 200)
-          .filter((call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id)
-          .at(-1)?.id ?? null;
-        store.appendEvent(createEvent("model.completed", { role: "query_rewrite", profileId: queryRewriteProfileId, requestId: queryRewriteCallId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      } catch (error) {
-        store.appendEvent(
-          createEvent(
-            "model.failed",
-            { role: "query_rewrite", error: error instanceof Error ? error.message : String(error), compiledId: queryRewritePrompt.id },
-            { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" },
-          ),
-        );
-      }
-      agentsRepo.appendMessage({
-        agentRunId: retrievalAgentRun.id,
-        direction: "internal",
-        role: "intent",
-        content: JSON.stringify({ intent: retrievalQuery.intent, analysis }),
-        meta: { retrievalQueryId: retrievalQuery.id },
-      });
-
-      const retrievalStarted = createEvent("retrieval.started", { question: input.question }, { sessionId: session.id, projectId: project.id, agent: "retriever" });
-      store.appendEvent(retrievalStarted);
-
-      const ftsLimit = input.depth === "deep" ? 12 : input.depth === "shallow" ? 4 : 8;
-      const pipelineInput = buildRetrievalPipelineInput(store, {
-        projectId: project.id,
-        query: rewritten.variant,
-        intent: retrievalQuery.intent,
-        mode,
-        depth,
-        ftsLimit,
-      });
-      const pipelineOutput = runRetrievalPipeline(pipelineInput);
-      const ranked = pipelineOutput.ranked;
-      const selected = pipelineOutput.selected;
-      const dropped = pipelineOutput.dropped;
-      const chunks = selected.map((entry) => entry.chunk);
-      const citations = buildAskCitations(selected);
-
-      retrievalRepo.recordResults(
-        retrievalQuery.id,
-        ranked.map((entry) => ({
-          chunkId: entry.chunk.id,
-          path: entry.chunk.path,
-          startLine: entry.chunk.startLine,
-          endLine: entry.chunk.endLine,
-          source: "heuristic",
-          baseScore: entry.baseScore,
-          finalScore: entry.finalScore,
-          included: selected.some((s) => s.chunk.id === entry.chunk.id),
-          rerankReason: entry.rerankReason,
-        })),
-      );
-      retrievalRepo.recordSelectedContext(
-        retrievalQuery.id,
-        selected.map((entry, index) => ({
-          chunkId: entry.chunk.id,
-          rank: index,
-          tokenCount: entry.chunk.tokenCount,
-          excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
-        })),
-      );
-      if (pipelineOutput.miss) {
-        retrievalRepo.recordMiss({
-          retrievalQueryId: retrievalQuery.id,
-          missedPath: pipelineOutput.miss.path,
-          confidence: pipelineOutput.confidence,
-          notes: pipelineOutput.miss.notes,
-        });
-      } else if (selected.length === 0) {
-        retrievalRepo.recordMiss({
-          retrievalQueryId: retrievalQuery.id,
-          missedPath: project.path,
-          confidence: pipelineOutput.confidence,
-          notes: "no chunks returned from hybrid retrieval",
-        });
-      }
-      const memoryEntries = memoryRepo.listEntries(project.id, undefined, 20);
-      const facts = memoryRepo.listFacts(project.id, 20);
-      const rules = memoryRepo.listProjectRules(project.id, 20);
-      const skills = skillsRepo.listSkills("active", 20);
-      const previousMessages = conversationRepo.listMessages(session.id).slice(-8);
-      const packedContext = buildContextPack({
-        sessionId: session.id,
-        projectId: project.id,
-        retrievalQueryId: retrievalQuery.id,
-        budgetTokens: 4096,
-        ranked: selected,
-        memoryEntries,
-        facts,
-        rules,
-        previousMessages,
-        skills,
-      });
-      const contextPack = contextRepo.recordPack({
-        sessionId: session.id,
-        projectId: project.id,
-        retrievalQueryId: retrievalQuery.id,
-        budgetTokens: packedContext.pack.budgetTokens,
-        usedTokens: packedContext.pack.usedTokens,
-        reason: packedContext.pack.reason ?? "ask",
-        items: packedContext.items.map((item, index) => ({
-          kind: item.kind,
-          sourceId: item.sourceId,
-          rank: item.rank ?? index,
-          tokenCount: item.tokenCount,
-          excerpt: item.excerpt,
-          included: item.included,
-          omissionReason: item.omissionReason,
-        })),
-        budgetEvents: [
-          ...packedContext.budgetEvents.map((event) => ({
-            deltaTokens: event.deltaTokens,
-            reason: event.reason,
-          })),
-          ...dropped.map((entry) => ({
-            deltaTokens: entry.chunk.tokenCount,
-            reason: `dropped:${entry.rerankReason}`,
-          })),
-        ],
-      });
-
-      const confidence = pipelineOutput.confidence;
-      const insufficientReason = selected.length === 0 ? "No matching chunks were found in the selected project." : null;
-      const retrievalJudgeProfileId = modelsRepo.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
-      const retrievalJudgePrompt = compilePrompt(
-        buildAskRetrievalJudgePrompt({
-          question: input.question,
-          retrievalQueryId: retrievalQuery.id,
-          contextPackId: contextPack.id,
-          rewrittenQuery: rewritten.variant,
-          mode,
-          depth,
-          retrievalChunks: chunks,
-          rankedCount: ranked.length,
-          selectedCount: selected.length,
-          droppedCount: dropped.length,
-        }),
-      );
-      const retrievalJudgeTrace = {
-        confidence,
-        insufficientReason,
-        confidenceNotes: pipelineOutput.confidenceNotes,
-        boost: pipelineOutput.boost,
-        miss: pipelineOutput.miss ?? null,
-        citations: citations.slice(0, 3),
-        rankedCount: ranked.length,
-        selectedCount: selected.length,
-        droppedCount: dropped.length,
-      };
-      let retrievalJudgeCallId: string | null = null;
-      try {
-        store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-        await invokeModel(
-          retrievalJudgeProfileId,
-          {
-            role: "retrieval_judge",
-            messages: retrievalJudgePrompt.messages,
-            temperature: 0,
-            maxOutputTokens: modelsRepo.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
-            metadata: {
-              compiledPrompt: retrievalJudgePrompt,
-              retrievalQueryId: retrievalQuery.id,
-              contextPackId: contextPack.id,
-              responseTrace: retrievalJudgeTrace,
-            },
-          },
-          {
-            sessionId: session.id,
-            taskId: retrievalAgentRun.id,
-            retrievalQueryId: retrievalQuery.id,
-          },
-        );
-        retrievalJudgeCallId = modelsRepo.listCalls(session.id, 200)
-          .filter((call) => call.role === "retrieval_judge" && call.taskId === retrievalAgentRun.id && call.retrievalQueryId === retrievalQuery.id)
-          .at(-1)?.id ?? null;
-        store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, requestId: retrievalJudgeCallId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      } catch (error) {
-        store.appendEvent(
-          createEvent(
-            "model.failed",
-            { role: "retrieval_judge", error: error instanceof Error ? error.message : String(error), compiledId: retrievalJudgePrompt.id },
-            { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" },
-          ),
-        );
-      }
-      agentsRepo.updateRun(retrievalAgentRun.id, {
-        status: "completed",
-        finishedAt: now(),
-        durationMs: Date.parse(now()) - Date.parse(retrievalAgentRun.startedAt),
-        output: {
-          chunkCount: selected.length,
-          rankedCount: ranked.length,
-          droppedCount: dropped.length,
-          confidence,
-          retrievalQueryId: retrievalQuery.id,
-        },
-      });
-
-      const answerAgentRun = agentsRepo.createRun({
-        sessionId: session.id,
-        projectId: project.id,
-        agent: "answer_agent",
-        role: "answer-synthesizer",
-        modelRole: "answer",
-        risk: "low",
-        input: { question: input.question, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
-      });
-      const answerProfileId = session.modelProfile ?? selectModelProfile(input.mode ?? "local", { depth: input.depth, question: input.question });
-      const compiledAnswer = compilePrompt(
-        buildAskAnswerPrompt({
-          question: input.question,
-          projectName: project.name,
-          contextPackId: contextPack.id,
-          confidence,
-          insufficientReason,
-          projectRules: rules,
-          memoryEntries,
-          facts,
-          retrievalChunks: chunks,
-          contextPackItems: contextRepo.listItems(contextPack.id)
-            .filter((item) => item.included)
-            .map((item) => ({
-              kind: item.kind,
-              rank: item.rank,
-              tokenCount: item.tokenCount,
-              excerpt: item.excerpt,
-              sourceId: item.sourceId,
-            })),
-          previousMessages,
-          sessionId: session.id,
-          retrievalQueryId: retrievalQuery.id,
-          tokenBudget: 4096,
-        }),
-      );
-      let answer: string;
-      let answerCallId: string | null = null;
-      if (selected.length === 0) {
-        answer = buildAskFallbackAnswer(project.name, input.question);
-        store.appendEvent(
-          createEvent(
-            "answer.fallback",
-            { reason: insufficientReason, question: input.question, confidence },
-            { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "info" },
-          ),
-        );
-      } else {
-        try {
-          store.appendEvent(createEvent("model.called", { role: "answer", profileId: answerProfileId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
-          const result = await invokeModel(
-            answerProfileId,
-            {
-              role: "answer",
-              messages: compiledAnswer.messages,
-              temperature: 0,
-              maxOutputTokens: modelsRepo.getProfile(answerProfileId)?.maxOutputTokens ?? 1024,
-              metadata: {
-                compiledPrompt: compiledAnswer,
-                retrievalQueryId: retrievalQuery.id,
-                contextPackId: contextPack.id,
-                citations: citations.slice(0, 5),
-                confidence,
-              },
-            },
-            {
-              sessionId: session.id,
-              taskId: answerAgentRun.id,
-              retrievalQueryId: retrievalQuery.id,
-            },
-          );
-          const matchingCalls = modelsRepo.listCalls(session.id, 200).filter((call) =>
-            call.role === "answer" &&
-            call.taskId === answerAgentRun.id &&
-            call.retrievalQueryId === retrievalQuery.id
-          );
-          answerCallId = matchingCalls.at(-1)?.id ?? null;
-          answer = buildAnswerFromCompiledPrompt(compiledAnswer, result.text, citations, confidence);
-          store.appendEvent(createEvent("model.completed", { role: "answer", profileId: answerProfileId, requestId: answerCallId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
-        } catch (error) {
-          answer = buildAskSynthesisFailure(input.question);
-          store.appendEvent(
-            createEvent(
-              "model.failed",
-              { role: "answer", error: error instanceof Error ? error.message : String(error), compiledId: compiledAnswer.id },
-              { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "warn" },
-            ),
-          );
-        }
-      }
-
-      const retrievalCompleted = createEvent(
-        chunks.length === 0 ? "retrieval.low_confidence" : "retrieval.completed",
-        {
-          question: input.question,
-          chunkCount: chunks.length,
-          confidence,
-        },
-        { sessionId: session.id, projectId: project.id, agent: "retriever" },
-      );
-      store.appendEvent(retrievalCompleted);
-
-      const summary = createEvent(
-        "session.completed",
-        {
-          summary: answer,
-        },
-        { sessionId: session.id, projectId: project.id, agent: "orchestrator" },
-      );
-      store.appendEvent(summary);
-      store.updateSession(session.id, {
-        status: "completed",
-        finishedAt: now(),
-        durationMs: 0,
-        finalSummary: answer,
-        activeTaskId: null,
-      });
-
-      conversationRepo.appendMessage({
-        sessionId: session.id,
-        projectId: project.id,
-        role: "assistant",
-        agent: "answer_agent",
-        content: answer,
-        parentMessageId: userMessage.id,
-        meta: { confidence, retrievalQueryId: retrievalQuery.id, citationCount: citations.length, contextPackId: contextPack.id, compiledId: compiledAnswer.id, modelCallId: answerCallId },
-      });
-      agentsRepo.updateRun(answerAgentRun.id, {
-        status: "completed",
-        finishedAt: now(),
-        durationMs: Date.parse(now()) - Date.parse(answerAgentRun.startedAt),
-        output: { answer, confidence, citations: citations.length, contextPackId: contextPack.id, compiledId: compiledAnswer.id, modelCallId: answerCallId },
-      });
-
-      if (chunks.length > 0) {
-        store.createLesson({
-          projectId: project.id,
-          sessionId: session.id,
-          title: `Answer: ${input.question.slice(0, 40)}`,
-          body: answer,
-          tags: ["ask", "retrieval"],
-          importance: Math.max(1, Math.round(confidence * 5)),
-        });
-        store.appendEvent(
-          createEvent(
-            "lesson.created",
-            {
-              title: `Answer: ${input.question.slice(0, 40)}`,
-              body: answer,
-              tags: ["ask", "retrieval"],
-              importance: Math.max(1, Math.round(confidence * 5)),
-            },
-            { sessionId: session.id, projectId: project.id, agent: "learning" },
-          ),
-        );
-      }
-      evalRepo.recordAnswerEvaluation({
-        sessionId: session.id,
-        retrievalQueryId: retrievalQuery.id,
-        groundedness: chunks.length > 0 ? confidence : 0,
-        citationCoverage: chunks.length > 0 ? Math.min(1, citations.length / 3) : 0,
-        contradiction: 0,
-        notes: chunks.length === 0 ? "no_chunks" : null,
-      });
-      evalRepo.recordSessionOutcome({
-        sessionId: session.id,
-        outcome: chunks.length === 0 ? "failed" : confidence >= 0.5 ? "success" : "partial",
-        score: confidence,
-        notes: chunks.length === 0 ? "no_chunks" : null,
-      });
-      enqueueReflectionJob(store, session.id, "ask", project.id);
-
-      return {
-        sessionId: session.id,
-        projectId: project.id,
-        question: input.question,
-        answer,
-        confidence,
-        citations,
-        retrievedChunks: chunks,
-        insufficientReason,
-      };
     },
     getConfig(config: ConfigSnapshot): ConfigSnapshot {
       return config;

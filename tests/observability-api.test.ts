@@ -112,11 +112,28 @@ test("observability api: retrieval queries endpoints return populated data", asy
         session: { id: string };
         modelCalls: Array<{ role: string }>;
         contextPacks: Array<{ pack: { id: string } }>;
+        compiledPrompts: Array<{ id: string; mode: string; role: string }>;
       };
     }>(ctx.request, `/sessions/${ask.data.sessionId}/trace`);
     assert.equal(trace.data.session.id, ask.data.sessionId);
     assert.ok(trace.data.modelCalls.some((call) => call.role === "answer"));
     assert.ok(trace.data.contextPacks.length > 0);
+    assert.ok(trace.data.compiledPrompts.length > 0);
+
+    const prompts = await getJson<{
+      status: "ok";
+      data: Array<{ id: string; sessionId: string | null; mode: string; role: string }>;
+    }>(ctx.request, `/prompts?sessionId=${ask.data.sessionId}`);
+    assert.ok(prompts.data.length > 0);
+    assert.equal(prompts.data[0].sessionId, ask.data.sessionId);
+
+    const promptDetail = await getJson<{
+      status: "ok";
+      data: { id: string; mode: string; role: string; messagesJson: string };
+    }>(ctx.request, `/prompts/${prompts.data[0].id}`);
+    assert.equal(promptDetail.data.id, prompts.data[0].id);
+    assert.equal(promptDetail.data.mode, prompts.data[0].mode);
+    assert.ok(promptDetail.data.messagesJson.includes("system"));
   } finally {
     await ctx.close();
   }

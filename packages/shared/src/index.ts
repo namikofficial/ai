@@ -70,6 +70,23 @@ export interface TaskRecord {
   updatedAt: string;
 }
 
+export interface CompiledPromptRecord {
+  id: string;
+  sessionId: string | null;
+  taskId: string | null;
+  retrievalQueryId: string | null;
+  contextPackId: string | null;
+  mode: string;
+  role: string;
+  messagesJson: string;
+  estimatedTokens: number;
+  includedContextJson: string;
+  omittedContextJson: string;
+  safetyNotesJson: string;
+  outputSchemaJson: string | null;
+  createdAt: string;
+}
+
 export interface RetrievalChunk {
   id: string;
   projectId: string;

@@ -30,6 +30,8 @@ function printUsage(): void {
   ai mcp calls
   ai reviews list
   ai reviews create --project <project> [--session <session-id>] [--title <title>] [--planned <files>] [--edited <files>] [--checks <checks>] [--notes <notes>]
+  ai prompts list [--session <session-id>] [--limit <n>]
+  ai prompts show <prompt-id>
   ai memory candidates [--status <pending|accepted|rejected>]
   ai memory accept <candidate-id>
   ai memory reject <candidate-id> [--reason <text>]
@@ -73,6 +75,80 @@ function parseArgs(argv: string[]) {
 
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
+}
+
+function parseJson<T>(value: string | null): T | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function formatPromptSummary(prompt: {
+  id: string;
+  sessionId: string | null;
+  mode: string;
+  role: string;
+  estimatedTokens: number;
+  createdAt: string;
+}): string {
+  return [
+    `${prompt.id}`,
+    `mode=${prompt.mode}`,
+    `role=${prompt.role}`,
+    `session=${prompt.sessionId ?? "none"}`,
+    `tokens=${prompt.estimatedTokens}`,
+    `created=${prompt.createdAt}`,
+  ].join(" | ");
+}
+
+function formatPromptDetail(prompt: {
+  id: string;
+  sessionId: string | null;
+  taskId: string | null;
+  retrievalQueryId: string | null;
+  contextPackId: string | null;
+  mode: string;
+  role: string;
+  messagesJson: string;
+  estimatedTokens: number;
+  includedContextJson: string;
+  omittedContextJson: string;
+  safetyNotesJson: string;
+  outputSchemaJson: string | null;
+  createdAt: string;
+}): string {
+  const lines = [
+    `Prompt ${prompt.id}`,
+    `Mode: ${prompt.mode}`,
+    `Role: ${prompt.role}`,
+    `Session: ${prompt.sessionId ?? "none"}`,
+    `Task: ${prompt.taskId ?? "none"}`,
+    `Retrieval Query: ${prompt.retrievalQueryId ?? "none"}`,
+    `Context Pack: ${prompt.contextPackId ?? "none"}`,
+    `Estimated Tokens: ${prompt.estimatedTokens}`,
+    `Created At: ${prompt.createdAt}`,
+    "",
+    "Messages:",
+    JSON.stringify(parseJson(prompt.messagesJson), null, 2) ?? prompt.messagesJson,
+    "",
+    "Included Context:",
+    JSON.stringify(parseJson(prompt.includedContextJson), null, 2) ?? prompt.includedContextJson,
+    "",
+    "Omitted Context:",
+    JSON.stringify(parseJson(prompt.omittedContextJson), null, 2) ?? prompt.omittedContextJson,
+    "",
+    "Safety Notes:",
+    JSON.stringify(parseJson(prompt.safetyNotesJson), null, 2) ?? prompt.safetyNotesJson,
+    "",
+    "Output Schema:",
+    JSON.stringify(parseJson(prompt.outputSchemaJson), null, 2) ?? "null",
+  ];
+  return lines.join("\n");
 }
 
 async function ensureServer(baseUrl?: string) {
@@ -575,14 +651,48 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
   }
   withDirectStore((store) => {
     const messages = store.conversation.listMessages(sessionId);
-    const runs = store.agents.listRuns(sessionId);
-    const handoffs = store.agents.listHandoffs(sessionId);
-    const queries = store.retrieval.listQueriesForSession(sessionId);
-    const packs = store.context.listPacksForSession(sessionId);
-    const modelCalls = store.models.listCalls(sessionId);
-    const events = store.listEvents(sessionId);
-    const outcomes = store.evals.listOutcomes(sessionId);
-    printJson({ messages, runs, handoffs, retrievalQueries: queries, contextPacks: packs, modelCalls, events, outcomes });
+  const runs = store.agents.listRuns(sessionId);
+  const handoffs = store.agents.listHandoffs(sessionId);
+  const queries = store.retrieval.listQueriesForSession(sessionId);
+  const packs = store.context.listPacksForSession(sessionId);
+  const compiledPrompts = store.listCompiledPrompts(sessionId, 100);
+  const modelCalls = store.models.listCalls(sessionId);
+  const events = store.listEvents(sessionId);
+  const outcomes = store.evals.listOutcomes(sessionId);
+  printJson({ messages, runs, handoffs, retrievalQueries: queries, contextPacks: packs, compiledPrompts, modelCalls, events, outcomes });
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (process.argv[2] === "prompts") {
+  withDirectStore(async (store) => {
+    const sub = process.argv[3] ?? "list";
+    if (sub === "list") {
+      const sessionId = process.argv.find((arg) => arg.startsWith("--session="))?.split("=")[1];
+      const limit = Number(process.argv.find((arg) => arg.startsWith("--limit="))?.split("=")[1] ?? 50) || 50;
+      const prompts = store.listCompiledPrompts(sessionId ?? null, limit);
+      if (prompts.length === 0) {
+        console.log("No compiled prompts found.");
+        return;
+      }
+      for (const prompt of prompts) {
+        console.log(formatPromptSummary(prompt));
+      }
+      return;
+    }
+    if (sub === "show") {
+      const id = process.argv[4];
+      if (!id) {
+        throw new Error("prompts show requires a prompt id");
+      }
+      const prompt = store.getCompiledPrompt(id);
+      if (!prompt) {
+        throw new Error(`Unknown compiled prompt: ${id}`);
+      }
+      console.log(formatPromptDetail(prompt));
+      return;
+    }
+    throw new Error(`unknown prompts subcommand: ${sub}`);
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

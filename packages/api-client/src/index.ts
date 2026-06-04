@@ -295,6 +295,16 @@ export function createApiClient(options: ApiClientOptions) {
     getSessionTrace(sessionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/trace`);
     },
+    listCompiledPrompts(input?: { sessionId?: string; limit?: number }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      const params = new URLSearchParams();
+      if (input?.sessionId) params.set("sessionId", input.sessionId);
+      if (input?.limit) params.set("limit", String(input.limit));
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return requestJson(options.baseUrl, `/prompts${suffix}`);
+    },
+    getCompiledPrompt(promptId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/prompts/${encodeURIComponent(promptId)}`);
+    },
     listEvalCases(projectId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
       return requestJson(options.baseUrl, `/eval/cases${suffix}`);

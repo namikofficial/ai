@@ -50,17 +50,16 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
 
   const judgeCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "retrieval_judge");
   assert.equal(judgeCalls.length, 1);
-  const judgeResponse = judgeCalls[0]?.response as { confidenceNotes: string[]; boost: { good: number; missed: number; bad: number }; rankedCount?: number; droppedCount?: number };
-  assert.ok(Array.isArray(judgeResponse.confidenceNotes));
-  assert.ok(judgeResponse.boost);
   const judgeRequest = judgeCalls[0]?.request as {
     metadata?: {
       compiledPrompt?: { mode?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };
-      responseTrace?: { confidence?: number };
+      responseTrace?: { confidence?: number; confidenceNotes?: string[]; boost?: { good?: number; missed?: number; bad?: number } };
     } | null;
   };
   assert.equal(judgeRequest.metadata?.compiledPrompt?.mode, "retrieval_judge");
   assert.ok(Array.isArray(judgeRequest.metadata?.compiledPrompt?.messages));
+  assert.ok(Array.isArray(judgeRequest.metadata?.responseTrace?.confidenceNotes));
+  assert.ok(judgeRequest.metadata?.responseTrace?.boost);
 
   const rewriteCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "query_rewrite");
   assert.equal(rewriteCalls.length, 1, "ask should record exactly one query rewrite model call");

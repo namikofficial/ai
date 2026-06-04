@@ -1,9 +1,54 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initializeStore, createStore } from "../packages/db/src/store.ts";
+
+async function startQdrantStub(vectorSize: number): Promise<{
+  url: string;
+  counts: { gets: number; puts: number; searches: number };
+  close(): Promise<void>;
+}> {
+  type QdrantStubServer = ReturnType<typeof createServer>;
+  const counts = { gets: 0, puts: 0, searches: 0 };
+  const server = createServer(async (req, res) => {
+    const url = req.url ?? "/";
+    if (req.method === "GET" && url.startsWith("/collections/")) {
+      counts.gets += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ result: { config: { params: { vectors: { size: vectorSize } } } } }));
+      return;
+    }
+    if (req.method === "POST" && url.includes("/points/search")) {
+      counts.searches += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ result: [] }));
+      return;
+    }
+    if (req.method === "PUT") {
+      counts.puts += 1;
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ result: true }));
+      return;
+    }
+    res.writeHead(404, { "content-type": "application/json" });
+    res.end(JSON.stringify({ error: "not found" }));
+  });
+  await new Promise<void>((resolve) => {
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = (server as any).address();
+  if (!address || typeof address === "string") {
+    throw new Error("failed to start qdrant stub");
+  }
+  return {
+    url: `http://127.0.0.1:${address.port}`,
+    counts,
+    close: () => new Promise<void>((resolve) => (server as QdrantStubServer).close(() => resolve())),
+  };
+}
 
 test("applies the migration and stores projects", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ai-db-"));
@@ -99,6 +144,56 @@ test("falls back when qdrant is enabled but unavailable", async () => {
     else process.env.AI_QDRANT_URL = previousQdrantUrl;
     if (previousQdrantCollection === undefined) delete process.env.AI_QDRANT_COLLECTION;
     else process.env.AI_QDRANT_COLLECTION = previousQdrantCollection;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("uses FTS fallback when qdrant collection dimension mismatches embedding dimension", async () => {
+  const previousQdrantEnabled = process.env.AI_QDRANT_ENABLED;
+  const previousQdrantUrl = process.env.AI_QDRANT_URL;
+  const previousQdrantCollection = process.env.AI_QDRANT_COLLECTION;
+  const previousEmbeddingDim = process.env.AI_EMBEDDING_DIM;
+
+  const stub = await startQdrantStub(384);
+  process.env.AI_QDRANT_ENABLED = "true";
+  process.env.AI_QDRANT_URL = stub.url;
+  process.env.AI_QDRANT_COLLECTION = "ai-test-dimension";
+  process.env.AI_EMBEDDING_DIM = "384";
+
+  const dir = await mkdtemp(join(tmpdir(), "ai-db-dim-"));
+  const dbPath = join(dir, "ai.db");
+  await mkdir(join(dir, "src"), { recursive: true });
+  await writeFile(
+    join(dir, "README.md"),
+    [
+      "# Dimension Mismatch Project",
+      "",
+      "Auth is documented here and should still be found by FTS.",
+    ].join("\n"),
+  );
+  await writeFile(join(dir, "src", "auth.ts"), "export const authNote = 'auth handled here';\n");
+
+  try {
+    const store = createStore(initializeStore(dbPath));
+    const project = store.createProject({ path: dir, name: "dimension-mismatch" });
+    await store.indexProject(project.id);
+    assert.ok(stub.counts.gets >= 1, "qdrant collection should be probed");
+    assert.equal(stub.counts.puts, 0, "qdrant upsert should be skipped on dimension mismatch");
+
+    const chunks = store.searchChunks(project.id, "auth handled", { limit: 4 });
+    assert.ok(chunks.length > 0, "FTS should still return chunks");
+    assert.ok(chunks[0].path.includes("auth"), "FTS should still surface auth-related content");
+    store.db.close();
+  } finally {
+    await stub.close();
+    if (previousQdrantEnabled === undefined) delete process.env.AI_QDRANT_ENABLED;
+    else process.env.AI_QDRANT_ENABLED = previousQdrantEnabled;
+    if (previousQdrantUrl === undefined) delete process.env.AI_QDRANT_URL;
+    else process.env.AI_QDRANT_URL = previousQdrantUrl;
+    if (previousQdrantCollection === undefined) delete process.env.AI_QDRANT_COLLECTION;
+    else process.env.AI_QDRANT_COLLECTION = previousQdrantCollection;
+    if (previousEmbeddingDim === undefined) delete process.env.AI_EMBEDDING_DIM;
+    else process.env.AI_EMBEDDING_DIM = previousEmbeddingDim;
     await rm(dir, { recursive: true, force: true });
   }
 });

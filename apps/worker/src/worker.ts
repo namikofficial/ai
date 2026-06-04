@@ -140,6 +140,11 @@ async function recordReflectionModelTrace(
     metadata: { sessionId, projectId: input.session.projectId },
     tokenBudget: 4096,
   });
+  store.recordCompiledPrompt({
+    compiledPrompt: compiled,
+    sessionId,
+    contextPackId: input.contextPacks.at(-1)?.id ?? undefined,
+  });
   await store.invokeModel(
     "reflection-local",
     {

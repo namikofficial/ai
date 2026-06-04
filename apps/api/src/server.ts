@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import fastify from "fastify";
-import type { AskRequest, ConfigSnapshot, EventEnvelope, HandoffRequest, PlanRequest, ProjectSummary } from "../../../packages/shared/src/index.ts";
+import type { AskRequest, CompiledPromptRecord, ConfigSnapshot, EventEnvelope, HandoffRequest, PlanRequest, ProjectSummary } from "../../../packages/shared/src/index.ts";
 import { createEvent, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
@@ -95,6 +95,14 @@ function safeParseList(value: string): string[] {
     return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
   } catch {
     return [];
+  }
+}
+
+function safeParseJson(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
   }
 }
 
@@ -377,6 +385,85 @@ function renderSessionDetailPage(store: ReturnType<typeof createStore>, sessionI
     sessionCount: store.listSessions(1000).length,
     activeSessionCount: store.dashboardSnapshot().activeSessions,
     liveStatus: session.status,
+  });
+}
+
+function renderCompiledPromptItem(prompt: CompiledPromptRecord): string {
+  return `<div class="list-item">
+    <div class="row"><strong>${escapeHtml(prompt.mode)}</strong><span class="badge">${escapeHtml(prompt.role)}</span></div>
+    <div class="tiny">${escapeHtml(prompt.id)}${prompt.sessionId ? ` · session ${escapeHtml(prompt.sessionId)}` : ""}</div>
+    <div class="tiny">${escapeHtml(String(prompt.estimatedTokens))} tokens · ${escapeHtml(prompt.createdAt)}</div>
+  </div>`;
+}
+
+function renderCompiledPromptPage(store: ReturnType<typeof createStore>, promptId: string): string {
+  const prompt = store.getCompiledPrompt(promptId);
+  if (!prompt) {
+    return pageShell("Prompt not found", `/prompts/${promptId}`, {
+      contentHtml: renderCard("Missing prompt", `No compiled prompt found for <code>${escapeHtml(promptId)}</code>.`),
+      projects: store.listProjects(),
+      projectCount: store.listProjects().length,
+      sessionCount: store.listSessions(1000).length,
+      activeSessionCount: store.dashboardSnapshot().activeSessions,
+      liveStatus: "missing",
+    });
+  }
+
+  const messages = safeParseJson(prompt.messagesJson);
+  const includedContext = safeParseJson(prompt.includedContextJson);
+  const omittedContext = safeParseJson(prompt.omittedContextJson);
+  const safetyNotes = safeParseJson(prompt.safetyNotesJson);
+  const outputSchema = prompt.outputSchemaJson ? safeParseJson(prompt.outputSchemaJson) : null;
+  const contentHtml = [
+    renderCard(
+      "Prompt Summary",
+      renderKeyValueList([
+        ["Mode", prompt.mode],
+        ["Role", prompt.role],
+        ["Tokens", String(prompt.estimatedTokens)],
+        ["Session", prompt.sessionId ?? "none"],
+        ["Task", prompt.taskId ?? "none"],
+        ["Retrieval Query", prompt.retrievalQueryId ?? "none"],
+        ["Context Pack", prompt.contextPackId ?? "none"],
+        ["Created", prompt.createdAt],
+      ]),
+      6,
+    ),
+    renderCard("Messages", `<pre>${escapeHtml(JSON.stringify(messages, null, 2))}</pre>`, 6),
+    renderCard("Included Context", `<pre>${escapeHtml(JSON.stringify(includedContext, null, 2))}</pre>`, 6),
+    renderCard("Omitted Context", `<pre>${escapeHtml(JSON.stringify(omittedContext, null, 2))}</pre>`, 6),
+    renderCard("Safety Notes", `<pre>${escapeHtml(JSON.stringify(safetyNotes, null, 2))}</pre>`, 6),
+    renderCard("Output Schema", `<pre>${escapeHtml(JSON.stringify(outputSchema, null, 2))}</pre>`, 6),
+  ].join("");
+
+  return pageShell(`Prompt ${prompt.id}`, `/prompts/${prompt.id}`, {
+    contentHtml,
+    rightPanelHtml: renderCard("Prompt Trace", `<div class="stack">${renderCompiledPromptItem(prompt)}</div>`),
+    projects: store.listProjects(),
+    projectCount: store.listProjects().length,
+    sessionCount: store.listSessions(1000).length,
+    activeSessionCount: store.dashboardSnapshot().activeSessions,
+    liveStatus: "ready",
+  });
+}
+
+function renderPromptsPage(store: ReturnType<typeof createStore>, sessionId?: string | null): string {
+  const prompts = store.listCompiledPrompts(sessionId ?? null, 100);
+  const contentHtml = [
+    renderCard(
+      "Compiled Prompts",
+      `<div class="list">${prompts.length > 0 ? prompts.map((prompt) => `<a href="/prompts/${encodeURIComponent(prompt.id)}" style="display:block">${renderCompiledPromptItem(prompt)}</a>`).join("") : renderEmptyState("No prompts yet", "Ask a question or run a plan to create compiled prompts.")}</div>`,
+      12,
+    ),
+  ].join("");
+  return pageShell("Prompts", `/prompts${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`, {
+    contentHtml,
+    rightPanelHtml: renderCard("Prompt Filter", renderKeyValueList([["Session", sessionId ?? "all"], ["Count", String(prompts.length)]])),
+    projects: store.listProjects(),
+    projectCount: store.listProjects().length,
+    sessionCount: store.listSessions(1000).length,
+    activeSessionCount: store.dashboardSnapshot().activeSessions,
+    liveStatus: "ready",
   });
 }
 
@@ -1237,6 +1324,37 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         return;
       }
 
+      if (method === "GET" && path === "/prompts") {
+        const sessionId = url.searchParams.get("sessionId");
+        const limit = Number(url.searchParams.get("limit") ?? 100) || 100;
+        const prompts = store.listCompiledPrompts(sessionId, limit);
+        if (!isHtmlRequest(req)) {
+          sendJson(res, json("ok", prompts));
+          return;
+        }
+        sendHtml(res, renderPromptsPage(store, sessionId));
+        return;
+      }
+
+      if (path.startsWith("/prompts/")) {
+        const promptId = decodeURIComponent(path.slice("/prompts/".length)).split("/")[0];
+        const prompt = store.getCompiledPrompt(promptId);
+        if (!prompt) {
+          if (!isHtmlRequest(req)) {
+            sendJson(res, json("error", undefined, { message: "prompt not found" }), 404);
+            return;
+          }
+          sendHtml(res, renderCompiledPromptPage(store, promptId), 404);
+          return;
+        }
+        if (!isHtmlRequest(req)) {
+          sendJson(res, json("ok", prompt));
+          return;
+        }
+        sendHtml(res, renderCompiledPromptPage(store, promptId));
+        return;
+      }
+
       if (method === "GET" && path === "/tasks") {
         if (!isHtmlRequest(req)) {
           sendJson(res, json("ok", store.listRecentTasks(100)));
@@ -1275,6 +1393,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               messages: store.conversation.listMessages(sessionId, 500),
               events: store.listEvents(sessionId, 500),
               retrievalQueries: store.retrieval.listQueriesForSession(sessionId, 100),
+              compiledPrompts: store.listCompiledPrompts(sessionId, 100),
               modelCalls: store.models.listCalls(sessionId, 100),
               agentRuns: store.agents.listRuns(sessionId, 100),
               agentHandoffs: store.agents.listHandoffs(sessionId, 100),

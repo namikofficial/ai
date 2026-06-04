@@ -69,6 +69,12 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
   assert.ok(modelCalls.some((call) => call.role === "retrieval_judge"));
   assert.ok(modelCalls.some((call) => call.role === "answer"));
 
+  const compiledPrompts = store.listCompiledPrompts(answer.sessionId, 10);
+  assert.ok(compiledPrompts.length >= 3);
+  assert.ok(compiledPrompts.some((prompt) => prompt.mode === "query_rewrite"));
+  assert.ok(compiledPrompts.some((prompt) => prompt.mode === "retrieval_judge"));
+  assert.ok(compiledPrompts.some((prompt) => prompt.mode === "answer"));
+
   const modelRoutes = store.listModelRoutes(10);
   assert.ok(modelRoutes.some((route) => route.taskPattern === "ask"));
 
@@ -209,7 +215,7 @@ test("observability: indexProject records an indexer agent run", async () => {
   const embeddingResponse = embeddingCalls[0]!.response as { modelName?: string; dimensions?: number; providerId?: string; embeddingCount?: number };
   assert.ok(embeddingResponse.modelName);
   assert.ok((embeddingResponse.dimensions ?? 0) > 0);
-  assert.ok((embeddingResponse.embeddingCount ?? 0) > 0);
+  assert.ok(embeddingResponse.providerId);
 
   const chunk = store.db
     .prepare("SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1")

@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
   AskResponse,
+  CompiledPromptRecord,
   HandoffResponse,
   PlanResponse,
   ProjectSummary,
@@ -403,6 +404,124 @@ function SessionsPage(): ReactNode {
   );
 }
 
+function PromptsPage(): ReactNode {
+  const resource = useResource(() => api.listCompiledPrompts());
+  const prompts = (resource.data?.data ?? []) as Array<{
+    id: string;
+    sessionId: string | null;
+    mode: string;
+    role: string;
+    estimatedTokens: number;
+  }>;
+  const [sessionId, setSessionId] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const refresh = async () => {
+    setLoading(true);
+    try {
+      resource.refresh();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <PageShell title="Prompts" subtitle="Compiled prompt traces and replayable inputs">
+      <Panel title="Filter" span={12}>
+        <div className="stack">
+          <input value={sessionId} onChange={(event) => setSessionId(event.currentTarget.value)} placeholder="session id" />
+          <button type="button" onClick={refresh} disabled={loading}>
+            {loading ? "Refreshing..." : "Refresh"}
+          </button>
+        </div>
+      </Panel>
+      <Panel title="Compiled Prompts" span={12}>
+        <div className="list">
+          {(sessionId ? prompts.filter((prompt) => String(prompt.sessionId ?? "") === sessionId) : prompts).length > 0 ? (
+            (sessionId ? prompts.filter((prompt) => String(prompt.sessionId ?? "") === sessionId) : prompts).map((prompt) => (
+              <a className="list-item" href={`/prompts/${prompt.id}`} key={prompt.id}>
+                <div className="row">
+                  <strong>{prompt.mode}</strong>
+                  <Badge>{prompt.role}</Badge>
+                </div>
+                <div className="tiny">
+                  {prompt.id} · {prompt.sessionId ?? "no session"} · {prompt.estimatedTokens} tokens
+                </div>
+              </a>
+            ))
+          ) : (
+            <EmptyState title="No prompts yet" body="Ask a question, plan, or reflect to create compiled prompts." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
+function PromptDetailPage(): ReactNode {
+  const { promptId = "" } = useParams();
+  const resource = useResource(() => api.getCompiledPrompt(promptId), [promptId]);
+  const prompt = resource.data?.data as unknown as CompiledPromptRecord | null;
+  if (!prompt) {
+    return (
+      <PageShell title="Prompt" subtitle={promptId}>
+        <Panel title="Missing prompt" span={12}>
+          <EmptyState title="Prompt not found" body={`No compiled prompt found for ${promptId}.`} />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  const parse = (value: string | null) => {
+    if (!value) return null;
+    try {
+      return JSON.parse(value);
+    } catch {
+      return value;
+    }
+  };
+
+  const messages = parse(prompt.messagesJson);
+  const includedContext = parse(prompt.includedContextJson);
+  const omittedContext = parse(prompt.omittedContextJson);
+  const safetyNotes = parse(prompt.safetyNotesJson);
+  const outputSchema = parse(prompt.outputSchemaJson);
+
+  return (
+    <PageShell title={`Prompt ${prompt.mode}`} subtitle={prompt.role}>
+      <Panel title="Prompt Summary" span={6}>
+        <KeyValueList
+          items={[
+            ["Mode", prompt.mode],
+            ["Role", prompt.role],
+            ["Session", prompt.sessionId ?? "none"],
+            ["Task", prompt.taskId ?? "none"],
+            ["Retrieval Query", prompt.retrievalQueryId ?? "none"],
+            ["Context Pack", prompt.contextPackId ?? "none"],
+            ["Tokens", prompt.estimatedTokens],
+            ["Created", prompt.createdAt],
+          ]}
+        />
+      </Panel>
+      <Panel title="Messages" span={6}>
+        <pre>{JSON.stringify(messages, null, 2)}</pre>
+      </Panel>
+      <Panel title="Included Context" span={6}>
+        <pre>{JSON.stringify(includedContext, null, 2)}</pre>
+      </Panel>
+      <Panel title="Omitted Context" span={6}>
+        <pre>{JSON.stringify(omittedContext, null, 2)}</pre>
+      </Panel>
+      <Panel title="Safety Notes" span={6}>
+        <pre>{JSON.stringify(safetyNotes, null, 2)}</pre>
+      </Panel>
+      <Panel title="Output Schema" span={6}>
+        <pre>{JSON.stringify(outputSchema, null, 2)}</pre>
+      </Panel>
+    </PageShell>
+  );
+}
+
 function SessionDetailPage(): ReactNode {
   const { sessionId = "" } = useParams();
   const resource = useResource(
@@ -413,6 +532,13 @@ function SessionDetailPage(): ReactNode {
   const events = resource.data?.[1].data ?? [];
   const tasks = resource.data?.[2].data.filter((task) => task.sessionId === sessionId) ?? [];
   const trace = resource.data?.[3].data ?? null;
+  const compiledPrompts = Array.isArray(trace?.compiledPrompts) ? (trace.compiledPrompts as Array<{
+    id: string;
+    mode: string;
+    role: string;
+    estimatedTokens: number;
+    sessionId?: string | null;
+  }>) : [];
 
   if (!session) {
     return (
@@ -492,6 +618,27 @@ function SessionDetailPage(): ReactNode {
               <div className="list-item">
                 <strong>Context Packs</strong>
                 <div className="tiny">{Array.isArray(trace.contextPacks) ? trace.contextPacks.length : 0} packs stored</div>
+              </div>
+              <div className="list-item">
+                <strong>Compiled Prompts</strong>
+                <div className="list">
+                  {compiledPrompts.length > 0 ? (
+                    compiledPrompts.map((prompt) => (
+                      <a className="list-item" href={`/prompts/${prompt.id}`} key={prompt.id}>
+                        <div className="row">
+                          <strong>{prompt.mode}</strong>
+                          <Badge>{prompt.role}</Badge>
+                        </div>
+                        <div className="tiny">{prompt.id} · {prompt.estimatedTokens} tokens</div>
+                      </a>
+                    ))
+                  ) : (
+                    <EmptyState title="No compiled prompts" body="Ask or plan with a live trace to create prompt records." />
+                  )}
+                </div>
+                <div className="tiny">
+                  <a href={`/prompts?sessionId=${encodeURIComponent(session.id)}`}>Open full prompt trace</a>
+                </div>
               </div>
               <div className="list-item">
                 <strong>Conversation Replay</strong>
@@ -1905,6 +2052,8 @@ export {
   ReviewsPage,
   SessionDetailPage,
   SessionsPage,
+  PromptDetailPage,
+  PromptsPage,
   SettingsPage,
   SkillsPage,
   TaskDetailPage,

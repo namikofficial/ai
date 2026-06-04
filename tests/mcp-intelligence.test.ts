@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { compilePrompt } from "../packages/prompt-compiler/src/index.ts";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
 import { resolveConfig } from "../packages/config/src/index.ts";
 
@@ -546,6 +547,15 @@ test("ai_get_session_trace returns full replayable trace", async () => {
     reason: "test",
     items: [{ kind: "retrieval_chunk", rank: 0, tokenCount: 50, excerpt: "x", sourceId: "src/x.ts" }],
   });
+  const compiledPrompt = compilePrompt({
+    mode: "answer",
+    role: "answer",
+    userRequest: "trace prompt",
+  });
+  store.recordCompiledPrompt({
+    compiledPrompt,
+    sessionId: session.id,
+  });
   const config = resolveConfig({
     databasePath: join(workspace, "ai.db"),
     runtimeDir: join(workspace, "runtime"),
@@ -565,6 +575,7 @@ test("ai_get_session_trace returns full replayable trace", async () => {
     rules: unknown[];
     skills: unknown[];
     checks: unknown[];
+    compiledPrompts: Array<{ id: string; mode: string }>;
     events: Array<{ type: string }>;
   };
   assert.equal(result.session.id, session.id);
@@ -577,6 +588,8 @@ test("ai_get_session_trace returns full replayable trace", async () => {
   assert.ok(Array.isArray(result.rules));
   assert.ok(Array.isArray(result.skills));
   assert.ok(Array.isArray(result.checks));
+  assert.ok(Array.isArray(result.compiledPrompts));
+  assert.equal(result.compiledPrompts[0]?.mode, "answer");
   assert.ok(Array.isArray(result.events));
 
   store.db.close();
