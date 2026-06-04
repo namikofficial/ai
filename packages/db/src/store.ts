@@ -18,6 +18,7 @@ import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import {
   QdrantClient,
+  embedQueryForQdrant,
   readQdrantRuntimeSettings,
   tryEnableSearchIndex,
 } from "../../retrieval-engine/src/index.ts";
@@ -1554,6 +1555,9 @@ export function createStore(db: DatabaseSync) {
     },
     searchChunks(projectId: string, query: string, options: SearchOptions = {}): RetrievalChunk[] {
       const embeddingConfig = readEmbeddingConfig({ cloudEnabled: process.env.AI_CLOUD_ENABLED === "true" });
+      const queryVector = query.trim().length > 0
+        ? embedQueryForQdrant({ text: query.trim(), dimension: embeddingConfig.dimension })
+        : null;
       return searchProjectChunks({
         db,
         projectId,
@@ -1561,6 +1565,18 @@ export function createStore(db: DatabaseSync) {
         limit: options.limit ?? 8,
         qdrantSettings: getActiveQdrantSettings(),
         queryVectorDimension: embeddingConfig.dimension,
+        queryVector,
+      });
+    },
+    searchChunksWithVector(projectId: string, query: string, queryVector: number[], options: SearchOptions = {}): RetrievalChunk[] {
+      return searchProjectChunks({
+        db,
+        projectId,
+        query,
+        limit: options.limit ?? 8,
+        qdrantSettings: getActiveQdrantSettings(),
+        queryVectorDimension: queryVector.length,
+        queryVector,
       });
     },
     async addOrUpdateProject(input: ProjectCreateInput): Promise<ProjectSummary> {

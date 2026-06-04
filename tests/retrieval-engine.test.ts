@@ -4,11 +4,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import type { RetrievalChunk } from "../packages/shared/src/index.ts";
 import {
   analyzeQuery,
   buildRetrievalPipelineInput,
   buildFtsQuery,
   classifyIntent,
+  embedQueryForQdrant,
   rankChunk,
   rewriteQuery,
   searchProjectChunks,
@@ -74,6 +76,94 @@ test("retrieval-engine: searchProjectChunks returns heuristic, FTS, and qdrant-s
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
+});
+
+test("retrieval-engine: buildRetrievalPipelineInput keeps lexical and vector candidates separate", () => {
+  const chunk = {
+    id: "chunk-1",
+    projectId: "project-1",
+    documentId: "doc-1",
+    path: "src/alpha.ts",
+    content: "export const alpha = 1;",
+    startLine: 1,
+    endLine: 1,
+    tokenCount: 6,
+    score: 1,
+    metadata: {},
+  } satisfies RetrievalChunk;
+  const calls: Array<"search" | "vector"> = [];
+  const source = {
+    searchChunks(projectId: string, query: string, options: { limit: number }) {
+      calls.push("search");
+      assert.equal(projectId, "project-1");
+      assert.ok(options.limit > 0);
+      return query.length > 0 ? [chunk] : [];
+    },
+    searchChunksWithVector(projectId: string, query: string, queryVector: number[], options: { limit: number }) {
+      calls.push("vector");
+      assert.equal(projectId, "project-1");
+      assert.equal(query, "alpha");
+      assert.deepEqual(queryVector, [1, 0, 0]);
+      assert.ok(options.limit > 0);
+      return [chunk];
+    },
+    retrieval: {
+      listQueriesForProject() {
+        return [];
+      },
+      listFeedback() {
+        return [];
+      },
+      listMisses() {
+        return [];
+      },
+      listPathBoosts() {
+        return [];
+      },
+    },
+    memory: {
+      listEntries() {
+        return [];
+      },
+      listFacts() {
+        return [];
+      },
+      listProjectRules() {
+        return [];
+      },
+    },
+    listProjectFiles() {
+      return [];
+    },
+  };
+
+  const pipelineInput = buildRetrievalPipelineInput(source, {
+    projectId: "project-1",
+    query: "alpha",
+    intent: "lookup",
+    mode: "local",
+    depth: "standard",
+    ftsLimit: 4,
+    queryVector: [1, 0, 0],
+  });
+
+  assert.deepEqual(calls, ["search", "vector", "search"]);
+  assert.equal(pipelineInput.ftsChunks.length, 1);
+  assert.equal(pipelineInput.vectorChunks.length, 1);
+});
+
+test("retrieval-engine: embedQueryForQdrant honors an explicit embedding override", () => {
+  const calls: Array<{ text: string; dimension: number }> = [];
+  const vector = embedQueryForQdrant({
+    text: "vectorHit",
+    dimension: 3,
+    embed: (text, dimension) => {
+      calls.push({ text, dimension });
+      return [1, 0, 0];
+    },
+  });
+  assert.deepEqual(calls, [{ text: "vectorHit", dimension: 3 }]);
+  assert.deepEqual(vector, [1, 0, 0]);
 });
 
 test("retrieval-engine: buildRetrievalPipelineInput is available from the engine package", async () => {

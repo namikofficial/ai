@@ -74,6 +74,8 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
 
   const answerCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "answer");
   assert.equal(answerCalls.length, 1, "ask should record exactly one answer model call");
+  const embeddingCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "embedding");
+  assert.ok(embeddingCalls.length >= 1, "ask should record a query embedding call");
   const answerRequest = answerCalls[0]!.request as {
     metadata?: {
       compiledPrompt?: { id?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };

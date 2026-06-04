@@ -12,6 +12,7 @@ import type { RetrievalChunk } from "../../shared/src/index.ts";
 
 export interface RetrievalPipelineSource {
   searchChunks(projectId: string, query: string, options: { limit: number }): RetrievalChunk[];
+  searchChunksWithVector?: (projectId: string, query: string, queryVector: number[], options: { limit: number }) => RetrievalChunk[];
   retrieval: {
     listQueriesForProject(projectId: string, limit: number): Array<{ id: string }>;
     listFeedback(retrievalQueryId: string, limit: number): RetrievalFeedbackRecord[];
@@ -33,6 +34,7 @@ export interface BuildRetrievalPipelineInputArgs {
   mode: RetrievalMode;
   depth: RetrievalDepth;
   ftsLimit: number;
+  queryVector?: number[] | null;
 }
 
 export function buildRetrievalPipelineInput(
@@ -58,6 +60,9 @@ export function buildRetrievalPipelineInput(
   secretTerms: string[];
 } {
   const ftsChunks = source.searchChunks(args.projectId, args.query, { limit: args.ftsLimit });
+  const vectorChunks = args.queryVector && source.searchChunksWithVector
+    ? source.searchChunksWithVector(args.projectId, args.query, args.queryVector, { limit: args.ftsLimit })
+    : [];
   const heuristicChunks = source.searchChunks(args.projectId, "", { limit: 4 });
   const queries = source.retrieval.listQueriesForProject(args.projectId, 200);
   const feedback: RetrievalFeedbackRecord[] = [];
@@ -84,7 +89,7 @@ export function buildRetrievalPipelineInput(
     mode: args.mode,
     depth: args.depth,
     ftsChunks,
-    vectorChunks: [],
+    vectorChunks,
     heuristicChunks,
     feedback,
     feedbackChunkPaths,

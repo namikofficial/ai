@@ -25,7 +25,6 @@ import { analyzeQuery, classifyIntent, rewriteQuery, runRetrievalPipeline } from
 import { buildRetrievalPipelineInput, type RetrievalPipelineSource } from "../../retrieval-engine/src/pipeline.ts";
 import { buildContextPack } from "../../context-engine/src/index.ts";
 import type { ModelInvokeOptions, ModelInvokeRequest, ModelInvokeResult, ModelRuntime } from "../../model-runtime/src/index.ts";
-import { selectModelProfile } from "../../model-runtime/src/index.ts";
 import type { ModelProfileRecord, ModelRouteRecord, ModelCallRecord, ModelRole } from "../../shared/src/index.ts";
 import { createEvent, createId } from "../../shared/src/index.ts";
 
@@ -182,6 +181,7 @@ export function buildAskSynthesisFailure(question: string): string {
 export interface AskWorkflowStore extends RetrievalPipelineSource {
   getProject(identifier: string): ProjectSummary | null;
   searchChunks(projectId: string, query: string, options?: { limit?: number }): RetrievalChunk[];
+  searchChunksWithVector?: (projectId: string, query: string, queryVector: number[], options?: { limit?: number }) => RetrievalChunk[];
   listProjectFiles(projectId: string, limit: number): Array<{ path: string }>;
   createSession(input: {
     projectId: string | null;
@@ -318,6 +318,20 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
   models: {
     getProfile(id: string): ModelProfileRecord | null;
     listCalls(sessionId: string, limit?: number): ModelCallRecord[];
+    recordCall(input: {
+      sessionId?: string | null;
+      taskId?: string | null;
+      retrievalQueryId?: string | null;
+      profileId: string;
+      role: ModelRole;
+      promptTokens?: number;
+      completionTokens?: number;
+      latencyMs?: number;
+      status: "ok" | "failed" | "fallback" | "blocked";
+      error?: string | null;
+      request?: Record<string, unknown>;
+      response?: Record<string, unknown>;
+    }): ModelCallRecord;
     recordRoute(input: {
       taskPattern: string;
       mode: "local" | "cloud" | "hybrid" | "any";
@@ -369,7 +383,7 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
 
 export interface RunAskWorkflowInput {
   store: AskWorkflowStore;
-  runtime: Pick<ModelRuntime, "route" | "invoke">;
+  runtime: Pick<ModelRuntime, "route" | "invoke" | "embed">;
   cloudEnabled: boolean;
   input: AskRequest;
 }
@@ -521,6 +535,24 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   input.store.appendEvent(retrievalStarted);
 
   const ftsLimit = input.input.depth === "deep" ? 12 : input.input.depth === "shallow" ? 4 : 8;
+  const embeddingProfileId = input.store.models.getProfile("embedding-local")?.id ?? "embedding-local";
+  const embeddingProfile = input.store.models.getProfile(embeddingProfileId);
+  const queryEmbedding = await input.runtime.embed(
+    embeddingProfileId,
+    {
+      input: rewritten.variant,
+      modelName: embeddingProfile?.modelName ?? "embedding-local",
+    },
+    {
+      sessionId: session.id,
+      taskId: retrievalAgentRun.id,
+      retrievalQueryId: retrievalQuery.id,
+      recordCall: (call) => {
+        input.store.models.recordCall(call);
+      },
+    },
+  );
+  const queryVector = queryEmbedding.embeddings[0] ?? [];
   const pipelineInput = buildRetrievalPipelineInput(input.store, {
     projectId: project.id,
     query: rewritten.variant,
@@ -528,6 +560,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     mode,
     depth,
     ftsLimit,
+    queryVector,
   });
   const pipelineOutput = runRetrievalPipeline(pipelineInput);
   const ranked = pipelineOutput.ranked;
@@ -713,7 +746,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     risk: "low",
     input: { question: input.input.question, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
   });
-  const answerProfileId = session.modelProfile ?? selectModelProfile(mode, { depth: input.input.depth, question: input.input.question });
+  const answerProfileId = session.modelProfile ?? selectedAnswerProfile;
   const compiledAnswer = compilePrompt(
     buildAskAnswerPrompt({
       question: input.input.question,

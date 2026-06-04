@@ -89,6 +89,7 @@ export interface SearchProjectChunksInput {
   limit: number;
   qdrantSettings: QdrantRuntimeSettings | null;
   queryVectorDimension?: number;
+  queryVector?: number[] | null;
 }
 
 export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalChunk[] {
@@ -105,10 +106,11 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
   };
 
   if (normalizedQuery.length > 0 && input.qdrantSettings) {
+    const queryVector = input.queryVector ?? embedQueryForQdrant({ text: normalizedQuery, dimension: input.queryVectorDimension ?? 32 });
     const qdrantChunks = searchQdrantChunksSync(
       input.qdrantSettings,
       input.projectId,
-      embedQueryForQdrant({ text: normalizedQuery, dimension: input.queryVectorDimension ?? 32 }),
+      queryVector,
       limit,
     );
     if (qdrantChunks) {
