@@ -1,6 +1,5 @@
 import type {
-  ModelCallRecord,
-  ModelHealthCheckRecord,
+  ModelCallStatus,
   ModelHealthStatus,
   ModelProfileRecord,
   ModelProviderRecord,
@@ -8,6 +7,7 @@ import type {
   ProjectSummary,
   RetrievalChunk,
 } from "../../shared/src/index.ts";
+import { checkCloudGuard, isCloudProviderKind, redactSecrets } from "../../safety/src/index.ts";
 
 export interface ModelRouteDetails {
   risk?: "low" | "medium" | "high";
@@ -36,17 +36,22 @@ export interface ModelInvokeRequest {
   metadata?: Record<string, unknown>;
 }
 
+export interface ModelInvokeUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 export interface ModelInvokeResult {
   text: string;
   promptTokens: number;
   completionTokens: number;
   latencyMs: number;
-  usage?: {
-    promptTokens: number;
-    completionTokens: number;
-    totalTokens: number;
-  };
+  usage?: ModelInvokeUsage;
   raw?: unknown;
+  profileId?: string;
+  providerId?: string;
+  status?: ModelCallStatus;
 }
 
 export interface EmbeddingRequest {
@@ -57,6 +62,8 @@ export interface EmbeddingRequest {
 export interface EmbeddingResult {
   embeddings: number[][];
   dimensions: number;
+  modelName: string;
+  providerId: string;
   raw?: unknown;
 }
 
@@ -95,23 +102,47 @@ export interface ModelRouteDecision {
   reason: string;
 }
 
+export interface ModelCallRecordedHook {
+  (input: {
+    profileId: string;
+    role: ModelRole;
+    promptTokens: number;
+    completionTokens: number;
+    latencyMs: number;
+    status: ModelCallStatus;
+    request: Record<string, unknown>;
+    response: Record<string, unknown>;
+    error?: string | null;
+    sessionId?: string | null;
+    taskId?: string | null;
+    retrievalQueryId?: string | null;
+  }): void;
+}
+
+export interface ModelInvokeOptions {
+  sessionId?: string | null;
+  taskId?: string | null;
+  retrievalQueryId?: string | null;
+  recordCall?: ModelCallRecordedHook;
+  fallbackProfileId?: string | null;
+}
+
 export interface ModelRuntime {
   route(input: ModelRouteInput): ModelRouteDecision;
   health(providerId?: string): Promise<Array<{ providerId: string; status: ModelHealthStatus; latencyMs: number | null; detail: string | null }>>;
-  invoke(profileId: string, request: ModelInvokeRequest): Promise<ModelInvokeResult>;
+  invoke(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
   embed(profileId: string, request: EmbeddingRequest): Promise<EmbeddingResult>;
   rerank(profileId: string, request: RerankRequest): Promise<RerankResult>;
-}
-
-export interface ModelRuntimeAdapterInput {
-  provider: Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">;
-  profile: ModelProfileRecord;
+  listProfiles(): ModelProfileRecord[];
+  listProviders(): Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
+  isCloudEnabled(): boolean;
 }
 
 export interface ModelRuntimeInput {
   providers: Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
   profiles: ModelProfileRecord[];
   cloudEnabled: boolean;
+  recordCall?: ModelCallRecordedHook;
 }
 
 export function selectModelProfile(
@@ -172,14 +203,36 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
-function normalizeProviderKind(kind: string): ModelProviderAdapter["kind"] {
+export function normalizeProviderKind(kind: string): ModelProviderAdapter["kind"] {
   if (kind === "cloud_openai_compat" || kind === "openai_compat") return "openai_compat";
   if (kind === "local_openai_compat" || kind === "llama_cpp") return "llama_cpp";
   if (kind === "mock") return "mock";
   return "heuristic";
 }
 
-function createHeuristicProviderAdapter(id: string): ModelProviderAdapter {
+function hashEmbedding(input: string, dim: number): number[] {
+  const vector = Array.from({ length: dim }, () => 0);
+  const terms = input.toLowerCase().split(/[^a-z0-9]+/g).filter((term) => term.length >= 2);
+  for (const term of terms) {
+    let hash = 2166136261;
+    for (let index = 0; index < term.length; index += 1) {
+      hash ^= term.charCodeAt(index);
+      hash = Math.imul(hash, 16777619);
+    }
+    const bucket = hash >>> 0;
+    vector[bucket % dim] += 1;
+    vector[(bucket >>> 5) % dim] += term.length / 8;
+    vector[(bucket >>> 11) % dim] += term.includes("auth") ? 1.5 : 0.25;
+  }
+  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
+  return magnitude > 0 ? vector.map((value) => value / magnitude) : vector;
+}
+
+export function createHeuristicEmbedding(input: string, dim = 32): number[] {
+  return hashEmbedding(input, dim);
+}
+
+function createHeuristicProviderAdapter(id: string, dim = 32): ModelProviderAdapter {
   return {
     id,
     kind: "heuristic",
@@ -188,9 +241,27 @@ function createHeuristicProviderAdapter(id: string): ModelProviderAdapter {
     },
     async invoke(request) {
       const prompt = request.messages.map((message) => `${message.role}: ${message.content}`).join("\n");
-      const text = request.role === "summarizer"
-        ? `Summary: ${request.messages.at(-1)?.content ?? prompt}`.slice(0, 800)
-        : `Heuristic ${request.role} response:\n${request.messages.at(-1)?.content ?? prompt}`.slice(0, 1200);
+      const lastUserMessage = request.messages.filter((m) => m.role === "user").at(-1)?.content ?? prompt;
+      let text: string;
+      switch (request.role) {
+        case "summarizer":
+          text = `Summary: ${lastUserMessage}`.slice(0, 800);
+          break;
+        case "intent":
+          text = `lookup: heuristic classification of "${lastUserMessage.slice(0, 80)}"`;
+          break;
+        case "query_rewrite":
+          text = lastUserMessage.replace(/\?$/, "").trim();
+          break;
+        case "answer":
+          text = `Heuristic answer based on the provided context:\n${lastUserMessage}`.slice(0, 1200);
+          break;
+        case "reflection":
+          text = `Reflection notes: ${lastUserMessage.slice(0, 600)}`;
+          break;
+        default:
+          text = `Heuristic ${request.role} response:\n${lastUserMessage}`.slice(0, 1200);
+      }
       return {
         text,
         promptTokens: estimateTokens(prompt),
@@ -205,23 +276,13 @@ function createHeuristicProviderAdapter(id: string): ModelProviderAdapter {
     },
     async embed(request) {
       const inputs = Array.isArray(request.input) ? request.input : [request.input];
-      const embeddings = inputs.map((input) => {
-        const vector = Array.from({ length: 32 }, () => 0);
-        const terms = input.toLowerCase().split(/[^a-z0-9]+/g).filter((term) => term.length >= 2);
-        for (const term of terms) {
-          let hash = 2166136261;
-          for (let index = 0; index < term.length; index += 1) {
-            hash ^= term.charCodeAt(index);
-            hash = Math.imul(hash, 16777619);
-          }
-          const bucket = hash >>> 0;
-          vector[bucket % vector.length] += 1;
-          vector[(bucket >>> 5) % vector.length] += term.length / 8;
-        }
-        const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-        return magnitude > 0 ? vector.map((value) => value / magnitude) : vector;
-      });
-      return { embeddings, dimensions: 32 };
+      const embeddings = inputs.map((input) => hashEmbedding(input, dim));
+      return {
+        embeddings,
+        dimensions: dim,
+        modelName: request.modelName ?? "heuristic-embedding",
+        providerId: id,
+      };
     },
     async rerank(request) {
       const lowered = request.query.toLowerCase();
@@ -262,6 +323,8 @@ function createMockProviderAdapter(id: string): ModelProviderAdapter {
       return {
         embeddings: inputs.map(() => [1, 0, 0, 0]),
         dimensions: 4,
+        modelName: request.modelName ?? "mock-embedding",
+        providerId: id,
       };
     },
     async rerank(request) {
@@ -365,6 +428,8 @@ function createOpenAICompatProviderAdapter(input: {
       return {
         embeddings,
         dimensions: embeddings[0]?.length ?? 0,
+        modelName: parsed.model ?? request.modelName ?? input.id,
+        providerId: input.id,
         raw: { ...parsed, latencyMs: Date.now() - started },
       };
     },
@@ -452,7 +517,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
       };
     }
 
-    const profile = pickBest(candidates);
+    const profile = pickBest(candidates) ?? pickBest(localCandidates);
     return {
       profileId: profile?.id ?? null,
       fallbackProfileId: inputRoute.fallbackProfileId ?? null,
@@ -461,8 +526,27 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
     };
   }
 
+  function recordCallSafely(payload: Parameters<ModelCallRecordedHook>[0], options?: ModelInvokeOptions): void {
+    const hook = options?.recordCall ?? input.recordCall;
+    if (!hook) return;
+    try {
+      hook(payload);
+    } catch {
+      // never fail an invocation because we couldn't record it
+    }
+  }
+
   return {
     route: chooseProfile,
+    listProfiles() {
+      return input.profiles.slice();
+    },
+    listProviders() {
+      return input.providers.slice();
+    },
+    isCloudEnabled() {
+      return input.cloudEnabled;
+    },
     async health(providerId?: string) {
       const providers = providerId ? input.providers.filter((provider) => provider.id === providerId) : input.providers;
       const results: Array<{ providerId: string; status: ModelHealthStatus; latencyMs: number | null; detail: string | null }> = [];
@@ -479,23 +563,139 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
       }
       return results;
     },
-    async invoke(profileId: string, request: ModelInvokeRequest) {
+    async invoke(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions) {
       const profile = input.profiles.find((candidate) => candidate.id === profileId);
       if (!profile) {
         throw new Error(`Unknown profile: ${profileId}`);
       }
-      return getAdapter(profile).invoke({ ...request, modelName: request.modelName ?? profile.modelName });
+      const provider = providerMap.get(profile.providerId);
+      if (provider) {
+        const guard = checkCloudGuard({
+          cloudEnabled: input.cloudEnabled,
+          providerKind: provider.kind,
+          profileLocalOnly: profile.localOnly,
+        });
+        if (!guard.allowed) {
+          const fallbackId =
+            options?.fallbackProfileId ?? profile.fallbackProfileId ?? input.profiles.find((p) => p.role === profile.role && p.localOnly && p.enabled)?.id ?? null;
+          recordCallSafely(
+            {
+              profileId,
+              role: request.role,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              status: "blocked",
+              request: { profileId, role: request.role, messageCount: request.messages.length },
+              response: { reason: guard.reason },
+              error: guard.reason,
+              sessionId: options?.sessionId ?? null,
+              taskId: options?.taskId ?? null,
+              retrievalQueryId: options?.retrievalQueryId ?? null,
+            },
+            options,
+          );
+          if (fallbackId && fallbackId !== profileId) {
+            const fallbackResult = await this.invoke(fallbackId, request, options);
+            return { ...fallbackResult, status: "fallback" };
+          }
+          throw new Error(`model call blocked: ${guard.reason}`);
+        }
+      }
+      const adapter = getAdapter(profile);
+      const started = Date.now();
+      const redactedRequest = {
+        profileId,
+        role: request.role,
+        modelName: request.modelName ?? profile.modelName,
+        temperature: request.temperature ?? 0,
+        messageCount: request.messages.length,
+        firstUserMessage: redactSecrets(request.messages.find((m) => m.role === "user")?.content ?? "").text.slice(0, 600),
+      };
+      try {
+        const result = await adapter.invoke({ ...request, modelName: request.modelName ?? profile.modelName });
+        const decorated: ModelInvokeResult = {
+          ...result,
+          profileId,
+          providerId: profile.providerId,
+          status: "ok",
+        };
+        recordCallSafely(
+          {
+            profileId,
+            role: request.role,
+            promptTokens: result.promptTokens,
+            completionTokens: result.completionTokens,
+            latencyMs: result.latencyMs || Date.now() - started,
+            status: "ok",
+            request: redactedRequest,
+            response: { text: redactSecrets(result.text).text.slice(0, 1200), usage: result.usage ?? null },
+            sessionId: options?.sessionId ?? null,
+            taskId: options?.taskId ?? null,
+            retrievalQueryId: options?.retrievalQueryId ?? null,
+          },
+          options,
+        );
+        return decorated;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        recordCallSafely(
+          {
+            profileId,
+            role: request.role,
+            promptTokens: 0,
+            completionTokens: 0,
+            latencyMs: Date.now() - started,
+            status: "failed",
+            request: redactedRequest,
+            response: { error: message },
+            error: message,
+            sessionId: options?.sessionId ?? null,
+            taskId: options?.taskId ?? null,
+            retrievalQueryId: options?.retrievalQueryId ?? null,
+          },
+          options,
+        );
+        const fallbackId = options?.fallbackProfileId ?? profile.fallbackProfileId;
+        if (fallbackId && fallbackId !== profileId) {
+          const fallbackResult = await this.invoke(fallbackId, request, options);
+          return { ...fallbackResult, status: "fallback" };
+        }
+        const heuristic = createHeuristicProviderAdapter(profile.providerId);
+        const fallbackText = await heuristic.invoke({ ...request, modelName: request.modelName ?? profile.modelName });
+        return {
+          ...fallbackText,
+          profileId,
+          providerId: profile.providerId,
+          status: "fallback",
+        };
+      }
     },
     async embed(profileId: string, request: EmbeddingRequest) {
       const profile = input.profiles.find((candidate) => candidate.id === profileId);
       if (!profile) {
         throw new Error(`Unknown profile: ${profileId}`);
       }
+      const provider = providerMap.get(profile.providerId);
+      if (provider) {
+        const guard = checkCloudGuard({
+          cloudEnabled: input.cloudEnabled,
+          providerKind: provider.kind,
+          profileLocalOnly: profile.localOnly,
+        });
+        if (!guard.allowed) {
+          throw new Error(`embedding blocked: ${guard.reason}`);
+        }
+      }
       const adapter = getAdapter(profile);
-      if (!adapter.embed) {
+      try {
+        if (!adapter.embed) {
+          return createHeuristicProviderAdapter(profile.providerId).embed!(request);
+        }
+        return await adapter.embed(request);
+      } catch {
         return createHeuristicProviderAdapter(profile.providerId).embed!(request);
       }
-      return adapter.embed(request);
     },
     async rerank(profileId: string, request: RerankRequest) {
       const profile = input.profiles.find((candidate) => candidate.id === profileId);
@@ -510,3 +710,5 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
     },
   };
 }
+
+export { isCloudProviderKind };

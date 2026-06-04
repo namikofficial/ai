@@ -1,5 +1,21 @@
 import type { ConfigSnapshot } from "../../shared/src/index.ts";
 
+export interface EmbeddingConfig {
+  providerId: string;
+  modelName: string;
+  dimensions: number;
+  expectedCollection: string;
+}
+
+export function resolveEmbeddingConfig(): EmbeddingConfig {
+  const providerId = process.env.AI_EMBEDDING_PROVIDER ?? "heuristic";
+  const modelName = process.env.AI_EMBEDDING_MODEL ?? "heuristic-embedding";
+  const rawDim = process.env.AI_EMBEDDING_DIM;
+  const dimensions = rawDim ? Math.max(8, Math.min(8192, Number.parseInt(rawDim, 10) || 32)) : 32;
+  const expectedCollection = process.env.AI_QDRANT_COLLECTION ?? "ai_chunks";
+  return { providerId, modelName, dimensions, expectedCollection };
+}
+
 export function resolveConfig(overrides: Partial<ConfigSnapshot> = {}): ConfigSnapshot {
   const cwd = process.cwd();
   const envDatabasePath = process.env.AI_DATABASE_PATH;

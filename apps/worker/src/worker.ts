@@ -2,6 +2,12 @@ import { mkdir } from "node:fs/promises";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
+import { createEvent } from "../../../packages/shared/src/index.ts";
+import {
+  reflect as reflectEngine,
+  type ReflectionOutput,
+} from "../../../packages/reflection-engine/src/index.ts";
+import type { ReflectInput } from "../../../packages/reflection-engine/src/index.ts";
 
 interface WorkerOptions {
   config?: Partial<ConfigSnapshot>;
@@ -22,6 +28,142 @@ function parsePayload(value: string): Record<string, unknown> {
     // ignore malformed payloads and let the worker fail the job.
   }
   return {};
+}
+
+function buildReflectionInput(store: ReturnType<typeof createStore>, sessionId: string): ReflectInput {
+  const session = store.getSession(sessionId);
+  if (!session) {
+    throw new Error(`Unknown session: ${sessionId}`);
+  }
+  const projectId = session.projectId ?? undefined;
+  const conversation = store.conversation.listMessages(sessionId);
+  const retrievals = store.retrieval.listQueriesForSession(sessionId, 50);
+  const retrievalResults = new Map<string, ReturnType<typeof store.retrieval.listResults>>();
+  const retrievalSelectedContext = new Map<string, ReturnType<typeof store.retrieval.listSelectedContext>>();
+  const allFeedback: ReturnType<typeof store.retrieval.listFeedback> extends Array<infer T> ? T[] : never = [];
+  const allMisses: ReturnType<typeof store.retrieval.listMisses> extends Array<infer T> ? T[] : never = [];
+  for (const query of retrievals) {
+    retrievalResults.set(query.id, store.retrieval.listResults(query.id, 200));
+    retrievalSelectedContext.set(query.id, store.retrieval.listSelectedContext(query.id));
+    for (const fb of store.retrieval.listFeedback(query.id, 50)) {
+      allFeedback.push(fb);
+    }
+    for (const miss of store.retrieval.listMisses(query.id)) {
+      allMisses.push(miss);
+    }
+  }
+  const contextPackRecords = store.context.listPacksForSession(sessionId, 50);
+  const contextPacks = contextPackRecords.map((pack) => ({
+    id: pack.id,
+    usedTokens: pack.usedTokens,
+    budgetTokens: pack.budgetTokens,
+    retrievalQueryId: pack.retrievalQueryId,
+  }));
+  const agentRuns = store.agents.listRuns(sessionId, 200);
+  const modelCalls = store.models.listCalls(sessionId, 200);
+  const checks = store.listCheckRuns(50);
+  const reviews = projectId ? store.listReviews(projectId, 50) : store.listReviews(null, 50);
+  const answerEvaluations = store.evals.listAnswerEvaluations(50);
+  const outcomes = store.evals.listOutcomes(sessionId, 20);
+  const outcome = outcomes.at(-1) ?? null;
+  const existingFacts = projectId ? store.memory.listFacts(projectId, 200) : store.memory.listFacts(null, 200);
+  const existingRules = projectId
+    ? store.memory.listProjectRules(projectId, 200)
+    : [];
+  const existingSkills = store.skills.listSkills(undefined, 200);
+  return {
+    session,
+    conversation,
+    retrievals,
+    retrievalResults,
+    retrievalSelectedContext,
+    retrievalFeedback: allFeedback,
+    retrievalMisses: allMisses,
+    contextPacks,
+    agentRuns,
+    modelCalls,
+    checks,
+    reviews,
+    answerEvaluations,
+    outcome,
+    existingFacts,
+    existingRules,
+    existingSkills,
+  };
+}
+
+interface ReflectionCounts {
+  memoryCandidates: number;
+  skillCandidates: number;
+  facts: number;
+  staleFacts: number;
+  retrievalFeedback: number;
+}
+
+function applyReflectionOutput(
+  store: ReturnType<typeof createStore>,
+  sessionId: string,
+  output: ReflectionOutput,
+): ReflectionCounts {
+  const session = store.getSession(sessionId);
+  const projectId = session?.projectId ?? null;
+  let memoryCandidates = 0;
+  for (const candidate of output.memoryCandidates) {
+    store.memory.createCandidate({
+      projectId,
+      sessionId,
+      kind: candidate.kind,
+      title: candidate.title,
+      body: candidate.body,
+      evidence: candidate.evidence as unknown as Array<Record<string, unknown>>,
+      confidence: candidate.confidence,
+      scope: candidate.scope,
+    });
+    memoryCandidates += 1;
+  }
+  let skillCandidates = 0;
+  for (const candidate of output.skillCandidates) {
+    store.skills.createCandidate({
+      projectId,
+      title: candidate.title,
+      triggerTerms: candidate.triggerTerms,
+      applicableProjects: projectId ? [projectId] : [],
+      steps: candidate.steps,
+      requiredContext: candidate.requiredContext,
+      commands: candidate.commands,
+      safetyNotes: candidate.safetyNotes,
+      validation: candidate.validation,
+      exampleSessionId: candidate.exampleSessionId,
+      sourceKind: candidate.sourceKind,
+      confidence: candidate.confidence,
+    });
+    skillCandidates += 1;
+  }
+  let facts = 0;
+  for (const fact of output.facts) {
+    store.memory.recordFact({
+      projectId,
+      key: fact.key,
+      value: fact.value,
+      kind: fact.kind,
+      confidence: fact.confidence,
+      sourceKind: fact.sourceKind,
+      sources: fact.sources.map((source) => ({ kind: source.kind, ref: source.ref, excerpt: source.excerpt })),
+    });
+    facts += 1;
+  }
+  let retrievalFeedback = 0;
+  for (const feedback of output.retrievalFeedback) {
+    store.retrieval.recordFeedback({
+      retrievalQueryId: feedback.retrievalQueryId,
+      chunkId: feedback.chunkId,
+      rating: feedback.rating,
+      missedPath: feedback.missedPath,
+      notes: feedback.notes,
+    });
+    retrievalFeedback += 1;
+  }
+  return { memoryCandidates, skillCandidates, facts, staleFacts: output.staleFacts.length, retrievalFeedback };
 }
 
 export async function processNextJob(store: ReturnType<typeof createStore>): Promise<boolean> {
@@ -89,30 +231,63 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       };
     } else if (job.type === "session.reflect") {
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
-      const session = sessionId ? store.getSession(sessionId) : null;
-      if (!session) {
-        throw new Error(`Unknown session: ${sessionId ?? "missing"}`);
+      if (!sessionId) {
+        throw new Error("session.reflect requires sessionId");
       }
-      output = store.createLesson({
+      const session = store.getSession(sessionId);
+      if (!session) {
+        throw new Error(`Unknown session: ${sessionId}`);
+      }
+      const reflectInput = buildReflectionInput(store, sessionId);
+      const reflection = reflectEngine(reflectInput);
+      const counts = applyReflectionOutput(store, sessionId, reflection);
+      const lesson = store.createLesson({
         projectId: session.projectId,
         sessionId: session.id,
         title: `Reflection: ${session.title}`,
-        body: session.finalSummary ?? session.userGoal,
-        tags: ["worker", "reflection"],
+        body: reflection.notes.length > 0 ? reflection.notes.join("\n") : session.finalSummary ?? session.userGoal,
+        tags: ["worker", "reflection", "engine"],
         importance: 3,
       });
+      store.appendEvent(
+        createEvent(
+          "session.reflected",
+          {
+            sessionId,
+            projectId: session.projectId,
+            counts,
+            noteCount: reflection.notes.length,
+          },
+          { sessionId, projectId: session.projectId, agent: "reflection" },
+        ),
+      );
+      output = { lesson, counts, notes: reflection.notes };
     } else if (job.type === "review.reflect") {
       const reviewId = typeof payload.reviewId === "string" ? payload.reviewId : null;
       const review = reviewId ? store.getReview(reviewId) : null;
       if (!review) {
         throw new Error(`Unknown review: ${reviewId ?? "missing"}`);
       }
+      const sessionId = review.sessionId;
+      let counts: ReflectionCounts = { memoryCandidates: 0, skillCandidates: 0, facts: 0, staleFacts: 0, retrievalFeedback: 0 };
+      if (sessionId) {
+        const reflectInput = buildReflectionInput(store, sessionId);
+        const reflection = reflectEngine(reflectInput);
+        counts = applyReflectionOutput(store, sessionId, reflection);
+        store.appendEvent(
+          createEvent(
+            "review.reflected",
+            { reviewId, sessionId, counts },
+            { sessionId, projectId: review.projectId, agent: "reflection" },
+          ),
+        );
+      }
       output = store.createLesson({
         projectId: review.projectId,
         sessionId: review.sessionId,
         title: `Review reflection: ${review.title}`,
         body: `${review.summary}\n\nReflect on follow-up actions and keep the scope tight.`,
-        tags: ["worker", "review", "reflection"],
+        tags: ["worker", "review", "reflection", "engine"],
         importance: 3,
       });
     } else {

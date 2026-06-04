@@ -280,6 +280,7 @@ export type EventType =
   | "session.cancelled"
   | "session.completed"
   | "session.failed"
+  | "session.reflected"
   | "task.created"
   | "task.started"
   | "task.completed"
@@ -301,6 +302,7 @@ export type EventType =
   | "check.completed"
   | "check.failed"
   | "handoff.created"
+  | "review.reflected"
   | "lesson.created";
 
 export interface ConfigSnapshot {

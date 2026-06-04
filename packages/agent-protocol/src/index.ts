@@ -84,7 +84,7 @@ export type {
   TaskStatus,
 } from "../../shared/src/index.ts";
 
-import type { EventType, ModelRole } from "../../shared/src/index.ts";
+import type { EventType } from "../../shared/src/index.ts";
 
 export type AgentId =
   | "orchestrator"
@@ -361,4 +361,284 @@ export function agentsWithModelRole(role: ModelRole): AgentDescriptor[] {
 
 export function isAgentId(value: string): value is AgentId {
   return AGENT_REGISTRY.has(value as AgentId);
+}
+
+import type {
+  AgentMessageRecord,
+  AgentRunRecord,
+  AgentStatus,
+  EventEnvelope,
+  ModelRole,
+} from "../../shared/src/index.ts";
+import { createEvent, createId } from "../../shared/src/index.ts";
+import type {
+  ModelInvokeOptions,
+  ModelInvokeRequest,
+  ModelInvokeResult,
+  ModelRuntime,
+} from "../../model-runtime/src/index.ts";
+
+export interface AgentExecutorHooks {
+  recordRun(run: AgentRunRecord): void;
+  recordMessage(message: AgentMessageRecord): void;
+  emitEvent(event: EventEnvelope): void;
+  invokeModel: (profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions) => Promise<ModelInvokeResult>;
+  now: () => Date;
+}
+
+export interface AgentRunInput {
+  id?: string;
+  sessionId?: string | null;
+  taskId?: string | null;
+  projectId?: string | null;
+  input: Record<string, unknown>;
+  profileId?: string | null;
+}
+
+export interface AgentRunResult {
+  run: AgentRunRecord;
+  messages: AgentMessageRecord[];
+  result?: ModelInvokeResult;
+  error?: string;
+}
+
+export class AgentExecutor {
+  readonly id: AgentId;
+  private readonly runtime: ModelRuntime;
+  private readonly hooks: AgentExecutorHooks;
+
+  constructor(id: AgentId, runtime: ModelRuntime, hooks: AgentExecutorHooks) {
+    if (!AGENT_REGISTRY.has(id)) {
+      throw new Error(`unknown agent: ${id}`);
+    }
+    this.id = id;
+    this.runtime = runtime;
+    this.hooks = hooks;
+  }
+
+  descriptor(): AgentDescriptor {
+    return AGENT_REGISTRY.get(this.id)!;
+  }
+
+  validateTool(tool: AgentToolName): boolean {
+    return isToolAllowed(this.id, tool);
+  }
+
+  private createRun(input: AgentRunInput, status: AgentStatus, startedAt: string, finishedAt: string | null, output: Record<string, unknown>, error: string | null, modelRole: ModelRole | null): AgentRunRecord {
+    const descriptor = this.descriptor();
+    return {
+      id: input.id ?? createId("arun"),
+      sessionId: input.sessionId ?? null,
+      taskId: input.taskId ?? null,
+      projectId: input.projectId ?? null,
+      agent: descriptor.id,
+      role: descriptor.role,
+      status,
+      input: input.input,
+      output,
+      modelRole: modelRole ?? descriptor.modelRole,
+      risk: descriptor.risk,
+      startedAt,
+      finishedAt,
+      durationMs: finishedAt ? new Date(finishedAt).getTime() - new Date(startedAt).getTime() : null,
+      error,
+      createdAt: startedAt,
+      updatedAt: finishedAt ?? startedAt,
+    };
+  }
+
+  async run(input: AgentRunInput): Promise<AgentRunResult> {
+    const descriptor = this.descriptor();
+    const startedAt = this.hooks.now().toISOString();
+    const messages: AgentMessageRecord[] = [];
+    const runId = input.id ?? createId("arun");
+    this.hooks.emitEvent(
+      createEvent(
+        "agent.started",
+        { agent: descriptor.id, role: descriptor.role, risk: descriptor.risk, input: input.input },
+        { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, id: `${runId}_started` },
+      ),
+    );
+    if (input.input && typeof input.input === "object" && "tool" in input.input) {
+      const toolName = String((input.input as Record<string, unknown>).tool);
+      if (!descriptor.allowedTools.includes(toolName as AgentToolName)) {
+        const run = this.createRun({ ...input, id: runId }, "failed", startedAt, this.hooks.now().toISOString(), { error: "tool not allowed", tool: toolName }, `tool ${toolName} not in allowlist`, descriptor.modelRole);
+        this.hooks.recordRun(run);
+        this.hooks.emitEvent(
+          createEvent(
+            "agent.failed",
+            { agent: descriptor.id, runId: run.id, reason: "tool-not-allowed", tool: toolName },
+            { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, level: "warn", id: `${runId}_failed_tool` },
+          ),
+        );
+        return { run, messages, error: run.error ?? "tool not allowed" };
+      }
+    }
+    const profileId = input.profileId ?? (descriptor.modelRole ? this.findProfileIdForRole(descriptor.modelRole) : null);
+    if (!profileId) {
+      const run = this.createRun({ ...input, id: runId }, "failed", startedAt, this.hooks.now().toISOString(), { error: "no profile for role" }, `no profile for role ${descriptor.modelRole ?? "none"}`, descriptor.modelRole);
+      this.hooks.recordRun(run);
+      this.hooks.emitEvent(
+        createEvent(
+          "agent.failed",
+          { agent: descriptor.id, runId: run.id, reason: "no-profile" },
+          { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, level: "warn", id: `${runId}_failed_profile` },
+        ),
+      );
+      return { run, messages, error: run.error ?? "no profile" };
+    }
+    const systemMessage: AgentMessageRecord = {
+      id: `${runId}_msg_in`,
+      agentRunId: runId,
+      direction: "in",
+      role: "system",
+      content: `Agent ${descriptor.id} (${descriptor.role}) starting`,
+      meta: { profileId, risk: descriptor.risk, timeoutMs: descriptor.timeoutMs },
+      ts: startedAt,
+      createdAt: startedAt,
+    };
+    this.hooks.recordMessage(systemMessage);
+    messages.push(systemMessage);
+
+    const request: ModelInvokeRequest = {
+      role: descriptor.modelRole ?? "answer",
+      modelName: profileId,
+      messages: [
+        { role: "system", content: `You are the ${descriptor.id} agent. ${descriptor.description}` },
+        { role: "user", content: JSON.stringify(input.input) },
+      ],
+    };
+    const start = this.hooks.now().getTime();
+    let result: ModelInvokeResult | null = null;
+    let error: string | null = null;
+    try {
+      result = await this.runWithRetry(profileId, request, descriptor.timeoutMs, input, runId);
+    } catch (err) {
+      error = err instanceof Error ? err.message : String(err);
+    }
+    const finishedAt = this.hooks.now().toISOString();
+    const durationMs = this.hooks.now().getTime() - start;
+    const status: AgentStatus = error ? "failed" : "completed";
+    const run = this.createRun(
+      { ...input, id: runId },
+      status,
+      startedAt,
+      finishedAt,
+      result ? { text: result.text, modelRole: descriptor.modelRole, profileId } : { error },
+      error,
+      descriptor.modelRole,
+    );
+    this.hooks.recordRun(run);
+    const outMessage: AgentMessageRecord = {
+      id: `${runId}_msg_out`,
+      agentRunId: runId,
+      direction: "out",
+      role: "assistant",
+      content: result ? result.text : `error: ${error ?? "unknown"}`,
+      meta: {
+        profileId,
+        modelRole: descriptor.modelRole,
+        promptTokens: result?.promptTokens ?? 0,
+        completionTokens: result?.completionTokens ?? 0,
+        latencyMs: result?.latencyMs ?? durationMs,
+        status: result?.status ?? "failed",
+      },
+      ts: finishedAt,
+      createdAt: finishedAt,
+    };
+    this.hooks.recordMessage(outMessage);
+    messages.push(outMessage);
+    this.hooks.emitEvent(
+      createEvent(
+        status === "completed" ? "agent.completed" : "agent.failed",
+        { agent: descriptor.id, runId: run.id, profileId, durationMs, status, error },
+        { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, level: status === "completed" ? "info" : "warn", id: `${runId}_done` },
+      ),
+    );
+    return { run, messages, result: result ?? undefined, error: error ?? undefined };
+  }
+
+  private findProfileIdForRole(role: ModelRole): string | null {
+    const profiles = this.runtime.listProfiles().filter((profile) => profile.role === role && profile.enabled);
+    if (profiles.length === 0) return null;
+    return profiles[0].id;
+  }
+
+  private async runWithRetry(
+    profileId: string,
+    request: ModelInvokeRequest,
+    timeoutMs: number,
+    input: AgentRunInput,
+    runId: string,
+  ): Promise<ModelInvokeResult> {
+    const descriptor = this.descriptor();
+    const maxAttempts = descriptor.retry === "exponential" ? 3 : 1;
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      try {
+        return await this.runWithTimeout(profileId, request, timeoutMs, input, runId);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+        if (descriptor.retry === "none") throw lastError;
+        if (descriptor.retry === "fallback_only") {
+          const fallbackId = this.runtime.listProfiles().find((profile) => profile.role === descriptor.modelRole && profile.localOnly && profile.enabled && profile.id !== profileId)?.id;
+          if (fallbackId) {
+            return await this.runWithTimeout(fallbackId, request, timeoutMs, input, runId);
+          }
+          throw lastError;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
+      }
+    }
+    throw lastError ?? new Error("agent retries exhausted");
+  }
+
+  private async runWithTimeout(
+    profileId: string,
+    request: ModelInvokeRequest,
+    timeoutMs: number,
+    input: AgentRunInput,
+    runId: string,
+  ): Promise<ModelInvokeResult> {
+    const agentId = this.id;
+    return await new Promise<ModelInvokeResult>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`agent timeout after ${timeoutMs}ms`)), timeoutMs);
+      this.hooks
+        .invokeModel(profileId, request, {
+          sessionId: input.sessionId ?? null,
+          taskId: input.taskId ?? null,
+          recordCall: (payload) => {
+            this.hooks.emitEvent(
+              createEvent(
+                payload.status === "ok" ? "model.completed" : payload.status === "blocked" ? "tool.blocked" : "model.failed",
+                { profileId: payload.profileId, role: payload.role, latencyMs: payload.latencyMs, status: payload.status, error: payload.error },
+                {
+                  sessionId: payload.sessionId ?? null,
+                  taskId: payload.taskId ?? null,
+                  agent: agentId,
+                  level: payload.status === "ok" ? "info" : "warn",
+                  id: `${runId}_model_${payload.profileId}`,
+                },
+              ),
+            );
+          },
+        })
+        .then((result) => {
+          clearTimeout(timer);
+          resolve(result);
+        })
+        .catch((error) => {
+          clearTimeout(timer);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        });
+    });
+  }
+}
+
+export function createAgentExecutor(input: {
+  agentId: AgentId;
+  runtime: ModelRuntime;
+  hooks: AgentExecutorHooks;
+}): AgentExecutor {
+  return new AgentExecutor(input.agentId, input.runtime, input.hooks);
 }

@@ -24,6 +24,7 @@ declare module "node:path" {
   export function basename(path: string, suffix?: string): string;
   export function dirname(path: string): string;
   export function extname(path: string): string;
+  export function isAbsolute(path: string): boolean;
   export function join(...parts: string[]): string;
   export function normalize(path: string): string;
   export function resolve(...parts: string[]): string;
@@ -73,6 +74,8 @@ declare module "node:assert/strict" {
     equal(actual: unknown, expected: unknown, message?: string): void;
     deepEqual(actual: unknown, expected: unknown, message?: string): void;
     notEqual(actual: unknown, expected: unknown, message?: string): void;
+    match(actual: string, expected: RegExp, message?: string): void;
+    throws(fn: () => unknown, expected?: RegExp | Error | Function, message?: string): void;
   };
   export default assert;
 }

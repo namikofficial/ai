@@ -6,6 +6,12 @@ import { basename, extname, join, normalize, relative, resolve } from "node:path
 import { DatabaseSync } from "node:sqlite";
 import { runMigrations } from "./migrate.ts";
 import { buildAnswer, selectModelProfile } from "../../model-runtime/src/index.ts";
+import type { ModelInvokeOptions, ModelInvokeRequest, ModelInvokeResult, ModelRuntime } from "../../model-runtime/src/index.ts";
+import { buildContextPack } from "../../context-engine/src/index.ts";
+import { reflect as reflectEngine } from "../../reflection-engine/src/index.ts";
+import { compilePrompt } from "../../prompt-compiler/src/index.ts";
+import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index.ts";
+import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import {
   createAgentsRepo,
   createContextRepo,
@@ -602,6 +608,11 @@ export function createStore(db: DatabaseSync) {
     qdrantAvailable = false;
   }
 
+  let intelligenceStack: {
+    runtime: ModelRuntime;
+    runtimeOptions?: { sessionId?: string | null; taskId?: string | null; retrievalQueryId?: string | null };
+  } | null = null;
+
   const conversationRepo = createConversationRepo(db);
   const retrievalRepo = createRetrievalRepo(db);
   const modelsRepo = createModelsRepo(db);
@@ -615,6 +626,12 @@ export function createStore(db: DatabaseSync) {
 
   const store = {
     db,
+    setIntelligenceStack(stack: typeof intelligenceStack): void {
+      intelligenceStack = stack;
+    },
+    hasIntelligenceStack(): boolean {
+      return intelligenceStack != null;
+    },
     seedAndMigrate: () => {
       db.exec("PRAGMA foreign_keys = ON;");
     },
@@ -1540,23 +1557,117 @@ export function createStore(db: DatabaseSync) {
         reason: `target=${input.target}`,
       });
       const files = store.listProjectFiles(project.id, 10).map((file) => file.path);
-      const prompt = [
-        `Target: ${input.target}`,
-        `Project: ${project.name}`,
-        `Subtask: ${input.subtask}`,
-        "",
-        "Inspect:",
-        ...files.slice(0, 4).map((file) => `- ${file}`),
-        "",
-        "Checks:",
-        "- typecheck",
-        "- focused tests",
-      ].join("\n");
+      const recentQueries = retrievalRepo.listQueriesForSession(session.id, 5);
+      const lastQuery = recentQueries.at(-1) ?? null;
+      const lastContext = lastQuery ? retrievalRepo.listSelectedContext(lastQuery.id) : [];
+      const lastResults = lastQuery ? retrievalRepo.listResults(lastQuery.id, 10) : [];
+      const memoryEntries = memoryRepo.listEntries(project.id, undefined, 5);
+      const facts = memoryRepo.listFacts(project.id, 5);
+      const rules = memoryRepo.listProjectRules(project.id, 5);
+      const previousMessages = conversationRepo.listMessages(session.id).slice(-6);
+      const ranked: RankedChunk[] = [];
+      for (const item of lastContext) {
+        const result = lastResults.find((r) => r.chunkId === item.chunkId);
+        if (!result) continue;
+        ranked.push({
+          chunk: {
+            id: item.chunkId,
+            projectId: project.id,
+            documentId: result.path,
+            path: result.path,
+            content: item.excerpt,
+            startLine: result.startLine,
+            endLine: result.endLine,
+            tokenCount: item.tokenCount,
+            score: result.finalScore,
+            metadata: { retrievalQueryId: lastQuery?.id ?? null },
+          },
+          baseScore: result.baseScore,
+          rerankScore: result.rerankScore,
+          finalScore: result.finalScore,
+          rerankReason: result.reason ?? "no-boost",
+          boosters: [],
+        });
+      }
+      const packedContext = buildContextPack({
+        sessionId: session.id,
+        taskId: session.activeTaskId,
+        projectId: project.id,
+        retrievalQueryId: lastQuery?.id ?? null,
+        budgetTokens: 4096,
+        ranked,
+        memoryEntries,
+        facts,
+        rules,
+        previousMessages,
+        systemInstructions: [
+          `Target: ${input.target}`,
+          `Project: ${project.name}`,
+          input.subtask,
+          "No arbitrary shell execution from the assistant output.",
+          "Keep edits within the project root.",
+          "Destructive actions require human approval.",
+        ],
+      });
+      const contextPack = contextRepo.recordPack({
+        sessionId: session.id,
+        taskId: session.activeTaskId,
+        projectId: project.id,
+        retrievalQueryId: lastQuery?.id ?? null,
+        budgetTokens: packedContext.pack.budgetTokens,
+        usedTokens: packedContext.pack.usedTokens,
+        reason: packedContext.pack.reason ?? `handoff:${input.target}`,
+        items: packedContext.items.map((item, index) => ({
+          kind: item.kind,
+          sourceId: item.sourceId,
+          rank: item.rank ?? index,
+          tokenCount: item.tokenCount,
+          excerpt: item.excerpt,
+          included: item.included,
+          omissionReason: item.omissionReason,
+        })),
+        budgetEvents: packedContext.budgetEvents.map((event) => ({
+          deltaTokens: event.deltaTokens,
+          reason: event.reason,
+        })),
+      });
+      const compiled = compilePrompt({
+        mode: "handoff",
+        role: "coder_handoff",
+        contextPackId: contextPack.id,
+        userRequest: input.subtask,
+        projectRules: rules,
+        memoryEntries,
+        facts,
+        retrievalChunks: ranked.map((r) => r.chunk),
+        previousMessages,
+        taskConstraints: [
+          `Target: ${input.target}`,
+          `Project: ${project.name}`,
+          input.subtask,
+          "No arbitrary shell execution from the assistant output.",
+          "Keep edits within the project root.",
+          "Destructive actions require human approval.",
+        ],
+        outputSchema: {
+          type: "object",
+          properties: { prompt: { type: "string" } },
+          required: ["prompt"],
+        },
+        metadata: { target: input.target, sessionId: session.id, contextPackId: contextPack.id },
+        tokenBudget: 4096,
+      });
+      const prompt = compiled.messages.map((m) => `${m.role}: ${m.content}`).join("\n\n");
       const selectedContext = {
         filesToInspect: files.slice(0, 4),
         filesLikelyToEdit: files.slice(0, 3),
         checksToRun: ["typecheck", "tests"],
-        constraints: ["No arbitrary shell execution", "Keep edits within the project root", "Do not delete files without approval"],
+        constraints: [
+          "No arbitrary shell execution",
+          "Keep edits within the project root",
+          "Do not delete files without approval",
+          `Context pack: ${contextPack.id} (${packedContext.pack.usedTokens}/${packedContext.pack.budgetTokens} tokens)`,
+        ],
       };
       const id = createId("handoff");
       const ts = now();
@@ -1564,32 +1675,17 @@ export function createStore(db: DatabaseSync) {
         `INSERT INTO handoffs (id, session_id, task_id, project_id, target, prompt, selected_context_json, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(id, session.id, session.activeTaskId, project.id, input.target, prompt, JSON.stringify(selectedContext), ts, ts);
-      const contextPack = contextRepo.recordPack({
-        sessionId: session.id,
-        taskId: session.activeTaskId,
-        projectId: project.id,
-        budgetTokens: 2048,
-        usedTokens: files.slice(0, 4).reduce((sum, file) => sum + file.length / 4, 0),
-        reason: `handoff:${input.target}`,
-        items: files.slice(0, 4).map((file, index) => ({
-          kind: "previous_session",
-          sourceId: file,
-          rank: index,
-          tokenCount: Math.ceil(file.length / 4),
-          excerpt: file,
-        })),
-      });
       const handoffModelCall = modelsRepo.recordCall({
         sessionId: session.id,
         taskId: session.activeTaskId,
         profileId: modelsRepo.getProfile("handoff-local")?.id ?? "handoff-local",
         role: "coder_handoff",
-        promptTokens: Math.ceil((input.subtask.length + files.join("\n").length) / 4),
+        promptTokens: compiled.estimatedTokens,
         completionTokens: Math.ceil(prompt.length / 4),
         latencyMs: 0,
         status: "ok",
-        request: { target: input.target, subtask: input.subtask, files, contextPackId: contextPack.id },
-        response: { handoffId: id, prompt, selectedContext },
+        request: { target: input.target, subtask: input.subtask, files, contextPackId: contextPack.id, compiledId: compiled.id },
+        response: { handoffId: id, prompt, selectedContext, promptCompiled: true },
       });
       store.appendEvent(createEvent("model.called", { role: "coder_handoff", profileId: handoffModelCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
       store.appendEvent(createEvent("model.completed", { role: "coder_handoff", profileId: handoffModelCall.profileId, requestId: handoffModelCall.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
@@ -1601,30 +1697,30 @@ export function createStore(db: DatabaseSync) {
         role: "target-handoff",
         modelRole: "coder_handoff",
         risk: "low",
-        input: { target: input.target, subtask: input.subtask, contextPackId: contextPack.id },
+        input: { target: input.target, subtask: input.subtask, contextPackId: contextPack.id, compiledId: compiled.id },
       });
       agentsRepo.appendMessage({
         agentRunId: handoffAgentRun.id,
         direction: "out",
         role: "prompt",
         content: prompt,
-        meta: { target: input.target, subtask: input.subtask },
+        meta: { target: input.target, subtask: input.subtask, compiledId: compiled.id, safetyNotes: compiled.safetyNotes.length },
       });
       agentsRepo.updateRun(handoffAgentRun.id, {
         status: "completed",
         finishedAt: now(),
         durationMs: 0,
-        output: { handoffId: id, contextPackId: contextPack.id, target: input.target },
+        output: { handoffId: id, contextPackId: contextPack.id, target: input.target, compiledId: compiled.id },
       });
       agentsRepo.recordHandoff({
         fromAgentRunId: handoffAgentRun.id,
         toAgent: input.target,
-        payload: { subtask: input.subtask, filesToInspect: selectedContext.filesToInspect, checks: selectedContext.checksToRun },
+        payload: { subtask: input.subtask, filesToInspect: selectedContext.filesToInspect, checks: selectedContext.checksToRun, compiledId: compiled.id },
         contextPackId: contextPack.id,
         sessionId: session.id,
         taskId: session.activeTaskId,
       });
-      store.appendEvent(createEvent("handoff.created", { target: input.target, prompt }, { sessionId: session.id, projectId: project.id, agent: "handoff" }));
+      store.appendEvent(createEvent("handoff.created", { target: input.target, prompt, contextPackId: contextPack.id, compiledId: compiled.id }, { sessionId: session.id, projectId: project.id, agent: "handoff" }));
       store.enqueueJob({
         type: "handoff.archive",
         payload: {
@@ -2077,6 +2173,36 @@ export function createStore(db: DatabaseSync) {
         chunks.length === 0
           ? `I could not find enough local context in ${project.name} to answer "${input.question}".`
           : buildAnswer(input.question, project, chunks, citations, confidence);
+      let intelligenceResult: ModelInvokeResult | null = null;
+      if (intelligenceStack && chunks.length > 0) {
+        try {
+          const request: ModelInvokeRequest = {
+            role: "answer",
+            messages: [
+              { role: "system", content: `You are the answer_agent for project ${project.name}. Cite paths and line numbers from the context.` },
+              { role: "user", content: `Question: ${input.question}\n\nContext:\n${chunks.map((c) => `${c.path}:${c.startLine}-${c.endLine}\n${c.content}`).join("\n\n")}` },
+            ],
+            temperature: 0,
+          };
+          intelligenceResult = await intelligenceStack.runtime.invoke(
+            session.modelProfile ?? "ask-fast-local",
+            request,
+            {
+              sessionId: session.id,
+              taskId: retrievalAgentRun.id,
+              retrievalQueryId: retrievalQuery.id,
+            },
+          );
+        } catch (error) {
+          store.appendEvent(
+            createEvent(
+              "model.failed",
+              { role: "answer", error: error instanceof Error ? error.message : String(error) },
+              { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "warn" },
+            ),
+          );
+        }
+      }
 
       agentsRepo.updateRun(retrievalAgentRun.id, {
         status: "completed",
