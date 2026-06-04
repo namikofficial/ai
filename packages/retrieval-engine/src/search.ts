@@ -82,6 +82,163 @@ function safeParseJson(value: string): Record<string, unknown> {
   }
 }
 
+function safeParseArray(value: unknown): unknown[] {
+  if (typeof value !== "string" || value.trim().length === 0) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function toNumberOrZero(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value === "string" && value.length > 0) return Number(value);
+  return 0;
+}
+
+function scoreSymbolRow(query: string, row: Record<string, unknown>): number {
+  const terms = tokenize(query);
+  const lowered = query.toLowerCase();
+  const path = asString(row.path);
+  const name = asString(row.name);
+  const qualifiedName = asString(row.qualified_name);
+  const kind = asString(row.kind);
+  const haystack = `${path}\n${name}\n${qualifiedName}\n${kind}`.toLowerCase();
+  let score = 0;
+  for (const term of terms) {
+    if (haystack.includes(term)) {
+      score += term.length >= 6 ? 3 : 1.5;
+    }
+  }
+  if (lowered.includes(name.toLowerCase()) || lowered.includes(qualifiedName.toLowerCase())) {
+    score += 4;
+  }
+  if (/auth|session|jwt|tenant/.test(lowered) && /auth|session|jwt|tenant/i.test(haystack)) {
+    score += 3;
+  }
+  if (/where is|how is|how does|what calls|handled|used/i.test(lowered) && /route|middleware|function|class|method|import/i.test(kind)) {
+    score += 1;
+  }
+  if (/test|spec/i.test(path) && /test|spec/.test(lowered)) {
+    score += 1.5;
+  }
+  return score;
+}
+
+function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: string, limit: number): RetrievalChunk[] {
+  if (query.trim().length === 0) return [];
+  try {
+    const symbolRows = db
+      .prepare(
+        `SELECT id, path, language, kind, name, qualified_name, start_line, end_line, signature, doc, metadata_json
+         FROM code_symbols
+         WHERE project_id = ?`,
+      )
+      .all(projectId) as Array<Record<string, unknown>>;
+    const scoredSymbols = symbolRows
+      .map((row) => ({
+        row,
+        score: scoreSymbolRow(query, row),
+      }))
+      .filter((entry) => entry.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, Math.max(6, limit));
+    const symbolIds = new Set(scoredSymbols.map((entry) => asString(entry.row.id)));
+    const chunks: RetrievalChunk[] = [];
+    const chunkRows = db.prepare(
+      `SELECT cs.symbol_id, cs.overlap_lines, c.*
+       FROM code_symbol_chunks cs
+       JOIN rag_chunks c ON c.id = cs.chunk_id
+       WHERE cs.project_id = ? AND cs.symbol_id = ? AND c.project_id = ?
+       ORDER BY cs.overlap_lines DESC, c.start_line ASC`,
+    );
+    const edgeRows = db.prepare(
+      `SELECT * FROM code_edges
+       WHERE project_id = ? AND (from_symbol_id = ? OR to_symbol_id = ?)`,
+    );
+    for (const symbolEntry of scoredSymbols) {
+      const symbol = symbolEntry.row;
+      const symbolId = asString(symbol.id);
+      const symbolMetadata = safeParseJson(asString(symbol.metadata_json));
+      const symbolChunkRows = chunkRows.all(projectId, symbolId, projectId) as Array<Record<string, unknown>>;
+      for (const row of symbolChunkRows) {
+        const content = asString(row.content);
+        const metadata = safeParseJson(asString(row.metadata_json));
+        const path = asString(row.path) || asString(metadata.path);
+        const chunkScore = rankChunk(query, path, content, toNumberOrZero(row.start_line), toNumberOrZero(row.end_line));
+        chunks.push({
+          id: asString(row.id),
+          projectId: asString(row.project_id),
+          documentId: asString(row.document_id),
+          path,
+          content,
+          startLine: toNumberOrZero(row.start_line),
+          endLine: toNumberOrZero(row.end_line),
+          tokenCount: toNumberOrZero(row.token_count),
+          score: chunkScore + symbolEntry.score + (toNumberOrZero(row.overlap_lines) / 10),
+          metadata: {
+            ...metadata,
+            codeSymbols: [
+              {
+                id: symbolId,
+                kind: asString(symbol.kind),
+                name: asString(symbol.name),
+                qualifiedName: asString(symbol.qualified_name),
+                signature: symbol.signature == null ? null : asString(symbol.signature),
+                metadata: symbolMetadata,
+              },
+            ],
+            symbolMatch: {
+              symbolId,
+              score: symbolEntry.score,
+            },
+          },
+        });
+      }
+
+      const incomingEdges = edgeRows.all(projectId, symbolId, symbolId) as Array<Record<string, unknown>>;
+      for (const edge of incomingEdges) {
+        const otherId = asString(edge.from_symbol_id) === symbolId ? asString(edge.to_symbol_id) : asString(edge.from_symbol_id);
+        if (!otherId) continue;
+        const target = symbolRows.find((row) => asString(row.id) === otherId);
+        if (!target) continue;
+        const targetChunks = chunkRows.all(projectId, otherId, projectId) as Array<Record<string, unknown>>;
+        for (const row of targetChunks.slice(0, 2)) {
+          const content = asString(row.content);
+          const metadata = safeParseJson(asString(row.metadata_json));
+          const path = asString(row.path) || asString(metadata.path);
+          const chunkScore = rankChunk(query, path, content, toNumberOrZero(row.start_line), toNumberOrZero(row.end_line));
+          chunks.push({
+            id: asString(row.id),
+            projectId: asString(row.project_id),
+            documentId: asString(row.document_id),
+            path,
+            content,
+            startLine: toNumberOrZero(row.start_line),
+            endLine: toNumberOrZero(row.end_line),
+            tokenCount: toNumberOrZero(row.token_count),
+            score: chunkScore + (symbolEntry.score * 0.5) + toNumberOrZero(edge.confidence ?? 0),
+            metadata: {
+              ...metadata,
+              graphExpansion: {
+                fromSymbolId: symbolId,
+                toSymbolId: otherId,
+                kind: asString(edge.kind),
+                confidence: toNumberOrZero(edge.confidence),
+              },
+            },
+          });
+        }
+      }
+    }
+    return chunks;
+  } catch {
+    return [];
+  }
+}
+
 export interface SearchProjectChunksInput {
   db: DatabaseSync;
   projectId: string;
@@ -99,9 +256,24 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
   const addCandidates = (chunks: RetrievalChunk[]) => {
     for (const chunk of chunks) {
       const existing = candidates.get(chunk.id);
-      if (!existing || chunk.score > existing.score) {
+      if (!existing) {
         candidates.set(chunk.id, chunk);
+        continue;
       }
+      const score = Math.max(existing.score, chunk.score);
+      const existingMetadata = existing.metadata as Record<string, unknown>;
+      const chunkMetadata = chunk.metadata as Record<string, unknown>;
+      candidates.set(chunk.id, {
+        ...existing,
+        ...chunk,
+        score,
+        metadata: {
+          ...existingMetadata,
+          ...chunkMetadata,
+          graphExpansion: existingMetadata.graphExpansion ?? chunkMetadata.graphExpansion ?? null,
+          symbolMatch: existingMetadata.symbolMatch ?? chunkMetadata.symbolMatch ?? null,
+        },
+      });
     }
   };
 
@@ -192,6 +364,9 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
       // Keep the search best-effort: if the fallback path fails, return what we have.
     }
   }
+
+  const symbolChunks = selectTopSymbolChunks(input.db, input.projectId, normalizedQuery, limit);
+  addCandidates(symbolChunks);
 
   return Array.from(candidates.values())
     .sort((left, right) => right.score - left.score)

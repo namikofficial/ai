@@ -169,6 +169,26 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
         boosters: entry.boosters,
       },
     });
+
+    const codeSymbols = Array.isArray(entry.chunk.metadata.codeSymbols)
+      ? (entry.chunk.metadata.codeSymbols as Array<Record<string, unknown>>)
+      : [];
+    for (const symbol of codeSymbols) {
+      const qualifiedName = typeof symbol.qualifiedName === "string" ? symbol.qualifiedName : typeof symbol.name === "string" ? symbol.name : "symbol";
+      const signature = typeof symbol.signature === "string" ? symbol.signature : null;
+      candidates.push({
+        kind: "code_symbol",
+        sourceId: typeof symbol.id === "string" ? symbol.id : null,
+        excerpt: excerptFromContent(signature ? `${qualifiedName}\n${signature}` : qualifiedName),
+        priority: 2.5 + entry.finalScore / 12,
+        pinned: false,
+        reason: "symbol-from-chunk",
+        reference: {
+          path: entry.chunk.path,
+          symbolKind: typeof symbol.kind === "string" ? symbol.kind : "unknown",
+        },
+      });
+    }
   }
 
   for (const fact of input.facts ?? []) {

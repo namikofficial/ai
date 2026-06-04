@@ -191,6 +191,67 @@ textarea {
   border: 1px solid rgba(148, 163, 184, 0.12);
   background: rgba(15, 23, 42, 0.56);
 }
+.timeline {
+  display: grid;
+  gap: 0.75rem;
+}
+.timeline-item {
+  border-radius: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  background: rgba(15, 23, 42, 0.56);
+  overflow: hidden;
+}
+.timeline-item > summary {
+  list-style: none;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 0.75rem;
+  padding: 0.85rem;
+  cursor: pointer;
+}
+.timeline-item > summary::-webkit-details-marker {
+  display: none;
+}
+.timeline-rail {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  margin-top: 0.35rem;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.15);
+}
+.timeline-dot[data-kind="model_call"] {
+  background: var(--good);
+}
+.timeline-dot[data-kind="retrieval_query"],
+.timeline-dot[data-kind="retrieval_result"] {
+  background: var(--warn);
+}
+.timeline-dot[data-kind="memory_candidate"],
+.timeline-dot[data-kind="skill_candidate"],
+.timeline-dot[data-kind="eval"],
+.timeline-dot[data-kind="review"] {
+  background: #c084fc;
+}
+.timeline-line {
+  width: 2px;
+  min-height: 100%;
+  background: rgba(148, 163, 184, 0.2);
+}
+.timeline-main {
+  min-width: 0;
+}
+.timeline-item pre {
+  margin: 0 0.85rem 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: rgba(2, 6, 23, 0.55);
+}
 .row {
   display: flex;
   align-items: center;

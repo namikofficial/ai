@@ -14,6 +14,12 @@ import type {
   ProjectSummary,
   RetrievalChunk,
   ReviewRecord,
+  PromptLabRunRequest,
+  PromptLabRunRecord,
+  PromptLabResultRecord,
+  SessionReplayRequest,
+  SessionReplayResponse,
+  SessionTimelineResponse,
   TaskRecord,
   SessionRecord,
   SettingsSnapshot,
@@ -63,6 +69,9 @@ export function createApiClient(options: ApiClientOptions) {
     getProject(projectId: string): Promise<{ status: "ok"; data: ProjectSummary | null }> {
       return requestJson(options.baseUrl, `/projects/${projectId}`);
     },
+    getProjectGraph(projectId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
+      return requestJson(options.baseUrl, `/projects/${projectId}/graph`);
+    },
     createProject(input: ProjectCreateInput): Promise<{ status: "ok"; data: ProjectSummary }> {
       return requestJson(options.baseUrl, "/projects", {
         method: "POST",
@@ -88,6 +97,16 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getSessionEvents(sessionId: string): Promise<{ status: "ok"; data: EventEnvelope[] }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/events`);
+    },
+    getSessionTimeline(sessionId: string): Promise<{ status: "ok"; data: SessionTimelineResponse }> {
+      return requestJson(options.baseUrl, `/sessions/${sessionId}/timeline`);
+    },
+    replaySession(sessionId: string, input: SessionReplayRequest): Promise<{ status: "ok"; data: SessionReplayResponse }> {
+      return requestJson(options.baseUrl, `/sessions/${sessionId}/replay`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
     },
     listTasks(): Promise<{ status: "ok"; data: TaskRecord[] }> {
       return requestJson(options.baseUrl, "/tasks");
@@ -140,6 +159,13 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
+    explainContext(input: { project: string; query: string; mode?: "local" | "cloud" | "hybrid"; depth?: "shallow" | "standard" | "deep"; limit?: number }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, "/context/explain", {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
     getSettings(): Promise<{ status: "ok"; data: SettingsSnapshot }> {
       return requestJson(options.baseUrl, "/settings");
     },
@@ -151,6 +177,19 @@ export function createApiClient(options: ApiClientOptions) {
     },
     createReview(input: ReviewRequest): Promise<{ status: "ok"; data: ReviewResponse }> {
       return requestJson(options.baseUrl, "/reviews", {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    listPromptLabRuns(): Promise<{ status: "ok"; data: PromptLabRunRecord[] }> {
+      return requestJson(options.baseUrl, "/prompt-lab/runs");
+    },
+    getPromptLabRun(runId: string): Promise<{ status: "ok"; data: { run: PromptLabRunRecord; prompt: Record<string, unknown> | null; results: PromptLabResultRecord[] } }> {
+      return requestJson(options.baseUrl, `/prompt-lab/runs/${encodeURIComponent(runId)}`);
+    },
+    runPromptLab(input: PromptLabRunRequest): Promise<{ status: "ok"; data: { run: PromptLabRunRecord; prompt: Record<string, unknown> | null; results: PromptLabResultRecord[] } }> {
+      return requestJson(options.baseUrl, "/prompt-lab/run", {
         method: "POST",
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },

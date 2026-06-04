@@ -289,6 +289,94 @@ export interface EventEnvelope<TPayload = Record<string, unknown>> {
   payload: TPayload;
 }
 
+export type TimelineItemKind =
+  | "event"
+  | "message"
+  | "agent_run"
+  | "model_call"
+  | "compiled_prompt"
+  | "retrieval_query"
+  | "retrieval_result"
+  | "context_pack"
+  | "memory_candidate"
+  | "skill_candidate"
+  | "eval"
+  | "mcp_call"
+  | "check"
+  | "review"
+  | "handoff";
+
+export interface TimelineItem {
+  id: string;
+  ts: string;
+  kind: TimelineItemKind;
+  title: string;
+  status?: string;
+  durationMs?: number | null;
+  summary: string;
+  refs: Record<string, string | null>;
+  payload: unknown;
+}
+
+export interface SessionTimelineResponse {
+  session: SessionRecord;
+  items: TimelineItem[];
+  trace: Record<string, unknown>;
+}
+
+export interface SessionReplayRequest {
+  fromTimelineItemId?: string;
+  editedUserRequest?: string;
+  editedSystemPrompt?: string;
+  editedContextPackId?: string;
+  selectedPromptId?: string;
+  modelProfileId?: string;
+  mode?: "local" | "hybrid" | "cloud";
+  dryRun?: boolean;
+}
+
+export interface SessionReplayResponse {
+  parentSessionId: string;
+  childSession: SessionRecord;
+  replay: Record<string, unknown>;
+}
+
+export interface PromptLabRunRequest {
+  projectId: string;
+  promptId: string;
+  modelProfileIds: string[];
+  notes?: string | null;
+  dryRun?: boolean;
+}
+
+export interface PromptLabResultRecord {
+  id: string;
+  runId: string;
+  profileId: string;
+  profileName: string;
+  modelName: string;
+  status: "ok" | "failed" | "blocked" | "fallback";
+  promptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
+  outputText: string | null;
+  error: string | null;
+  approxCost: number | null;
+  createdAt: string;
+}
+
+export interface PromptLabRunRecord {
+  id: string;
+  sessionId: string | null;
+  projectId: string;
+  promptId: string;
+  mode: string;
+  selectedProfiles: string[];
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type EventType =
   | "session.created"
   | "session.started"
@@ -670,6 +758,7 @@ export interface ContextPackRecord {
 
 export type ContextPackItemKind =
   | "retrieval_chunk"
+  | "code_symbol"
   | "memory_entry"
   | "fact"
   | "project_rule"
@@ -691,6 +780,32 @@ export interface ContextPackItemRecord {
   included: boolean;
   omissionReason: string | null;
   createdAt: string;
+}
+
+export interface CodeSymbolRecord {
+  id: string;
+  projectId: string;
+  fileId: string;
+  path: string;
+  language: string | null;
+  kind: "function" | "class" | "method" | "interface" | "type" | "import" | "route" | "middleware" | "constant" | "unknown";
+  name: string;
+  qualifiedName: string;
+  startLine: number;
+  endLine: number;
+  signature: string | null;
+  doc: string | null;
+  metadata: Record<string, unknown>;
+}
+
+export interface CodeEdgeRecord {
+  id: string;
+  projectId: string;
+  fromSymbolId: string;
+  toSymbolId: string;
+  kind: "imports" | "calls" | "defines" | "uses" | "routes_to" | "middleware_for" | "tests" | "unknown";
+  confidence: number;
+  metadata: Record<string, unknown>;
 }
 
 export interface ContextBudgetEventRecord {

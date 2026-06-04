@@ -1,5 +1,8 @@
+import { readFileSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { createApiClient } from "../../../packages/api-client/src/index.ts";
-import { resolveConfig } from "../../../packages/config/src/index.ts";
+import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { startWorkbenchServer } from "../../../apps/api/src/server.ts";
 import { startWorkbenchWeb } from "../../../apps/web/src/server.ts";
 import { startWorkbenchWorker } from "../../../apps/worker/src/worker.ts";
@@ -18,12 +21,18 @@ function printUsage(): void {
   ai worker
   ai project add <path> [--name <name>]
   ai project index <project>
+  ai project graph <project>
   ai ask "<question>" --project <project>
+  ai context explain "<question>" --project <project>
+  ai config show --project <project>
+  ai config init --project <project>
+  ai config validate --project <project>
   ai plan "<goal>" --project <project>
   ai research "<topic>" --project <project>
   ai handoff --session <session-id> --project <project> --target <target> --subtask "<text>"
   ai sessions
   ai trace <session-id>
+  ai trace timeline <session-id>
   ai checks list
   ai checks run <name> --project <project>
   ai mcp
@@ -32,6 +41,7 @@ function printUsage(): void {
   ai reviews create --project <project> [--session <session-id>] [--title <title>] [--planned <files>] [--edited <files>] [--checks <checks>] [--notes <notes>]
   ai prompts list [--session <session-id>] [--limit <n>]
   ai prompts show <prompt-id>
+  ai replay <session-id> --prompt <compiled-prompt-id> --model <profile-id>
   ai memory candidates [--status <pending|accepted|rejected>]
   ai memory accept <candidate-id>
   ai memory reject <candidate-id> [--reason <text>]
@@ -86,6 +96,36 @@ function parseJson<T>(value: string | null): T | null {
   } catch {
     return null;
   }
+}
+
+function projectConfigCandidates(projectPath: string): string[] {
+  return [".ai-workbench.json", ".ai-workbench", ".aiconfig"].map((name) => join(projectPath, name));
+}
+
+function validateProjectConfigFile(projectPath: string): { path: string | null; valid: boolean; error: string | null; value: Record<string, unknown> | null } {
+  for (const candidate of projectConfigCandidates(projectPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(candidate, { encoding: "utf8" })) as unknown;
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        return { path: candidate, valid: false, error: "project config must be a JSON object", value: null };
+      }
+      return { path: candidate, valid: true, error: null, value: parsed as Record<string, unknown> };
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT") {
+        continue;
+      }
+      return { path: candidate, valid: false, error: error instanceof Error ? error.message : String(error), value: null };
+    }
+  }
+  return { path: null, valid: true, error: null, value: null };
+}
+
+async function getProjectRecord(client: ReturnType<typeof createApiClient>, projectId: string) {
+  const response = await client.getProject(projectId);
+  if (!response.data) {
+    throw new Error(`Unknown project: ${projectId}`);
+  }
+  return response.data;
 }
 
 function formatPromptSummary(prompt: {
@@ -235,6 +275,15 @@ async function run(): Promise<void> {
       printJson(result);
       return;
     }
+    if (subcommand === "graph") {
+      const project = positionals.shift();
+      if (!project) {
+        throw new Error("project graph requires a project identifier");
+      }
+      const result = await client.getProjectGraph(project);
+      printJson(result);
+      return;
+    }
   }
 
   if (command === "ask") {
@@ -251,6 +300,98 @@ async function run(): Promise<void> {
     });
     printJson(result);
     return;
+  }
+
+  if (command === "context") {
+    const subcommand = positionals.shift();
+    if (subcommand === "explain") {
+      const question = positionals.join(" ");
+      const project = options.project;
+      if (!project) {
+        throw new Error("context explain requires --project <project>");
+      }
+      if (!question) {
+        throw new Error("context explain requires a query string");
+      }
+      const result = await client.explainContext({
+        project,
+        query: question,
+        mode: options.mode === "cloud" || options.mode === "hybrid" ? options.mode : "local",
+        depth: options.depth === "shallow" || options.depth === "deep" ? options.depth : "standard",
+        limit: Number(options.limit ?? 8) || 8,
+      });
+      printJson(result);
+      return;
+    }
+  }
+
+  if (command === "config") {
+    const subcommand = positionals.shift();
+    if (subcommand === "show" || subcommand === "validate") {
+      const projectId = options.project;
+      if (!projectId) {
+        throw new Error(`config ${subcommand} requires --project <project>`);
+      }
+      const project = await getProjectRecord(client, projectId);
+      const resolved = resolveProjectConfig(project.path);
+      const inspection = validateProjectConfigFile(project.path);
+      if (subcommand === "show") {
+        printJson({
+          project,
+          config: resolved,
+          inspection,
+        });
+        return;
+      }
+      printJson({
+        project,
+        valid: inspection.valid,
+        filePath: inspection.path,
+        error: inspection.error,
+        config: resolved,
+      });
+      return;
+    }
+    if (subcommand === "init") {
+      const projectId = options.project;
+      if (!projectId) {
+        throw new Error("config init requires --project <project>");
+      }
+      const project = await getProjectRecord(client, projectId);
+      const target = join(project.path, ".ai-workbench.json");
+      const template = {
+        ignore: ["dist/**", "coverage/**"],
+        include: ["apps/**", "packages/**"],
+        chunking: {
+          preferTreeSitter: true,
+          maxChunkTokens: 900,
+        },
+        retrieval: {
+          boostPaths: ["apps/api/**", "packages/**"],
+          authHints: ["auth", "session", "jwt", "tenant"],
+        },
+        models: {
+          answer: "ask-deep-local",
+          embedding: "embedding-local",
+        },
+      };
+      let existed = true;
+      try {
+        readFileSync(target, { encoding: "utf8" });
+      } catch {
+        existed = false;
+      }
+      if (!existed) {
+        await writeFile(target, `${JSON.stringify(template, null, 2)}\n`, { encoding: "utf8" });
+      }
+      printJson({
+        project,
+        path: target,
+        existed,
+        config: validateProjectConfigFile(project.path),
+      });
+      return;
+    }
   }
 
   if (command === "plan") {
@@ -308,11 +449,36 @@ async function run(): Promise<void> {
   }
 
   if (command === "trace") {
-    const sessionId = positionals[0];
+    const subcommand = positionals[0] === "timeline" || positionals[0] === "conversation" ? positionals.shift()! : "conversation";
+    const sessionId = positionals[0] ?? (subcommand === "conversation" ? positionals.shift() : null);
     if (!sessionId) {
       throw new Error("trace requires a session id");
     }
+    if (subcommand === "timeline") {
+      printJson(await client.getSessionTimeline(sessionId));
+      return;
+    }
     const result = await client.getSessionEvents(sessionId);
+    printJson(result);
+    return;
+  }
+
+  if (command === "replay") {
+    const sessionId = positionals.shift();
+    if (!sessionId) {
+      throw new Error("replay requires a session id");
+    }
+    const promptId = options.prompt;
+    const modelProfileId = options.model ?? options["model-profile-id"] ?? null;
+    if (!promptId || !modelProfileId) {
+      throw new Error("replay requires --prompt <compiled-prompt-id> and --model <profile-id>");
+    }
+    const result = await client.replaySession(sessionId, {
+      selectedPromptId: promptId,
+      modelProfileId,
+      mode: options.mode === "local" || options.mode === "cloud" || options.mode === "hybrid" ? options.mode : undefined,
+      dryRun: options["dry-run"] === "true" || options.dryRun === "true",
+    });
     printJson(result);
     return;
   }

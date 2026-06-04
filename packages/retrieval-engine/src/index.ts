@@ -250,7 +250,7 @@ export interface RankedChunk {
   rerankScore: number;
   finalScore: number;
   rerankReason: string;
-  boosters: Array<"good" | "bad" | "missed" | "memory" | "fact" | "rule" | "session">;
+  boosters: Array<"good" | "bad" | "missed" | "memory" | "fact" | "rule" | "session" | "symbol" | "graph">;
 }
 
 export function rerankChunks(input: {
@@ -324,6 +324,24 @@ export function rerankChunks(input: {
         rerankScore += 0.5;
         if (!boosters.includes("rule")) boosters.push("rule");
         break;
+      }
+    }
+    const codeSymbols = Array.isArray(chunk.metadata.codeSymbols) ? chunk.metadata.codeSymbols as Array<Record<string, unknown>> : [];
+    if (codeSymbols.length > 0) {
+      const symbolHaystack = codeSymbols
+        .map((symbol) => `${String(symbol.name ?? "")} ${String(symbol.qualifiedName ?? "")} ${String(symbol.kind ?? "")}`)
+        .join(" ")
+        .toLowerCase();
+      for (const term of tokenize(input.query)) {
+        if (symbolHaystack.includes(term)) {
+          rerankScore += 1.25;
+          if (!boosters.includes("symbol")) boosters.push("symbol");
+          break;
+        }
+      }
+      if ((chunk.metadata.graphExpansion as Record<string, unknown> | undefined) != null) {
+        rerankScore += 0.4;
+        if (!boosters.includes("graph")) boosters.push("graph");
       }
     }
     if (priorSessionPathSet.has(chunk.path)) {

@@ -99,12 +99,12 @@ export async function isReadableFile(path: string): Promise<boolean> {
 
 export function inferLanguage(path: string): string | null {
   const extension = extname(path).toLowerCase();
-  if (extension === ".ts" || extension === ".tsx" || extension === ".js" || extension === ".jsx") {
-    return "typescript";
-  }
+  if (extension === ".ts" || extension === ".tsx") return "typescript";
+  if (extension === ".js" || extension === ".jsx") return "javascript";
   if (extension === ".py") return "python";
   if (extension === ".rs") return "rust";
   if (extension === ".go") return "go";
+  if (extension === ".sql") return "sql";
   if (extension === ".java") return "java";
   if (extension === ".sh") return "shell";
   return null;

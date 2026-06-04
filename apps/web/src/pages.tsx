@@ -6,10 +6,14 @@ import type {
   CompiledPromptRecord,
   HandoffResponse,
   PlanResponse,
+  PromptLabRunRecord,
+  PromptLabResultRecord,
   ProjectSummary,
   ReviewRecord,
   SessionRecord,
+  SessionTimelineResponse,
   TaskRecord,
+  TimelineItem,
 } from "../../../packages/shared/src/index.ts";
 import { api } from "./api.ts";
 import { Badge, EmptyState, KeyValueList, Panel, StatCard } from "./components.tsx";
@@ -458,6 +462,142 @@ function PromptsPage(): ReactNode {
   );
 }
 
+function PromptLabPage(): ReactNode {
+  const resource = useResource(() =>
+    Promise.all([api.listProjects(), api.listCompiledPrompts(), api.getModelProviders(), api.listPromptLabRuns()]),
+  );
+  const projects = (resource.data?.[0].data ?? []) as ProjectSummary[];
+  const prompts = (resource.data?.[1].data ?? []) as Array<{
+    id: string;
+    sessionId: string | null;
+    mode: string;
+    role: string;
+    estimatedTokens: number;
+  }>;
+  const modelProviderData = resource.data?.[2].data ?? { providers: [], profiles: [] };
+  const profiles = (modelProviderData.profiles ?? []) as Array<Record<string, unknown>>;
+  const runs = (resource.data?.[3].data ?? []) as PromptLabRunRecord[];
+  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+  const [promptId, setPromptId] = useState(prompts[0]?.id ?? "");
+  const [selectedProfiles, setSelectedProfiles] = useState<string[]>([]);
+  const [notes, setNotes] = useState("");
+  const [result, setResult] = useState<{
+    run: PromptLabRunRecord;
+    prompt: Record<string, unknown> | null;
+    results: PromptLabResultRecord[];
+  } | null>(null);
+
+  useEffect(() => {
+    if (!projectId && projects[0]?.id) setProjectId(projects[0].id);
+    if (!promptId && prompts[0]?.id) setPromptId(prompts[0].id);
+  }, [projectId, projects, promptId, prompts]);
+
+  useEffect(() => {
+    if (selectedProfiles.length === 0 && profiles.length > 0) {
+      setSelectedProfiles(profiles.slice(0, 3).map((profile) => String(profile.id)));
+    }
+  }, [profiles, selectedProfiles.length]);
+
+  const toggleProfile = (profileId: string) => {
+    setSelectedProfiles((current) =>
+      current.includes(profileId) ? current.filter((id) => id !== profileId) : [...current, profileId].slice(0, 3),
+    );
+  };
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const response = await api.runPromptLab({
+      projectId,
+      promptId,
+      modelProfileIds: selectedProfiles,
+      notes: notes || null,
+    });
+    setResult(response.data);
+    resource.refresh();
+  };
+
+  return (
+    <PageShell title="Prompt Lab" subtitle="Compare a compiled prompt across model profiles">
+      <Panel title="Run Comparison" span={6}>
+        <form className="stack" onSubmit={submit}>
+          <select value={projectId} onChange={(event) => setProjectId(event.currentTarget.value)}>
+            {projects.length > 0 ? projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>) : <option value="">Add a project first</option>}
+          </select>
+          <select value={promptId} onChange={(event) => setPromptId(event.currentTarget.value)}>
+            {prompts.length > 0 ? prompts.map((prompt) => <option key={prompt.id} value={prompt.id}>{prompt.mode} · {prompt.role} · {prompt.id}</option>) : <option value="">No compiled prompts</option>}
+          </select>
+          <input value={notes} onChange={(event) => setNotes(event.currentTarget.value)} placeholder="comparison notes" />
+          <div className="stack">
+            {profiles.length > 0 ? (
+              profiles.slice(0, 6).map((profile) => {
+                const id = String(profile.id);
+                const checked = selectedProfiles.includes(id);
+                return (
+                  <label className="list-item" key={id}>
+                    <div className="row">
+                      <strong>{String(profile.displayName ?? profile.modelName ?? id)}</strong>
+                      <input type="checkbox" checked={checked} onChange={() => toggleProfile(id)} />
+                    </div>
+                    <div className="tiny">
+                      {String(profile.role ?? "?")} · {String(profile.providerId ?? "provider")} · {String(profile.modelName ?? id)}
+                    </div>
+                  </label>
+                );
+              })
+            ) : (
+              <EmptyState title="No model profiles" body="Register model profiles before running prompt lab comparisons." />
+            )}
+          </div>
+          <button type="submit" disabled={selectedProfiles.length === 0}>
+            Run comparison
+          </button>
+        </form>
+      </Panel>
+      <Panel title="Results" span={6}>
+        {result ? (
+          <div className="list">
+            {result.results.map((entry) => (
+              <div className="list-item" key={entry.id}>
+                <div className="row">
+                  <strong>{entry.profileName}</strong>
+                  <Badge tone={entry.status === "ok" ? "good" : entry.status === "blocked" ? "bad" : entry.status === "fallback" ? "warn" : "bad"}>
+                    {entry.status}
+                  </Badge>
+                </div>
+                <div className="tiny">
+                  {entry.modelName} · {entry.promptTokens} prompt / {entry.completionTokens} completion · {entry.latencyMs} ms
+                </div>
+                <pre>{entry.outputText ?? entry.error ?? "No output"}</pre>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No run yet" body="Run a compiled prompt against 1-3 selected profiles." />
+        )}
+      </Panel>
+      <Panel title="Recent Runs" span={12}>
+        <div className="list">
+          {runs.length > 0 ? (
+            runs.map((run) => (
+              <div className="list-item" key={String(run.id)}>
+                <div className="row">
+                  <strong>{String(run.promptId ?? run.id)}</strong>
+                  <Badge>{String(run.mode ?? "compare")}</Badge>
+                </div>
+                <div className="tiny">
+                  profiles {Array.isArray(run.selectedProfiles) ? (run.selectedProfiles as string[]).join(", ") : "none"} · {String(run.createdAt ?? "")}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No prompt lab runs" body="Comparisons will appear here after you run one." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
 function PromptDetailPage(): ReactNode {
   const { promptId = "" } = useParams();
   const resource = useResource(() => api.getCompiledPrompt(promptId), [promptId]);
@@ -525,20 +665,24 @@ function PromptDetailPage(): ReactNode {
 function SessionDetailPage(): ReactNode {
   const { sessionId = "" } = useParams();
   const resource = useResource(
-    () => Promise.all([api.getSession(sessionId), api.getSessionEvents(sessionId), api.listTasks(), api.getSessionTrace(sessionId)]),
+    () => Promise.all([api.getSession(sessionId), api.getSessionEvents(sessionId), api.listTasks(), api.getSessionTrace(sessionId), api.getSessionTimeline(sessionId)]),
     [sessionId],
   );
   const session = resource.data?.[0].data ?? null;
   const events = resource.data?.[1].data ?? [];
   const tasks = resource.data?.[2].data.filter((task) => task.sessionId === sessionId) ?? [];
   const trace = resource.data?.[3].data ?? null;
-  const compiledPrompts = Array.isArray(trace?.compiledPrompts) ? (trace.compiledPrompts as Array<{
-    id: string;
-    mode: string;
-    role: string;
-    estimatedTokens: number;
-    sessionId?: string | null;
-  }>) : [];
+  const timeline = resource.data?.[4].data ?? null;
+  const timelineItems = Array.isArray(timeline?.items) ? (timeline.items as TimelineItem[]) : [];
+  const compiledPrompts = Array.isArray(trace?.compiledPrompts)
+    ? (trace.compiledPrompts as Array<{
+        id: string;
+        mode: string;
+        role: string;
+        estimatedTokens: number;
+        sessionId?: string | null;
+      }>)
+    : [];
 
   if (!session) {
     return (
@@ -603,6 +747,44 @@ function SessionDetailPage(): ReactNode {
           )}
         </div>
       </Panel>
+      <Panel title="Timeline" span={12}>
+        {timelineItems.length > 0 ? (
+          <div className="timeline">
+            {timelineItems.map((item) => (
+              <details className="timeline-item" key={item.id} open={false}>
+                <summary>
+                  <div className="timeline-rail">
+                    <span className="timeline-dot" data-kind={item.kind} />
+                    <div className="timeline-line" />
+                  </div>
+                  <div className="timeline-main">
+                    <div className="row">
+                      <strong>{item.title}</strong>
+                      <div className="row">
+                        <Badge tone={item.status === "blocked" ? "bad" : item.status === "selected" ? "good" : "neutral"}>{item.kind}</Badge>
+                        {item.status ? <Badge>{item.status}</Badge> : null}
+                        {typeof item.durationMs === "number" ? <Badge>{Math.round(item.durationMs)} ms</Badge> : null}
+                      </div>
+                    </div>
+                    <div className="tiny">{item.ts}</div>
+                    <div className="tiny">{item.summary}</div>
+                  </div>
+                </summary>
+                <pre>{JSON.stringify(item.payload, null, 2)}</pre>
+                <div className="tiny">
+                  refs:{" "}
+                  {Object.entries(item.refs)
+                    .filter(([, value]) => value)
+                    .map(([key, value]) => `${key}=${value}`)
+                    .join(" · ") || "none"}
+                </div>
+              </details>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No timeline yet" body="The session timeline will appear once the API returns replay data." />
+        )}
+      </Panel>
       <Panel title="Trace Replay" span={12}>
         <div className="list">
           {trace ? (
@@ -629,7 +811,9 @@ function SessionDetailPage(): ReactNode {
                           <strong>{prompt.mode}</strong>
                           <Badge>{prompt.role}</Badge>
                         </div>
-                        <div className="tiny">{prompt.id} · {prompt.estimatedTokens} tokens</div>
+                        <div className="tiny">
+                          {prompt.id} · {prompt.estimatedTokens} tokens
+                        </div>
                       </a>
                     ))
                   ) : (
@@ -2043,6 +2227,7 @@ export {
   McpCallDetailPage,
   McpPage,
   ModelsPage,
+  PromptLabPage,
   PlannerPage,
   ProjectDetailPage,
   ProjectsPage,

@@ -180,6 +180,7 @@ export function buildAskSynthesisFailure(question: string): string {
 
 export interface AskWorkflowStore extends RetrievalPipelineSource {
   getProject(identifier: string): ProjectSummary | null;
+  getSession(sessionId: string): SessionRecord | null;
   searchChunks(projectId: string, query: string, options?: { limit?: number }): RetrievalChunk[];
   searchChunksWithVector?: (projectId: string, query: string, queryVector: number[], options?: { limit?: number }) => RetrievalChunk[];
   listProjectFiles(projectId: string, limit: number): Array<{ path: string }>;
@@ -386,6 +387,8 @@ export interface RunAskWorkflowInput {
   runtime: Pick<ModelRuntime, "route" | "invoke" | "embed">;
   cloudEnabled: boolean;
   input: AskRequest;
+  preferredAnswerProfileId?: string | null;
+  sessionId?: string | null;
 }
 
 export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskResponse> {
@@ -395,6 +398,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   }
   const mode = input.input.mode ?? "local";
   const depth = input.input.depth ?? "standard";
+  const existingSession = input.sessionId ? input.store.getSession(input.sessionId) : null;
   const { decision: routeDecision, profileId: selectedAnswerProfile } = await (async () => {
     const decision = await input.runtime.route({
       role: "answer",
@@ -409,18 +413,25 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     });
     return {
       decision,
-      profileId: decision.profileId ?? decision.fallbackProfileId ?? "ask-fast-local",
+      profileId:
+        existingSession?.modelProfile ??
+        input.preferredAnswerProfileId ??
+        decision.profileId ??
+        decision.fallbackProfileId ??
+        "ask-fast-local",
     };
   })();
 
-  const session = input.store.createSession({
-    projectId: project.id,
-    title: `Ask: ${input.input.question.slice(0, 60)}`,
-    userGoal: input.input.question,
-    mode,
-    modelProfile: selectedAnswerProfile,
-    source: "cli",
-  });
+  const session =
+    existingSession ??
+    input.store.createSession({
+      projectId: project.id,
+      title: `Ask: ${input.input.question.slice(0, 60)}`,
+      userGoal: input.input.question,
+      mode,
+      modelProfile: selectedAnswerProfile,
+      source: "cli",
+    });
   input.store.models.recordRoute({
     taskPattern: "ask",
     mode,

@@ -6,21 +6,24 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { listMigrations, runMigrations } from "../packages/db/src/migrate.ts";
 
-test("migrations list includes 0001, 0002, and 0003_intelligence", () => {
+test("migrations list includes 0001 through 0006", () => {
   const migrations = listMigrations();
   const versions = migrations.map((entry) => entry.version);
   assert.ok(versions.includes("0001_init"));
   assert.ok(versions.includes("0002_observability"));
   assert.ok(versions.includes("0003_intelligence"));
+  assert.ok(versions.includes("0004_prompt_traces"));
+  assert.ok(versions.includes("0005_code_intelligence"));
+  assert.ok(versions.includes("0006_trace_replay"));
 });
 
-test("migrations apply cleanly and create the new intelligence tables", async () => {
+test("migrations apply cleanly and create the new intelligence and trace tables", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ai-mig-"));
   const dbPath = join(dir, "ai.db");
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 3);
+    assert.equal(result.applied.length, 6);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{ name: string }>;
@@ -29,6 +32,13 @@ test("migrations apply cleanly and create the new intelligence tables", async ()
     assert.ok(tableNames.includes("retrieval_path_feedback"), "retrieval_path_feedback table must exist");
     assert.ok(tableNames.includes("retrieval_query_rewrites_used"), "retrieval_query_rewrites_used table must exist");
     assert.ok(tableNames.includes("context_pack_dependencies"), "context_pack_dependencies table must exist");
+    assert.ok(tableNames.includes("code_symbols"), "code_symbols table must exist");
+    assert.ok(tableNames.includes("code_edges"), "code_edges table must exist");
+    assert.ok(tableNames.includes("code_symbol_chunks"), "code_symbol_chunks table must exist");
+    assert.ok(tableNames.includes("project_context_graphs"), "project_context_graphs table must exist");
+    assert.ok(tableNames.includes("session_replays"), "session_replays table must exist");
+    assert.ok(tableNames.includes("prompt_lab_runs"), "prompt_lab_runs table must exist");
+    assert.ok(tableNames.includes("prompt_lab_results"), "prompt_lab_results table must exist");
 
     const ragChunksColumns = db.prepare("PRAGMA table_info(rag_chunks)").all() as Array<{ name: string }>;
     const ragChunksNames = ragChunksColumns.map((c) => c.name);
@@ -46,7 +56,7 @@ test("migrations are idempotent: second run skips all", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const first = runMigrations(db);
-    assert.ok(first.applied.length >= 3);
+    assert.ok(first.applied.length >= 6);
     const second = runMigrations(db);
     assert.equal(second.applied.length, 0);
     assert.equal(second.skipped.length, first.applied.length);

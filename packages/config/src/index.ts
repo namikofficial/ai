@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ConfigSnapshot } from "../../shared/src/index.ts";
 import { readEmbeddingConfig } from "../../indexer/src/index.ts";
 
@@ -6,6 +8,97 @@ export interface EmbeddingConfig {
   modelName: string;
   dimensions: number;
   expectedCollection: string;
+}
+
+export interface ProjectConfig {
+  sourcePath: string | null;
+  ignore: string[];
+  include: string[];
+  chunking: {
+    preferTreeSitter: boolean;
+    maxChunkTokens: number;
+  };
+  retrieval: {
+    boostPaths: string[];
+    authHints: string[];
+  };
+  models: {
+    answer: string | null;
+    embedding: string | null;
+  };
+  raw: Record<string, unknown>;
+}
+
+function readString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function readStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(readString).filter((item): item is string => item != null) : [];
+}
+
+function readBoolean(value: unknown, fallback = false): boolean {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function readNumber(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+}
+
+function readJsonObject(path: string): Record<string, unknown> | null {
+  try {
+    const raw = readFileSync(path, { encoding: "utf8" });
+    const parsed = JSON.parse(raw) as unknown;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function readProjectConfigObject(projectPath: string): { path: string; value: Record<string, unknown> } | null {
+  const candidates = [".ai-workbench.json", ".ai-workbench", ".aiconfig"];
+  for (const name of candidates) {
+    const filePath = join(projectPath, name);
+    const parsed = readJsonObject(filePath);
+    if (parsed) return { path: filePath, value: parsed };
+  }
+  return null;
+}
+
+function compileGlobPattern(pattern: string): RegExp {
+  const normalized = pattern.replaceAll("\\", "/").trim();
+  let regex = "^";
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized[index]!;
+    const next = normalized[index + 1] ?? "";
+    if (char === "*" && next === "*") {
+      regex += ".*";
+      index += 1;
+      continue;
+    }
+    if (char === "*") {
+      regex += "[^/]*";
+      continue;
+    }
+    if (/[.+^${}()|[\]\\?]/.test(char)) {
+      regex += `\\${char}`;
+      continue;
+    }
+    regex += char;
+  }
+  regex += "$";
+  return new RegExp(regex);
+}
+
+function createGlobMatcher(patterns: string[]): (value: string) => boolean {
+  const regexes = patterns.map(compileGlobPattern);
+  return (value: string) => {
+    const normalized = value.replaceAll("\\", "/").replace(/^\.?\//, "");
+    return regexes.some((regex) => regex.test(normalized));
+  };
 }
 
 export function resolveEmbeddingConfig(): EmbeddingConfig {
@@ -43,4 +136,41 @@ export function resolveConfig(overrides: Partial<ConfigSnapshot> = {}): ConfigSn
     qdrantUrl: overrides.qdrantUrl ?? envQdrantUrl ?? (qdrantEnabled ? "http://127.0.0.1:6333" : null),
     qdrantCollection: overrides.qdrantCollection ?? envQdrantCollection,
   };
+}
+
+export function resolveProjectConfig(projectPath: string): ProjectConfig {
+  const loaded = readProjectConfigObject(projectPath);
+  const raw = loaded?.value ?? {};
+  const hasConfig = loaded != null;
+  return {
+    sourcePath: loaded?.path ?? null,
+    ignore: hasConfig ? readStringArray(raw.ignore ?? ["dist/**", "coverage/**"]) : [],
+    include: hasConfig ? readStringArray(raw.include ?? ["apps/**", "packages/**"]) : [],
+    chunking: {
+      preferTreeSitter: hasConfig ? readBoolean((raw.chunking as Record<string, unknown> | undefined)?.preferTreeSitter, true) : true,
+      maxChunkTokens: hasConfig ? readNumber((raw.chunking as Record<string, unknown> | undefined)?.maxChunkTokens, 900) : 900,
+    },
+    retrieval: {
+      boostPaths: hasConfig ? readStringArray((raw.retrieval as Record<string, unknown> | undefined)?.boostPaths ?? ["apps/api/**", "packages/**"]) : [],
+      authHints: hasConfig ? readStringArray((raw.retrieval as Record<string, unknown> | undefined)?.authHints ?? ["auth", "session", "jwt", "tenant"]) : [],
+    },
+    models: {
+      answer: hasConfig ? readString((raw.models as Record<string, unknown> | undefined)?.answer) : null,
+      embedding: hasConfig ? readString((raw.models as Record<string, unknown> | undefined)?.embedding) : null,
+    },
+    raw,
+  };
+}
+
+export function projectPathMatchesConfig(path: string, config: ProjectConfig): boolean {
+  const normalized = path.replaceAll("\\", "/").replace(/^\.?\//, "");
+  const matchesInclude = config.include.length === 0 || createGlobMatcher(config.include)(normalized);
+  const matchesIgnore = config.ignore.length > 0 && createGlobMatcher(config.ignore)(normalized);
+  return matchesInclude && !matchesIgnore;
+}
+
+export function boostWeightForPath(path: string, config: ProjectConfig): number {
+  const normalized = path.replaceAll("\\", "/").replace(/^\.?\//, "");
+  const matcher = createGlobMatcher(config.retrieval.boostPaths);
+  return matcher(normalized) ? 1 : 0;
 }

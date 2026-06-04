@@ -13,6 +13,7 @@ import { runAskWorkflow } from "../../ask-engine/src/index.ts";
 import { reflect as reflectEngine } from "../../reflection-engine/src/index.ts";
 import { indexProject as runIndexerProject } from "../../indexer/src/index.ts";
 import { readEmbeddingConfig } from "../../indexer/src/config.ts";
+import { boostWeightForPath, resolveProjectConfig } from "../../config/src/index.ts";
 import { compilePrompt } from "../../prompt-compiler/src/index.ts";
 import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
@@ -1554,11 +1555,13 @@ export function createStore(db: DatabaseSync) {
       };
     },
     searchChunks(projectId: string, query: string, options: SearchOptions = {}): RetrievalChunk[] {
+      const project = store.getProject(projectId);
+      const projectConfig = project ? resolveProjectConfig(project.path) : null;
       const embeddingConfig = readEmbeddingConfig({ cloudEnabled: process.env.AI_CLOUD_ENABLED === "true" });
       const queryVector = query.trim().length > 0
         ? embedQueryForQdrant({ text: query.trim(), dimension: embeddingConfig.dimension })
         : null;
-      return searchProjectChunks({
+      const chunks = searchProjectChunks({
         db,
         projectId,
         query,
@@ -1567,6 +1570,18 @@ export function createStore(db: DatabaseSync) {
         queryVectorDimension: embeddingConfig.dimension,
         queryVector,
       });
+      if (!projectConfig || projectConfig.retrieval.boostPaths.length === 0) {
+        return chunks;
+      }
+      const boosted = chunks.map((chunk) => {
+        const pathBoost = boostWeightForPath(chunk.path, projectConfig);
+        const authBoost = projectConfig.retrieval.authHints.some((hint) => `${chunk.path}\n${chunk.content}`.toLowerCase().includes(hint.toLowerCase())) ? 0.5 : 0;
+        return pathBoost > 0 || authBoost > 0
+          ? { ...chunk, score: chunk.score + pathBoost + authBoost }
+          : chunk;
+      });
+      boosted.sort((left, right) => right.score - left.score);
+      return boosted;
     },
     searchChunksWithVector(projectId: string, query: string, queryVector: number[], options: SearchOptions = {}): RetrievalChunk[] {
       return searchProjectChunks({
@@ -1587,13 +1602,14 @@ export function createStore(db: DatabaseSync) {
       if (!project) {
         throw new Error(`Unknown project: ${projectIdentifier}`);
       }
+      const projectConfig = resolveProjectConfig(project.path);
       const { decision: routeDecision, profileId: selectedEmbeddingProfile } = await resolveModelProfile(
         {
           role: "embedding",
           mode: "local",
           cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
           details: { goal: project.path, contextTokens: 1024 },
-          fallbackProfileId: "embedding-local",
+          fallbackProfileId: projectConfig.models.embedding ?? "embedding-local",
         },
         selectModelProfile("index", { goal: project.path }),
       );
@@ -1661,6 +1677,7 @@ export function createStore(db: DatabaseSync) {
         db,
         projectId: project.id,
         projectPath: project.path,
+        projectConfig,
         qdrant: qdrantClient,
         embedBatch: async (inputs) => {
           return getRuntime().embed(
@@ -1796,11 +1813,14 @@ export function createStore(db: DatabaseSync) {
       return promptRepo.getCompiledPrompt(promptId);
     },
     async ask(input: AskRequest): Promise<AskResponse> {
+      const project = store.getProject(input.project);
+      const projectConfig = project ? resolveProjectConfig(project.path) : null;
       return runAskWorkflow({
         store,
         runtime: getRuntime(),
         cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
         input,
+        preferredAnswerProfileId: projectConfig?.models.answer ?? null,
       });
     },
     getConfig(config: ConfigSnapshot): ConfigSnapshot {

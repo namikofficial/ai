@@ -1,10 +1,31 @@
 import { mkdir } from "node:fs/promises";
 import fastify from "fastify";
-import type { AskRequest, CompiledPromptRecord, ConfigSnapshot, EventEnvelope, HandoffRequest, PlanRequest, ProjectSummary } from "../../../packages/shared/src/index.ts";
-import { createEvent, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
-import { resolveConfig } from "../../../packages/config/src/index.ts";
+import type {
+  AskRequest,
+  CompiledPromptRecord,
+  ConfigSnapshot,
+  ContextBudgetEventRecord,
+  ContextPackRecord,
+  EventEnvelope,
+  EvalRunRecord,
+  FactRecord,
+  HandoffRequest,
+  MemoryEntryRecord,
+  ModelCallRecord,
+  PlanRequest,
+  ProjectRuleRecord,
+  ProjectSummary,
+  RetrievalQueryRecord,
+  SessionReplayRequest,
+  SessionTimelineResponse,
+  SkillRecord,
+  TimelineItem,
+} from "../../../packages/shared/src/index.ts";
+import { createEvent, createId, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
+import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import { runAskWorkflow } from "../../../packages/ask-engine/src/index.ts";
 import type { ModelProviderRecord, ModelProfileRecord } from "../../../packages/shared/src/index.ts";
 import { runExplainWithStore } from "./retrieval-explain.ts";
 import {
@@ -104,6 +125,384 @@ function safeParseJson(value: string): unknown {
   } catch {
     return value;
   }
+}
+
+function readProjectGraph(store: ReturnType<typeof createStore>, projectId: string): Record<string, unknown> | null {
+  try {
+    const row = store.db.prepare("SELECT summary_json, updated_at FROM project_context_graphs WHERE project_id = ? LIMIT 1").get(projectId) as { summary_json: string; updated_at: string } | undefined;
+    if (!row) return null;
+    const parsed = safeParseJson(row.summary_json);
+    return typeof parsed === "object" && parsed !== null
+      ? { ...(parsed as Record<string, unknown>), updatedAt: row.updated_at }
+      : { summary: parsed, updatedAt: row.updated_at };
+  } catch {
+    return null;
+  }
+}
+
+function createTimelineItem(input: {
+  id: string;
+  ts: string;
+  kind: TimelineItem["kind"];
+  title: string;
+  summary: string;
+  payload: unknown;
+  status?: string;
+  durationMs?: number | null;
+  refs?: Record<string, string | null>;
+}): TimelineItem {
+  return {
+    id: input.id,
+    ts: input.ts,
+    kind: input.kind,
+    title: input.title,
+    status: input.status,
+    durationMs: input.durationMs ?? null,
+    summary: input.summary,
+    refs: input.refs ?? {},
+    payload: input.payload,
+  };
+}
+
+function buildSessionTraceData(store: ReturnType<typeof createStore>, sessionId: string): Record<string, unknown> {
+  const session = store.getSession(sessionId);
+  if (!session) {
+    return {};
+  }
+  const projectId = session.projectId;
+  const compiledPrompts = store.listCompiledPrompts(sessionId, 100);
+  return {
+    session,
+    messages: store.conversation.listMessages(sessionId, 500),
+    events: store.listEvents(sessionId, 500),
+    retrievalQueries: store.retrieval.listQueriesForSession(sessionId, 100),
+    compiledPrompts,
+    modelCalls: store.models.listCalls(sessionId, 100),
+    agentRuns: store.agents.listRuns(sessionId, 100),
+    agentHandoffs: store.agents.listHandoffs(sessionId, 100),
+    contextPacks: store.context.listPacksForSession(sessionId, 100).map((pack) => ({
+      pack,
+      items: store.context.listItems(pack.id),
+      budgetEvents: store.context.listBudgetEvents(pack.id),
+    })),
+    memoryCandidates: store.memory.listCandidates(undefined, projectId, 100).filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId),
+    skills: store.skills.listSkills(undefined, 100),
+    evalOutcomes: store.evals.listOutcomes(sessionId, 100),
+  };
+}
+
+function buildSessionTimeline(store: ReturnType<typeof createStore>, sessionId: string): SessionTimelineResponse | null {
+  const session = store.getSession(sessionId);
+  if (!session) {
+    return null;
+  }
+  const trace = buildSessionTraceData(store, sessionId);
+  const items: TimelineItem[] = [];
+  const projectId = session.projectId;
+  const events = store.listEvents(sessionId, 500);
+  const messages = store.conversation.listMessages(sessionId, 500);
+  const retrievalQueries = store.retrieval.listQueriesForSession(sessionId, 100);
+  const agentRuns = store.agents.listRuns(sessionId, 100);
+  const modelCalls = store.models.listCalls(sessionId, 200);
+  const compiledPrompts = store.listCompiledPrompts(sessionId, 100);
+  const contextPacks = store.context.listPacksForSession(sessionId, 100);
+  const memoryCandidates = store.memory.listCandidates(undefined, projectId, 100).filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId);
+  const skills = store.skills.listSkills(undefined, 100);
+  const evalOutcomes = store.evals.listOutcomes(sessionId, 100);
+  const handoffs = store.agents.listHandoffs(sessionId, 100);
+  const mcpCalls = store.db.prepare("SELECT * FROM mcp_calls WHERE session_id = ? ORDER BY created_at ASC LIMIT 100").all(sessionId) as Array<{
+    id: string;
+    session_id: string | null;
+    project_id: string | null;
+    tool_name: string;
+    input_json: string;
+    output_json: string | null;
+    blocked: number;
+    created_at: string;
+  }>;
+  const checks = store.db.prepare("SELECT * FROM check_runs WHERE session_id = ? ORDER BY created_at ASC LIMIT 100").all(sessionId) as Array<{
+    id: string;
+    session_id: string | null;
+    project_id: string | null;
+    name: string;
+    status: string;
+    command: string | null;
+    output: string | null;
+    error_output: string | null;
+    exit_code: number | null;
+    started_at: string | null;
+    finished_at: string | null;
+    created_at: string;
+    updated_at: string;
+  }>;
+  const reviews = store.db.prepare("SELECT * FROM reviews WHERE session_id = ? ORDER BY created_at ASC LIMIT 100").all(sessionId) as Array<{
+    id: string;
+    project_id: string | null;
+    session_id: string | null;
+    title: string;
+    summary: string;
+    planned_files_json: string;
+    edited_files_json: string;
+    checks_json: string;
+    scope_creep_json: string;
+    missing_tests_json: string;
+    risky_changes_json: string;
+    created_at: string;
+    updated_at: string;
+  }>;
+
+  for (const event of events) {
+    items.push(
+      createTimelineItem({
+        id: event.id,
+        ts: event.ts,
+        kind: "event",
+        title: event.type,
+        summary: JSON.stringify(event.payload ?? {}),
+        payload: event,
+        refs: { sessionId: event.sessionId, taskId: event.taskId, projectId: event.projectId },
+      }),
+    );
+  }
+
+  for (const message of messages) {
+    items.push(
+      createTimelineItem({
+        id: message.id,
+        ts: message.ts,
+        kind: "message",
+        title: `${message.role} message`,
+        summary: message.content.slice(0, 200),
+        payload: message,
+        refs: { sessionId: message.sessionId, projectId: message.projectId, parentMessageId: message.parentMessageId },
+      }),
+    );
+  }
+
+  for (const run of agentRuns) {
+    items.push(
+      createTimelineItem({
+        id: run.id,
+        ts: run.startedAt,
+        kind: "agent_run",
+        title: run.agent,
+        summary: `${run.status} · ${run.role}`,
+        payload: run,
+        status: run.status,
+        durationMs: run.durationMs,
+        refs: { sessionId: run.sessionId, taskId: run.taskId, projectId: run.projectId },
+      }),
+    );
+  }
+
+  for (const call of modelCalls) {
+    items.push(
+      createTimelineItem({
+        id: call.id,
+        ts: call.ts,
+        kind: "model_call",
+        title: call.role,
+        summary: `${call.profileId} · ${call.status} · ${call.promptTokens}/${call.completionTokens}`,
+        payload: call,
+        status: call.status,
+        durationMs: call.latencyMs,
+        refs: { sessionId: call.sessionId, taskId: call.taskId, retrievalQueryId: call.retrievalQueryId, profileId: call.profileId },
+      }),
+    );
+  }
+
+  for (const prompt of compiledPrompts) {
+    items.push(
+      createTimelineItem({
+        id: prompt.id,
+        ts: prompt.createdAt,
+        kind: "compiled_prompt",
+        title: `${prompt.mode} prompt`,
+        summary: `${prompt.role} · ${prompt.estimatedTokens} tokens`,
+        payload: {
+          ...prompt,
+          messages: safeParseJson(prompt.messagesJson),
+          includedContext: safeParseJson(prompt.includedContextJson),
+          omittedContext: safeParseJson(prompt.omittedContextJson),
+          safetyNotes: safeParseJson(prompt.safetyNotesJson),
+          outputSchema: prompt.outputSchemaJson ? safeParseJson(prompt.outputSchemaJson) : null,
+        },
+        refs: { sessionId: prompt.sessionId, taskId: prompt.taskId, retrievalQueryId: prompt.retrievalQueryId, contextPackId: prompt.contextPackId },
+      }),
+    );
+  }
+
+  const retrievalQueryMap = new Map<string, RetrievalQueryRecord>();
+  for (const query of retrievalQueries) {
+    retrievalQueryMap.set(query.id, query);
+    items.push(
+      createTimelineItem({
+        id: query.id,
+        ts: query.createdAt,
+        kind: "retrieval_query",
+        title: query.originalQuery,
+        summary: `${query.intent} · ${query.mode} · ${query.depth}`,
+        payload: query,
+        refs: { sessionId: query.sessionId, taskId: query.taskId, projectId: query.projectId },
+      }),
+    );
+    for (const result of store.retrieval.listResults(query.id, 100)) {
+      items.push(
+        createTimelineItem({
+          id: result.id,
+          ts: result.createdAt,
+          kind: "retrieval_result",
+          title: result.path,
+          summary: `${result.source} · ${result.finalScore.toFixed(2)} · ${result.included ? "selected" : "dropped"}`,
+          payload: result,
+          status: result.included ? "selected" : "dropped",
+          refs: { retrievalQueryId: result.retrievalQueryId, chunkId: result.chunkId },
+        }),
+      );
+    }
+  }
+
+  for (const pack of contextPacks) {
+    const itemsForPack = store.context.listItems(pack.id);
+    const budgetEvents = store.context.listBudgetEvents(pack.id);
+    items.push(
+      createTimelineItem({
+        id: pack.id,
+        ts: pack.createdAt,
+        kind: "context_pack",
+        title: pack.reason ?? "context pack",
+        summary: `${itemsForPack.length} items · ${pack.usedTokens}/${pack.budgetTokens} tokens`,
+        payload: { pack, items: itemsForPack, budgetEvents },
+        refs: { sessionId: pack.sessionId, taskId: pack.taskId, retrievalQueryId: pack.retrievalQueryId },
+      }),
+    );
+  }
+
+  for (const candidate of memoryCandidates) {
+    items.push(
+      createTimelineItem({
+        id: candidate.id,
+        ts: candidate.createdAt,
+        kind: "memory_candidate",
+        title: candidate.title,
+        summary: `${candidate.kind} · ${candidate.status}`,
+        payload: candidate,
+        status: candidate.status,
+        refs: { sessionId: candidate.sessionId, projectId: candidate.projectId },
+      }),
+    );
+  }
+
+  for (const skill of skills) {
+    items.push(
+      createTimelineItem({
+        id: skill.id,
+        ts: skill.createdAt,
+        kind: "skill_candidate",
+        title: skill.title,
+        summary: `${skill.status} · ${skill.useCount} uses`,
+        payload: skill,
+        status: skill.status,
+        refs: { sessionId: null, projectId },
+      }),
+    );
+  }
+
+  for (const outcome of evalOutcomes) {
+    items.push(
+      createTimelineItem({
+        id: outcome.id,
+        ts: outcome.createdAt,
+        kind: "eval",
+        title: outcome.outcome,
+        summary: `${Math.round(outcome.score * 100)}% · ${outcome.notes ?? "no notes"}`,
+        payload: outcome,
+        status: outcome.outcome,
+        refs: { sessionId: outcome.sessionId },
+      }),
+    );
+  }
+
+  for (const handoff of handoffs) {
+    items.push(
+      createTimelineItem({
+        id: handoff.id,
+        ts: handoff.createdAt,
+        kind: "handoff",
+        title: handoff.toAgent,
+        summary: `handoff · ${handoff.contextPackId ?? "no context pack"}`,
+        payload: handoff,
+        refs: { sessionId: handoff.sessionId, taskId: handoff.taskId, contextPackId: handoff.contextPackId },
+      }),
+    );
+  }
+
+  for (const call of mcpCalls) {
+    items.push(
+      createTimelineItem({
+        id: call.id,
+        ts: call.created_at,
+        kind: "mcp_call",
+        title: call.tool_name,
+        summary: `${call.blocked ? "blocked" : "allowed"} · ${String(call.project_id ?? "global")}`,
+        payload: call,
+        status: call.blocked ? "blocked" : "allowed",
+        refs: { sessionId: call.session_id, projectId: call.project_id },
+      }),
+    );
+  }
+
+  for (const check of checks) {
+    items.push(
+      createTimelineItem({
+        id: check.id,
+        ts: check.created_at,
+        kind: "check",
+        title: check.name,
+        summary: `${check.status} · ${check.output ?? check.error_output ?? "no output"}`,
+        payload: check,
+        status: check.status,
+        refs: { sessionId: check.session_id, projectId: check.project_id },
+      }),
+    );
+  }
+
+  for (const review of reviews) {
+    items.push(
+      createTimelineItem({
+        id: review.id,
+        ts: review.created_at,
+        kind: "review",
+        title: review.title,
+        summary: review.summary,
+        payload: review,
+        refs: { sessionId: review.session_id, projectId: review.project_id },
+      }),
+    );
+  }
+
+  items.sort((left, right) => left.ts.localeCompare(right.ts) || left.id.localeCompare(right.id));
+
+  return {
+    session,
+    items,
+    trace,
+  };
+}
+
+function buildRuntimeForStore(store: ReturnType<typeof createStore>, cloudEnabled: boolean): ModelRuntime {
+  return createModelRuntime({
+    providers: store.models.listProviders().map((provider) => ({
+      id: provider.id,
+      kind: provider.kind,
+      displayName: provider.displayName,
+      baseUrl: provider.baseUrl,
+      apiKeyEnv: provider.apiKeyEnv,
+      enabled: provider.enabled,
+    })),
+    profiles: store.models.listProfiles(),
+    cloudEnabled,
+  });
 }
 
 function sendJson(res: any, payload: JsonResponse, statusCode = 200): void {
@@ -1273,6 +1672,24 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           sendHtml(res, renderProjectDetailPage(store, projectId));
           return;
         }
+        if (method === "GET" && rest === "/graph") {
+          const project = store.getProject(projectId);
+          if (!project) {
+            sendJson(res, json("error", undefined, { message: "project not found" }), 404);
+            return;
+          }
+          sendJson(
+            res,
+            json("ok", {
+              project,
+              config: resolveProjectConfig(project.path),
+              graph: readProjectGraph(store, project.id),
+              symbols: store.db.prepare("SELECT * FROM code_symbols WHERE project_id = ? ORDER BY kind, path, start_line").all(project.id),
+              edges: store.db.prepare("SELECT * FROM code_edges WHERE project_id = ? ORDER BY created_at DESC").all(project.id),
+            }),
+          );
+          return;
+        }
         if (method === "POST" && rest === "/index") {
           const result = await store.indexProject(projectId);
           result.events.forEach(publish);
@@ -1379,32 +1796,104 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           sendJson(res, json("ok", store.listEvents(sessionId, 500)));
           return;
         }
-        if (method === "GET" && rest === "/trace") {
-          const session = store.getSession(sessionId);
-          if (!session) {
+        if (method === "GET" && rest === "/timeline") {
+          const timeline = buildSessionTimeline(store, sessionId);
+          if (!timeline) {
             sendJson(res, json("error", undefined, { message: "session not found" }), 404);
             return;
           }
-          const projectId = session.projectId;
+          sendJson(res, json("ok", timeline));
+          return;
+        }
+        if (method === "GET" && rest === "/trace") {
+          const trace = buildSessionTraceData(store, sessionId);
+          if (!trace.session) {
+            sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+            return;
+          }
+          sendJson(res, json("ok", trace));
+          return;
+        }
+        if (method === "POST" && rest === "/replay") {
+          const body = (req.headers?.["content-type"]?.includes("application/json")
+            ? await readJsonBody(request, req)
+            : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
+          const input: SessionReplayRequest = {
+            fromTimelineItemId: typeof body.fromTimelineItemId === "string" ? body.fromTimelineItemId : undefined,
+            editedUserRequest: typeof body.editedUserRequest === "string" ? body.editedUserRequest : undefined,
+            editedSystemPrompt: typeof body.editedSystemPrompt === "string" ? body.editedSystemPrompt : undefined,
+            editedContextPackId: typeof body.editedContextPackId === "string" ? body.editedContextPackId : undefined,
+            selectedPromptId: typeof body.selectedPromptId === "string" ? body.selectedPromptId : undefined,
+            modelProfileId: typeof body.modelProfileId === "string" ? body.modelProfileId : undefined,
+            mode: body.mode === "local" || body.mode === "hybrid" || body.mode === "cloud" ? body.mode : undefined,
+            dryRun: body.dryRun === true || body.dryRun === "true",
+          };
+          const parentSession = store.getSession(sessionId);
+          if (!parentSession) {
+            sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+            return;
+          }
+          const replayQuestion = input.editedUserRequest ?? parentSession.userGoal;
+          const replayMode = input.mode ?? (parentSession.mode === "plan" || parentSession.mode === "handoff" || parentSession.mode === "check" || parentSession.mode === "reflect" ? "local" : parentSession.mode);
+          const branchSession = store.createSession({
+            projectId: parentSession.projectId,
+            title: `Replay: ${parentSession.title}`,
+            userGoal: replayQuestion,
+            mode: replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud" ? replayMode : "local",
+            source: "replay",
+            modelProfile: input.modelProfileId ?? parentSession.modelProfile,
+          });
+          store.db.prepare(
+            `INSERT INTO session_replays (
+              id, parent_session_id, child_session_id, source_session_id, mode, request_json, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            createId("srep"),
+            parentSession.id,
+            branchSession.id,
+            input.fromTimelineItemId ?? null,
+            replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud" ? replayMode : "local",
+            JSON.stringify(input),
+            new Date().toISOString(),
+            new Date().toISOString(),
+          );
+          if (input.dryRun) {
+            sendJson(
+              res,
+              json("ok", {
+                parentSessionId: parentSession.id,
+                childSession: branchSession,
+                replay: {
+                  dryRun: true,
+                  request: input,
+                },
+              }),
+            );
+            return;
+          }
+          const runtime = buildRuntimeForStore(store, config.cloudEnabled);
+          const result = await runAskWorkflow({
+            store,
+            runtime,
+            cloudEnabled: config.cloudEnabled,
+            input: {
+              project: parentSession.projectId ?? "",
+              question: replayQuestion,
+              mode: replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud" ? replayMode : "local",
+              depth: "standard",
+            },
+            preferredAnswerProfileId: input.modelProfileId ?? parentSession.modelProfile,
+            sessionId: branchSession.id,
+          });
           sendJson(
             res,
             json("ok", {
-              session,
-              messages: store.conversation.listMessages(sessionId, 500),
-              events: store.listEvents(sessionId, 500),
-              retrievalQueries: store.retrieval.listQueriesForSession(sessionId, 100),
-              compiledPrompts: store.listCompiledPrompts(sessionId, 100),
-              modelCalls: store.models.listCalls(sessionId, 100),
-              agentRuns: store.agents.listRuns(sessionId, 100),
-              agentHandoffs: store.agents.listHandoffs(sessionId, 100),
-              contextPacks: store.context.listPacksForSession(sessionId, 100).map((pack) => ({
-                pack,
-                items: store.context.listItems(pack.id),
-                budgetEvents: store.context.listBudgetEvents(pack.id),
-              })),
-              memoryCandidates: store.memory.listCandidates(undefined, projectId, 100).filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId),
-              skills: store.skills.listSkills(undefined, 100),
-              evalOutcomes: store.evals.listOutcomes(sessionId, 100),
+              parentSessionId: parentSession.id,
+              childSession: store.getSession(branchSession.id),
+              replay: {
+                request: input,
+                result,
+              },
             }),
           );
           return;
@@ -1707,6 +2196,311 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         return;
       }
 
+      if (method === "GET" && path === "/prompt-lab/runs") {
+        const runs = store.db.prepare("SELECT * FROM prompt_lab_runs ORDER BY created_at DESC LIMIT 100").all() as Array<{
+          id: string;
+          session_id: string | null;
+          project_id: string;
+          prompt_id: string;
+          mode: string;
+          selected_profiles_json: string;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        }>;
+        sendJson(
+          res,
+          json("ok", runs.map((run) => ({
+            id: run.id,
+            sessionId: run.session_id,
+            projectId: run.project_id,
+            promptId: run.prompt_id,
+            mode: run.mode,
+            selectedProfiles: safeParseList(run.selected_profiles_json),
+            notes: run.notes,
+            createdAt: run.created_at,
+            updatedAt: run.updated_at,
+          }))),
+        );
+        return;
+      }
+
+      if (path.startsWith("/prompt-lab/runs/")) {
+        const runId = decodeURIComponent(path.slice("/prompt-lab/runs/".length)).split("/")[0];
+        const run = store.db.prepare("SELECT * FROM prompt_lab_runs WHERE id = ? LIMIT 1").get(runId) as
+          | {
+              id: string;
+              session_id: string | null;
+              project_id: string;
+              prompt_id: string;
+              mode: string;
+              selected_profiles_json: string;
+              notes: string | null;
+              created_at: string;
+              updated_at: string;
+            }
+          | undefined;
+        if (!run) {
+          sendJson(res, json("error", undefined, { message: "prompt lab run not found" }), 404);
+          return;
+        }
+        const results = store.db.prepare("SELECT * FROM prompt_lab_results WHERE run_id = ? ORDER BY created_at ASC").all(run.id) as Array<{
+          id: string;
+          run_id: string;
+          profile_id: string;
+          profile_name: string;
+          model_name: string;
+          status: string;
+          prompt_tokens: number;
+          completion_tokens: number;
+          latency_ms: number;
+          output_text: string | null;
+          error: string | null;
+          approx_cost: number | null;
+          created_at: string;
+        }>;
+        sendJson(
+          res,
+          json("ok", {
+            run: {
+              id: run.id,
+              sessionId: run.session_id,
+              projectId: run.project_id,
+              promptId: run.prompt_id,
+              mode: run.mode,
+              selectedProfiles: safeParseList(run.selected_profiles_json),
+              notes: run.notes,
+              createdAt: run.created_at,
+              updatedAt: run.updated_at,
+            },
+            prompt: store.getCompiledPrompt(run.prompt_id),
+            results: results.map((result) => ({
+              id: result.id,
+              runId: result.run_id,
+              profileId: result.profile_id,
+              profileName: result.profile_name,
+              modelName: result.model_name,
+              status: result.status,
+              promptTokens: result.prompt_tokens,
+              completionTokens: result.completion_tokens,
+              latencyMs: result.latency_ms,
+              outputText: result.output_text,
+              error: result.error,
+              approxCost: result.approx_cost,
+              createdAt: result.created_at,
+            })),
+          }),
+        );
+        return;
+      }
+
+      if (method === "POST" && path === "/prompt-lab/run") {
+        const body = (req.headers?.["content-type"]?.includes("application/json")
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
+        const projectId = String(body.projectId ?? body.project ?? "");
+        const promptId = String(body.promptId ?? body.prompt ?? "");
+        const selectedProfiles = Array.isArray(body.modelProfileIds)
+          ? body.modelProfileIds.map(String).filter(Boolean)
+          : Array.isArray(body.modelProfiles)
+            ? body.modelProfiles.map(String).filter(Boolean)
+            : [];
+        const notes = typeof body.notes === "string" ? body.notes : null;
+        const dryRun = body.dryRun === true || body.dryRun === "true";
+        if (!projectId || !promptId || selectedProfiles.length === 0) {
+          sendJson(res, json("error", undefined, { message: "projectId, promptId, and modelProfileIds are required" }));
+          return;
+        }
+        const prompt = store.getCompiledPrompt(promptId);
+        if (!prompt) {
+          sendJson(res, json("error", undefined, { message: "compiled prompt not found" }), 404);
+          return;
+        }
+        const runId = createId("plr");
+        const ts = new Date().toISOString();
+        store.db.prepare(
+          `INSERT INTO prompt_lab_runs (
+            id, session_id, project_id, prompt_id, mode, selected_profiles_json, notes, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(runId, prompt.sessionId ?? null, projectId, promptId, prompt.mode, JSON.stringify(selectedProfiles), notes, ts, ts);
+
+        const runtime = buildRuntimeForStore(store, config.cloudEnabled);
+        const promptPayload = {
+          messages: safeParseJson(prompt.messagesJson) as Array<{ role: "system" | "user" | "assistant"; content: string }>,
+          modelName: null as string | null,
+        };
+        const results: Array<Record<string, unknown>> = [];
+        for (const profileId of selectedProfiles) {
+          const profile = store.models.getProfile(profileId);
+          if (!profile) {
+            const result = {
+              id: createId("plres"),
+              runId,
+              profileId,
+              profileName: profileId,
+              modelName: profileId,
+              status: "failed",
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: "unknown profile",
+              approxCost: null,
+              createdAt: ts,
+            } as const;
+            store.db.prepare(
+              `INSERT INTO prompt_lab_results (
+                id, run_id, profile_id, profile_name, model_name, status,
+                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            results.push(result);
+            continue;
+          }
+          if (dryRun) {
+            const result = {
+              id: createId("plres"),
+              runId,
+              profileId: profile.id,
+              profileName: profile.displayName ?? profile.modelName,
+              modelName: profile.modelName,
+              status: "blocked",
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: "dry run",
+              approxCost: null,
+              createdAt: ts,
+            } as const;
+            store.db.prepare(
+              `INSERT INTO prompt_lab_results (
+                id, run_id, profile_id, profile_name, model_name, status,
+                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            results.push(result);
+            continue;
+          }
+          const provider = store.models.listProviders().find((item) => item.id === profile.providerId) ?? null;
+          if (provider && /cloud_openai_compat/i.test(provider.kind) && !config.cloudEnabled) {
+            const result = {
+              id: createId("plres"),
+              runId,
+              profileId: profile.id,
+              profileName: profile.displayName ?? profile.modelName,
+              modelName: profile.modelName,
+              status: "blocked",
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: "cloud disabled",
+              approxCost: null,
+              createdAt: ts,
+            } as const;
+            store.db.prepare(
+              `INSERT INTO prompt_lab_results (
+                id, run_id, profile_id, profile_name, model_name, status,
+                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            results.push(result);
+            continue;
+          }
+          try {
+            const invocation = await runtime.invoke(profile.id, {
+              role: "answer",
+              messages: promptPayload.messages,
+              metadata: {
+                source: "prompt-lab",
+                promptId,
+                runId,
+              },
+            });
+            const result = {
+              id: createId("plres"),
+              runId,
+              profileId: profile.id,
+              profileName: profile.displayName ?? profile.modelName,
+              modelName: profile.modelName,
+              status: invocation.status ?? "ok",
+              promptTokens: invocation.promptTokens,
+              completionTokens: invocation.completionTokens,
+              latencyMs: invocation.latencyMs,
+              outputText: invocation.text,
+              error: null,
+              approxCost: null,
+              createdAt: ts,
+            } as const;
+            store.db.prepare(
+              `INSERT INTO prompt_lab_results (
+                id, run_id, profile_id, profile_name, model_name, status,
+                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              result.id,
+              runId,
+              result.profileId,
+              result.profileName,
+              result.modelName,
+              result.status,
+              result.promptTokens,
+              result.completionTokens,
+              result.latencyMs,
+              result.outputText,
+              result.error,
+              result.approxCost,
+              ts,
+            );
+            results.push(result);
+          } catch (error) {
+            const result = {
+              id: createId("plres"),
+              runId,
+              profileId: profile.id,
+              profileName: profile.displayName ?? profile.modelName,
+              modelName: profile.modelName,
+              status: "failed",
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: error instanceof Error ? error.message : String(error),
+              approxCost: null,
+              createdAt: ts,
+            } as const;
+            store.db.prepare(
+              `INSERT INTO prompt_lab_results (
+                id, run_id, profile_id, profile_name, model_name, status,
+                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            results.push(result);
+          }
+        }
+        const runResponse = {
+          id: runId,
+          sessionId: prompt.sessionId,
+          projectId,
+          promptId,
+          mode: prompt.mode,
+          selectedProfiles,
+          notes,
+          createdAt: ts,
+          updatedAt: ts,
+        };
+        sendJson(
+          res,
+          json("ok", {
+            run: runResponse,
+            prompt,
+            results,
+          }),
+        );
+        return;
+      }
+
       if (method === "POST" && path === "/retrieval/search") {
         const body = (req.headers?.["content-type"]?.includes("application/json")
           ? await readJsonBody(request, req)
@@ -1742,6 +2536,38 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         }
         const explanation = runExplainWithStore(store, { projectId, query, mode, depth, limit });
         sendJson(res, json("ok", explanation));
+        return;
+      }
+
+      if (method === "POST" && path === "/context/explain") {
+        const body = (req.headers?.["content-type"]?.includes("application/json")
+          ? await readJsonBody(request, req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
+        const projectId = String(body.project ?? body.projectId ?? "");
+        const query = String(body.query ?? "");
+        const mode = body.mode === "cloud" || body.mode === "hybrid" ? body.mode : "local";
+        const depth = body.depth === "shallow" || body.depth === "deep" ? body.depth : "standard";
+        const limit = Number(body.limit ?? 8) || 8;
+        const project = store.getProject(projectId);
+        if (!project) {
+          sendJson(res, json("error", undefined, { message: `Unknown project: ${projectId}` }), 404);
+          return;
+        }
+        const explanation = runExplainWithStore(store, { projectId, query, mode, depth, limit });
+        sendJson(
+          res,
+          json("ok", {
+            project,
+            config: resolveProjectConfig(project.path),
+            graph: readProjectGraph(store, project.id),
+            explanation,
+            selectionReasons: explanation.selected.map((entry) => ({
+              path: entry.path,
+              finalScore: entry.finalScore,
+              rerankReason: explanation.ranked.find((ranked) => ranked.path === entry.path)?.rerankReason ?? "selected",
+            })),
+          }),
+        );
         return;
       }
 
