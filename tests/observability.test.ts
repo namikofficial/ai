@@ -223,6 +223,30 @@ test("observability: indexProject records an indexer agent run", async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("observability: reindex skips unchanged files and avoids extra embedding calls", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-index-reuse-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src", "alpha.ts"), "export const alpha = 1;\n");
+  await writeFile(join(repo, "src", "beta.ts"), "export const beta = 2;\n");
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "repo" });
+
+  const first = await store.indexProject(project.id);
+  const firstEmbeddingCalls = store.models.listCalls(first.session.id, 100).filter((call) => call.role === "embedding");
+  assert.ok(firstEmbeddingCalls.length >= 1, "initial index should embed files");
+
+  const second = await store.indexProject(project.id);
+  const secondEmbeddingCalls = store.models.listCalls(second.session.id, 100).filter((call) => call.role === "embedding");
+  assert.equal(secondEmbeddingCalls.length, 0, "unchanged reindex should skip embeddings");
+  assert.equal(second.filesIndexed, first.filesIndexed);
+  assert.equal(second.chunksIndexed, 0, "unchanged reindex should not write new chunks");
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("observability: memory candidate accept/reject lifecycle", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-obs-memory-"));
   const store = createStore(initializeStore(join(workspace, "ai.db")));

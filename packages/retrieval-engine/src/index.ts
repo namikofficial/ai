@@ -39,6 +39,10 @@ export {
   syncSearchIndexForFile,
   tryEnableSearchIndex,
 } from "./fts.ts";
+export { searchProjectChunks } from "./search.ts";
+export type { SearchProjectChunksInput } from "./search.ts";
+export { buildRetrievalPipelineInput } from "./pipeline.ts";
+export type { BuildRetrievalPipelineInputArgs, RetrievalPipelineSource } from "./pipeline.ts";
 
 const DEFINITION_TOKENS = new Set(["what", "where", "how", "why", "when", "which", "who"]);
 const DEBUG_TOKENS = new Set(["fix", "bug", "error", "failing", "regression", "crash", "trace", "stack", "panic", "exception"]);

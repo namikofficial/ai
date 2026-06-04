@@ -100,3 +100,64 @@ test("model-runtime: routes locally and blocks cloud when disabled", async () =>
   assert.equal(health.length, 2);
   assert.equal(health[1].status, "disabled");
 });
+
+test("model-runtime: route scoring prefers deeper local profiles for larger context need", () => {
+  const runtime = createModelRuntime({
+    providers: [
+      { id: "provider_local", kind: "heuristic", displayName: "Local", baseUrl: null, apiKeyEnv: null, enabled: true },
+    ],
+    profiles: [
+      {
+        id: "ask-fast-local",
+        providerId: "provider_local",
+        role: "answer",
+        modelName: "ask-fast-local",
+        displayName: null,
+        contextWindow: 4096,
+        maxOutputTokens: 1024,
+        localOnly: true,
+        enabled: true,
+        fallbackProfileId: null,
+        qualityScore: 0.68,
+        latencyScore: 0.86,
+        costScore: 0.92,
+        meta: {},
+        createdAt: "2024-01-01",
+        updatedAt: "2024-01-01",
+      },
+      {
+        id: "ask-deep-local",
+        providerId: "provider_local",
+        role: "answer",
+        modelName: "ask-deep-local",
+        displayName: null,
+        contextWindow: 32768,
+        maxOutputTokens: 4096,
+        localOnly: true,
+        enabled: true,
+        fallbackProfileId: null,
+        qualityScore: 0.72,
+        latencyScore: 0.72,
+        costScore: 0.88,
+        meta: {},
+        createdAt: "2024-01-01",
+        updatedAt: "2024-01-01",
+      },
+    ],
+    cloudEnabled: false,
+  });
+
+  const decision = runtime.route({
+    role: "answer",
+    mode: "local",
+    cloudEnabled: false,
+    details: {
+      depth: "deep",
+      question: "x".repeat(600),
+      contextTokens: 16_384,
+    },
+  });
+
+  assert.equal(decision.profileId, "ask-deep-local");
+  assert.equal(decision.blocked, false);
+});

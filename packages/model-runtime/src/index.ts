@@ -14,6 +14,7 @@ export interface ModelRouteDetails {
   depth?: "shallow" | "standard" | "deep";
   question?: string;
   goal?: string;
+  contextTokens?: number;
 }
 
 export interface ModelHealthResult {
@@ -492,11 +493,37 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
     const localCandidates = candidates.filter((profile) => profile.localOnly);
     const cloudCandidates = candidates.filter((profile) => !profile.localOnly);
     const pickBest = (list: ModelProfileRecord[]): ModelProfileRecord | null =>
-      list.slice().sort((left, right) =>
-        right.qualityScore - left.qualityScore ||
-        right.latencyScore - left.latencyScore ||
-        right.costScore - left.costScore,
-      )[0] ?? null;
+      list.slice().sort((left, right) => scoreProfileCandidate(right, inputRoute) - scoreProfileCandidate(left, inputRoute))[0] ?? null;
+
+    function scoreProfileCandidate(profile: ModelProfileRecord, routeInput: ModelRouteInput): number {
+      const questionLength = routeInput.details?.question?.trim().length ?? 0;
+      const depth = routeInput.details?.depth ?? "standard";
+      const risk = routeInput.details?.risk ?? "low";
+      const contextNeed = routeInput.details?.contextTokens ?? Math.max(2048, Math.min(32_768, questionLength * 64));
+      const contextWindow = profile.contextWindow ?? 0;
+      const contextFit = contextWindow <= 0 ? 0 : Math.max(0, Math.min(1, contextNeed / contextWindow));
+      const contextBonus = contextWindow >= contextNeed ? 0.2 : -0.2 * (1 - contextFit);
+      const depthBonus = depth === "deep" ? Math.min(0.2, contextWindow / 32_768) : depth === "shallow" ? -0.05 : 0;
+      const riskBonus = risk === "high" ? Math.min(0.15, profile.qualityScore * 0.15) : risk === "medium" ? 0.05 : 0;
+      const roleBonus =
+        routeInput.role === "planner" && profile.modelName.includes("planner")
+          ? 0.08
+          : routeInput.role === "answer" && profile.modelName.includes("ask")
+            ? 0.08
+            : routeInput.role === "embedding" && profile.modelName.includes("embedding")
+              ? 0.08
+              : 0;
+      return (
+        profile.qualityScore * 0.5 +
+        profile.latencyScore * 0.2 +
+        profile.costScore * 0.15 +
+        contextBonus +
+        depthBonus +
+        riskBonus +
+        roleBonus +
+        (profile.localOnly ? 0.03 : 0)
+      );
+    }
 
     if (inputRoute.mode === "cloud" && !inputRoute.cloudEnabled) {
       const fallback = inputRoute.fallbackProfileId ?? pickBest(localCandidates)?.id ?? pickBest(candidates)?.id ?? null;

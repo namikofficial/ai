@@ -1,4 +1,4 @@
-import { runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
+import { buildRetrievalPipelineInput as buildRetrievalPipelineInputFromEngine, runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
 import type {
   RetrievalDepth,
   RetrievalIntentKind,
@@ -51,46 +51,7 @@ export function buildRetrievalPipelineInput(
   store: Store,
   args: BuildRetrievalPipelineInputArgs,
 ): Parameters<typeof runRetrievalPipeline>[0] {
-  const ftsChunks = store.searchChunks(args.projectId, args.query, { limit: args.ftsLimit });
-  const heuristicChunks = store.searchChunks(args.projectId, "", { limit: 4 });
-  const queries = store.retrieval.listQueriesForProject(args.projectId, 200);
-  const feedback: ReturnType<Store["retrieval"]["listFeedback"]> = [];
-  const misses: ReturnType<Store["retrieval"]["listMisses"]> = [];
-  for (const q of queries) {
-    for (const fb of store.retrieval.listFeedback(q.id, 50)) feedback.push(fb);
-    for (const miss of store.retrieval.listMisses(q.id)) misses.push(miss);
-  }
-  const memoryEntries = store.memory.listEntries(args.projectId, "project", 50);
-  const facts = store.memory.listFacts(args.projectId, 50);
-  const rules = store.memory.listProjectRules(args.projectId, 50);
-  const recentSessionPaths = store.listProjectFiles(args.projectId, 25).map((file) => file.path);
-  const feedbackChunkPaths = new Map<string, string>();
-  for (const fb of feedback) {
-    if (fb.chunkId) feedbackChunkPaths.set(fb.chunkId, fb.missedPath ?? "");
-  }
-  const pathBoosts = new Map<string, number>();
-  for (const boost of store.retrieval.listPathBoosts(args.projectId, 200)) {
-    pathBoosts.set(boost.path, boost.weight);
-  }
-  return {
-    query: args.query,
-    intent: args.intent,
-    mode: args.mode,
-    depth: args.depth,
-    ftsChunks,
-    vectorChunks: [],
-    heuristicChunks,
-    feedback,
-    feedbackChunkPaths,
-    missRecords: misses,
-    pathBoosts,
-    memoryEntries,
-    facts: facts.map((f) => ({ key: f.key, value: f.value, confidence: f.confidence, status: f.status })),
-    rules,
-    priorSessionPaths: recentSessionPaths,
-    budgetTokens: 4096,
-    secretTerms: [],
-  };
+  return buildRetrievalPipelineInputFromEngine(store, args);
 }
 
 export function runRetrievalExplain(store: Store, input: RetrievalExplainInput): RetrievalExplainOutput {

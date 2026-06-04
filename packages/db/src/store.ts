@@ -1,17 +1,33 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, stat } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
 // @ts-ignore - this workspace's node type surface does not expose node:module, but the runtime does.
 import { createRequire } from "node:module";
 import { basename, extname, join, normalize, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runMigrations } from "./migrate.ts";
+import { seedDefaultModelCatalog } from "../../model-runtime/src/default-catalog.ts";
 import { createModelRuntime, selectModelProfile } from "../../model-runtime/src/index.ts";
 import type { ModelInvokeOptions, ModelInvokeRequest, ModelInvokeResult, ModelRuntime } from "../../model-runtime/src/index.ts";
 import { buildContextPack } from "../../context-engine/src/index.ts";
+import {
+  buildAskAnswerPrompt,
+  buildAskCitations,
+  buildAskFallbackAnswer,
+  buildAskQueryRewritePrompt,
+  buildAskRetrievalJudgePrompt,
+  buildAskSynthesisFailure,
+} from "../../ask-engine/src/index.ts";
 import { reflect as reflectEngine } from "../../reflection-engine/src/index.ts";
+import { indexProject as runIndexerProject } from "../../indexer/src/index.ts";
 import { buildAnswerFromCompiledPrompt, compilePrompt } from "../../prompt-compiler/src/index.ts";
 import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
+import {
+  QdrantClient,
+  readQdrantRuntimeSettings,
+  tryEnableSearchIndex,
+} from "../../retrieval-engine/src/index.ts";
+import { searchProjectChunks } from "../../retrieval-engine/src/search.ts";
 import {
   createAgentsRepo,
   createContextRepo,
@@ -65,7 +81,7 @@ import {
   rewriteQuery,
   runRetrievalPipeline,
 } from "../../retrieval-engine/src/index.ts";
-import { buildRetrievalPipelineInput } from "./retrieval-explain.ts";
+import { buildRetrievalPipelineInput } from "../../retrieval-engine/src/index.ts";
 import { createEvent, createId, slugifyName } from "../../shared/src/index.ts";
 
 type Row = Record<string, unknown>;
@@ -179,341 +195,6 @@ function rowToTask(row: Row): TaskRecord {
   };
 }
 
-const DEFAULT_MODEL_PROVIDER_ROWS = [
-  {
-    id: "provider_heuristic_local",
-    kind: "heuristic" as const,
-    displayName: "Heuristic local router",
-    baseUrl: null,
-    apiKeyEnv: null,
-    enabled: true,
-  },
-  {
-    id: "provider_cloud_openai_compat",
-    kind: "cloud_openai_compat" as const,
-    displayName: "Cloud OpenAI-compatible",
-    baseUrl: null,
-    apiKeyEnv: "AI_CLOUD_API_KEY",
-    enabled: false,
-  },
-];
-
-const DEFAULT_MODEL_PROFILE_ROWS = [
-  { id: "intent-local", providerId: "provider_heuristic_local", role: "intent" as const, modelName: "intent-local", displayName: "Intent classifier" },
-  { id: "query-rewrite-local", providerId: "provider_heuristic_local", role: "query_rewrite" as const, modelName: "query-rewrite-local", displayName: "Query rewriter" },
-  { id: "retrieval-judge-local", providerId: "provider_heuristic_local", role: "retrieval_judge" as const, modelName: "retrieval-judge-local", displayName: "Retrieval judge" },
-  { id: "reranker-local", providerId: "provider_heuristic_local", role: "reranker" as const, modelName: "reranker-local", displayName: "Reranker" },
-  { id: "embedding-local", providerId: "provider_heuristic_local", role: "embedding" as const, modelName: "embedding-local", displayName: "Embedding model" },
-  { id: "summarizer-local", providerId: "provider_heuristic_local", role: "summarizer" as const, modelName: "summarizer-local", displayName: "Summarizer" },
-  { id: "reviewer-local", providerId: "provider_heuristic_local", role: "reviewer" as const, modelName: "reviewer-local", displayName: "Reviewer" },
-  { id: "reflection-local", providerId: "provider_heuristic_local", role: "reflection" as const, modelName: "reflection-local", displayName: "Reflection model" },
-  { id: "indexer-local", providerId: "provider_heuristic_local", role: "embedding" as const, modelName: "indexer-local", displayName: "Indexer" },
-  { id: "ask-fast-local", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-fast-local", displayName: "Fast answer" },
-  { id: "ask-extended-local", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-extended-local", displayName: "Extended answer" },
-  { id: "ask-deep-local", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-deep-local", displayName: "Deep answer" },
-  { id: "ask-hybrid-router", providerId: "provider_heuristic_local", role: "answer" as const, modelName: "ask-hybrid-router", displayName: "Hybrid answer router" },
-  { id: "ask-cloud-router", providerId: "provider_cloud_openai_compat", role: "answer" as const, modelName: "ask-cloud-router", displayName: "Cloud answer router", localOnly: false, enabled: false },
-  { id: "planner-fast-local", providerId: "provider_heuristic_local", role: "planner" as const, modelName: "planner-fast-local", displayName: "Fast planner" },
-  { id: "planner-balanced-local", providerId: "provider_heuristic_local", role: "planner" as const, modelName: "planner-balanced-local", displayName: "Balanced planner" },
-  { id: "planner-deep-local", providerId: "provider_heuristic_local", role: "planner" as const, modelName: "planner-deep-local", displayName: "Deep planner" },
-  { id: "handoff-local", providerId: "provider_heuristic_local", role: "coder_handoff" as const, modelName: "handoff-local", displayName: "Handoff compiler" },
-  { id: "checker-local", providerId: "provider_heuristic_local", role: "reviewer" as const, modelName: "checker-local", displayName: "Check summarizer" },
-];
-
-function seedDefaultModelCatalog(modelsRepo: ReturnType<typeof createModelsRepo>): void {
-  const profiles = modelsRepo.listProfiles();
-  if (profiles.length > 0) {
-    return;
-  }
-  for (const provider of DEFAULT_MODEL_PROVIDER_ROWS) {
-    modelsRepo.upsertProvider(provider);
-  }
-  for (const profile of DEFAULT_MODEL_PROFILE_ROWS) {
-    modelsRepo.upsertProfile({
-      id: profile.id,
-      providerId: profile.providerId,
-      role: profile.role,
-      modelName: profile.modelName,
-      displayName: profile.displayName,
-      contextWindow: profile.id.includes("deep") ? 32_768 : profile.id.includes("extended") ? 16_384 : 8_192,
-      maxOutputTokens: profile.id.includes("deep") ? 4_096 : 2_048,
-      localOnly: profile.localOnly !== false,
-      enabled: profile.enabled !== false,
-      qualityScore: profile.role === "planner" ? 0.7 : profile.role === "answer" ? 0.65 : 0.6,
-      latencyScore: profile.role === "embedding" ? 0.8 : 0.7,
-      costScore: profile.localOnly === false ? 0.2 : 0.9,
-    });
-  }
-}
-
-interface QdrantRuntimeSettings {
-  enabled: boolean;
-  url: string | null;
-  collection: string;
-}
-
-interface QdrantPoint {
-  id: string;
-  vector: number[];
-  payload: Record<string, unknown>;
-}
-
-interface IndexEmbeddingBatchResult {
-  embeddings: number[][];
-  dimensions: number;
-  modelName: string;
-  providerId: string;
-}
-
-type IndexEmbeddingBatcher = (input: string[]) => Promise<IndexEmbeddingBatchResult>;
-
-function getQdrantRuntimeSettings(): QdrantRuntimeSettings {
-  const enabled = /^(1|true|yes)$/i.test(process.env.AI_QDRANT_ENABLED ?? "");
-  const collection = process.env.AI_QDRANT_COLLECTION ?? "ai_chunks";
-  const url = process.env.AI_QDRANT_URL ?? (enabled ? "http://127.0.0.1:6333" : null);
-  return { enabled, url, collection };
-}
-
-function embedText(text: string): number[] {
-  const dim = 32;
-  const vector = Array.from({ length: dim }, () => 0);
-  const terms = text
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter((term) => term.length >= 2);
-  for (const term of terms) {
-    let hash = 2166136261;
-    for (let index = 0; index < term.length; index += 1) {
-      hash ^= term.charCodeAt(index);
-      hash = Math.imul(hash, 16777619);
-    }
-    const bucket = hash >>> 0;
-    vector[bucket % dim] += 1;
-    vector[(bucket >>> 5) % dim] += term.length / 8;
-    vector[(bucket >>> 11) % dim] += term.includes("auth") ? 1.5 : 0.25;
-  }
-  const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + value * value, 0));
-  return magnitude > 0 ? vector.map((value) => value / magnitude) : vector;
-}
-
-function qdrantRequestSync(
-  baseUrl: string,
-  path: string,
-  init?: { method: string; body?: unknown },
-): { ok: boolean; status: number; body: string } | null {
-  const method = init?.method ?? "GET";
-  const encodedBody = init?.body === undefined ? "" : encodeURIComponent(JSON.stringify(init.body));
-  const script = `
-    const [url, method, bodyB64] = process.argv.slice(1);
-    const body = bodyB64 ? JSON.parse(decodeURIComponent(bodyB64)) : undefined;
-    const response = await fetch(url, {
-      method,
-      headers: body === undefined ? undefined : { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
-    const text = await response.text();
-    process.stdout.write(JSON.stringify({ ok: response.ok, status: response.status, body: text }));
-  `;
-  const { spawnSync } = require("node:child_process") as {
-    spawnSync: (
-      command: string,
-      args: string[],
-      options: { encoding: "utf8"; timeout: number; maxBuffer: number },
-    ) => { status: number | null; stdout: string };
-  };
-  let stdout = "";
-  try {
-    stdout = spawnSync(process.argv[0], ["--input-type=module", "-e", script, new URL(path, baseUrl).toString(), method, encodedBody], {
-      encoding: "utf8",
-      timeout: 2500,
-      maxBuffer: 10_000_000,
-    }).stdout;
-  } catch {
-    return null;
-  }
-  try {
-    return JSON.parse(stdout) as { ok: boolean; status: number; body: string };
-  } catch {
-    return null;
-  }
-}
-
-function qdrantVectorSize(body: string): number | null {
-  try {
-    const parsed = JSON.parse(body) as {
-      result?: {
-        config?: {
-          params?: {
-            vectors?: { size?: number; default?: { size?: number } } | Record<string, { size?: number }>;
-          };
-        };
-      };
-    };
-    const vectors = parsed.result?.config?.params?.vectors;
-    if (!vectors || typeof vectors !== "object") return null;
-    if ("size" in vectors && typeof vectors.size === "number") return vectors.size;
-    if ("default" in vectors && typeof vectors.default?.size === "number") return vectors.default.size;
-    for (const value of Object.values(vectors)) {
-      if (value && typeof value === "object" && typeof value.size === "number") return value.size;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function ensureQdrantCollectionSync(settings: QdrantRuntimeSettings, dimension: number): boolean {
-  if (!settings.enabled || !settings.url) {
-    return false;
-  }
-  const existing = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, { method: "GET" });
-  if (existing?.ok) {
-    const existingSize = qdrantVectorSize(existing.body);
-    return existingSize == null || existingSize === dimension;
-  }
-  const created = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, {
-    method: "PUT",
-    body: {
-      vectors: {
-        size: dimension,
-        distance: "Cosine",
-      },
-    },
-  });
-  return Boolean(created?.ok);
-}
-
-function qdrantPointForChunk(
-  projectId: string,
-  documentId: string,
-  path: string,
-  chunk: { id: string; content: string; startLine: number; endLine: number; tokenCount: number },
-  language: string | null,
-  vector: number[],
-): QdrantPoint {
-  return {
-    id: chunk.id,
-    vector,
-    payload: {
-      chunkId: chunk.id,
-      projectId,
-      documentId,
-      path,
-      content: chunk.content,
-      startLine: chunk.startLine,
-      endLine: chunk.endLine,
-      tokenCount: chunk.tokenCount,
-      metadata: {
-        path,
-        language,
-      },
-    },
-  };
-}
-
-function upsertQdrantChunksSync(settings: QdrantRuntimeSettings, points: QdrantPoint[]): boolean {
-  if (!settings.enabled || !settings.url || points.length === 0) {
-    return false;
-  }
-  const dimension = points[0]?.vector.length ?? 0;
-  if (dimension <= 0 || !points.every((point) => point.vector.length === dimension)) {
-    return false;
-  }
-  if (!ensureQdrantCollectionSync(settings, dimension)) {
-    return false;
-  }
-  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points?wait=true`, {
-    method: "PUT",
-    body: { points },
-  });
-  return Boolean(response?.ok);
-}
-
-function searchQdrantChunksSync(settings: QdrantRuntimeSettings, projectId: string, query: string, limit: number): RetrievalChunk[] | null {
-  if (!settings.enabled || !settings.url || query.trim().length === 0) {
-    return null;
-  }
-  const queryVector = embedText(query);
-  if (!ensureQdrantCollectionSync(settings, queryVector.length)) {
-    return null;
-  }
-  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points/search`, {
-    method: "POST",
-    body: {
-      vector: queryVector,
-      limit: limit * 3,
-      with_payload: true,
-      filter: {
-        must: [
-          {
-            key: "projectId",
-            match: {
-              value: projectId,
-            },
-          },
-        ],
-      },
-    },
-  });
-  if (!response?.ok) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(response.body) as {
-      result?: Array<{
-        id: string | number;
-        score: number;
-        payload?: Record<string, unknown>;
-      }>;
-    };
-    return (parsed.result ?? [])
-      .map((result) => {
-        const payload = result.payload ?? {};
-        const metadata = payload.metadata && typeof payload.metadata === "object" ? (payload.metadata as Record<string, unknown>) : {};
-        return {
-          id: asString(payload.chunkId ?? result.id),
-          projectId: asString(payload.projectId),
-          documentId: asString(payload.documentId),
-          path: asString(payload.path),
-          content: asString(payload.content),
-          startLine: toNumber(payload.startLine),
-          endLine: toNumber(payload.endLine),
-          tokenCount: toNumber(payload.tokenCount),
-          score: result.score * 10,
-          metadata,
-        } satisfies RetrievalChunk;
-      })
-      .filter((chunk) => chunk.id.length > 0 && chunk.path.length > 0 && chunk.content.length > 0);
-  } catch {
-    return null;
-  }
-}
-
-function tryEnableSearchIndex(db: DatabaseSync): boolean {
-  try {
-    db.exec(
-      "CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(chunk_id UNINDEXED, project_id UNINDEXED, path, content)",
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function syncSearchIndexForFile(db: DatabaseSync, projectId: string, path: string, chunks: Array<{ id: string; content: string }>): void {
-  try {
-    db.prepare("DELETE FROM rag_chunks_fts WHERE project_id = ? AND path = ?").run(projectId, path);
-    const insertSearchRow = db.prepare(
-      "INSERT INTO rag_chunks_fts (chunk_id, project_id, path, content) VALUES (?, ?, ?, ?)",
-    );
-    for (const chunk of chunks) {
-      insertSearchRow.run(chunk.id, projectId, path, chunk.content);
-    }
-  } catch {
-    // FTS is optional. When unavailable, the heuristic search path remains active.
-  }
-}
-
 function enqueueReflectionJob(
   storeRef: { enqueueJob: (input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }) => JobRecord },
   sessionId: string,
@@ -530,64 +211,12 @@ function enqueueReflectionJob(
   });
 }
 
-function lineCount(text: string): number {
-  if (text.length === 0) return 1;
-  return text.split("\n").length;
-}
-
-function chunkContent(content: string, linesPerChunk = 80): Array<{ content: string; startLine: number; endLine: number; tokenCount: number }> {
-  const lines = content.split("\n");
-  const chunks: Array<{ content: string; startLine: number; endLine: number; tokenCount: number }> = [];
-  for (let index = 0; index < lines.length; index += linesPerChunk) {
-    const slice = lines.slice(index, index + linesPerChunk);
-    const startLine = index + 1;
-    const endLine = index + slice.length;
-    const chunkText = slice.join("\n").trim();
-    if (chunkText.length === 0) {
-      continue;
-    }
-    chunks.push({
-      content: chunkText,
-      startLine,
-      endLine,
-      tokenCount: Math.max(1, Math.ceil(chunkText.length / 4)),
-    });
-  }
-  return chunks;
-}
-
-function isProbablyTextFile(path: string): boolean {
-  return TEXT_EXTENSIONS.has(extname(path).toLowerCase()) || basename(path) === "package.json" || basename(path) === "Dockerfile";
-}
-
-async function safeReadText(path: string): Promise<string | null> {
-  try {
-    const content = await readFile(path, "utf8");
-    return content;
-  } catch {
-    return null;
-  }
-}
-
-async function isReadableFile(path: string): Promise<boolean> {
-  try {
-    await stat(path);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function countMatches(haystack: string, needle: string): number {
-  let count = 0;
-  let position = 0;
-  while (true) {
-    const found = haystack.indexOf(needle, position);
-    if (found === -1) break;
-    count += 1;
-    position = found + needle.length;
-  }
-  return count;
+function detectFrameworkFromPath(projectPath: string): string | null {
+  const name = basename(projectPath).toLowerCase();
+  if (name.includes("react")) return "react";
+  if (name.includes("next")) return "next.js";
+  if (name.includes("expo")) return "expo";
+  return null;
 }
 
 export interface StoreOptions {
@@ -644,10 +273,10 @@ export function initializeStore(dbPath: string): DatabaseSync {
 }
 
 export function createStore(db: DatabaseSync) {
-  const qdrantBaseSettings = getQdrantRuntimeSettings();
+  const qdrantBaseSettings = readQdrantRuntimeSettings();
   let qdrantAvailable = qdrantBaseSettings.enabled && Boolean(qdrantBaseSettings.url);
 
-  function getActiveQdrantSettings(): QdrantRuntimeSettings | null {
+  function getActiveQdrantSettings(): ReturnType<typeof readQdrantRuntimeSettings> | null {
     if (!qdrantBaseSettings.enabled || !qdrantAvailable || !qdrantBaseSettings.url) {
       return null;
     }
@@ -1528,7 +1157,7 @@ export function createStore(db: DatabaseSync) {
         role: "planner",
         mode: "local",
         cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-        details: { risk, goal: input.goal },
+        details: { risk, goal: input.goal, contextTokens: Math.max(2048, Math.min(32_768, input.goal.length * 64)) },
         fallbackProfileId: "planner-balanced-local",
       });
       const selectedPlannerProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile("plan", { risk, goal: input.goal });
@@ -1908,99 +1537,14 @@ export function createStore(db: DatabaseSync) {
       };
     },
     searchChunks(projectId: string, query: string, options: SearchOptions = {}): RetrievalChunk[] {
-      const normalizedQuery = query.trim();
-      const limit = options.limit ?? 8;
-      const candidates = new Map<string, RetrievalChunk>();
-      const addCandidates = (chunks: RetrievalChunk[]) => {
-        for (const chunk of chunks) {
-          const existing = candidates.get(chunk.id);
-          if (!existing || chunk.score > existing.score) {
-            candidates.set(chunk.id, chunk);
-          }
-        }
-      };
-
-      const qdrantSettings = getActiveQdrantSettings();
-      if (normalizedQuery.length > 0 && qdrantSettings) {
-        const qdrantChunks = searchQdrantChunksSync(qdrantSettings, projectId, normalizedQuery, limit);
-        if (qdrantChunks === null) {
-          disableQdrant();
-        } else {
-          addCandidates(qdrantChunks);
-        }
-      }
-
-      const ftsQuery = normalizedQuery.length > 0 ? buildFtsQuery(normalizedQuery) : null;
-      if (ftsQuery) {
-        try {
-          const rows = db
-            .prepare(
-              `SELECT
-                c.*,
-                (100 - bm25(rag_chunks_fts)) AS fts_score
-               FROM rag_chunks_fts
-               JOIN rag_chunks c ON c.id = rag_chunks_fts.chunk_id
-               WHERE rag_chunks_fts MATCH ? AND c.project_id = ?
-               ORDER BY bm25(rag_chunks_fts) ASC
-               LIMIT ?`,
-            )
-            .all(ftsQuery, projectId, limit * 3) as Row[];
-          const scored = rows
-            .map((row) => {
-              const content = asString(row.content);
-              const metadata = safeParseJson(asString(row.metadata_json));
-              const path = asString(row.path) || asString(metadata.path);
-              const heuristicScore = rankChunk(normalizedQuery, path, content, toNumber(row.start_line), toNumber(row.end_line));
-              const ftsScore = toNumber(row.fts_score);
-              return {
-                id: asString(row.id),
-                projectId: asString(row.project_id),
-                documentId: asString(row.document_id),
-                path,
-                content,
-                startLine: toNumber(row.start_line),
-                endLine: toNumber(row.end_line),
-                tokenCount: toNumber(row.token_count),
-                score: ftsScore + heuristicScore,
-                metadata,
-              } satisfies RetrievalChunk;
-            })
-            .filter((chunk) => chunk.score > 0)
-            .sort((left, right) => right.score - left.score);
-          addCandidates(scored);
-        } catch {
-          // Fall back to the heuristic scorer if FTS isn't available or the query is unsupported.
-        }
-      }
-
-      const rows = db
-        .prepare("SELECT * FROM rag_chunks WHERE project_id = ? ORDER BY created_at DESC LIMIT 500")
-        .all(projectId) as Row[];
-      const scored = rows
-        .map((row) => {
-          const content = asString(row.content);
-          const metadata = safeParseJson(asString(row.metadata_json));
-          const path = asString(row.path) || asString(metadata.path);
-          const score = normalizedQuery.length === 0 ? 1 : rankChunk(normalizedQuery, path, content, toNumber(row.start_line), toNumber(row.end_line));
-          return {
-            id: asString(row.id),
-            projectId: asString(row.project_id),
-            documentId: asString(row.document_id),
-            path,
-            content,
-            startLine: toNumber(row.start_line),
-            endLine: toNumber(row.end_line),
-            tokenCount: toNumber(row.token_count),
-            score,
-            metadata,
-          } satisfies RetrievalChunk;
-        })
-        .filter((chunk) => normalizedQuery.length === 0 || chunk.score > 0)
-        .sort((left, right) => right.score - left.score);
-      addCandidates(scored);
-      return Array.from(candidates.values())
-        .sort((left, right) => right.score - left.score)
-        .slice(0, limit);
+      return searchProjectChunks({
+        db,
+        projectId,
+        query,
+        limit: options.limit ?? 8,
+        qdrantSettings: getActiveQdrantSettings(),
+        queryVectorDimension: 32,
+      });
     },
     async addOrUpdateProject(input: ProjectCreateInput): Promise<ProjectSummary> {
       return store.createProject(input);
@@ -2014,7 +1558,7 @@ export function createStore(db: DatabaseSync) {
         role: "embedding",
         mode: "local",
         cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-        details: { goal: project.path },
+        details: { goal: project.path, contextTokens: 1024 },
         fallbackProfileId: "embedding-local",
       });
       const selectedEmbeddingProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile("index", { goal: project.path });
@@ -2069,12 +1613,15 @@ export function createStore(db: DatabaseSync) {
       push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
 
       const embeddingProfileId = session.modelProfile ?? "embedding-local";
-      const indexSummary = await indexProjectFiles(
+      const qdrantSettings = getActiveQdrantSettings();
+      const embeddingProfile = modelsRepo.getProfile(embeddingProfileId);
+      const qdrantClient = qdrantSettings ? new QdrantClient({ settings: qdrantSettings, initialDimension: 0 }) : null;
+      const indexSummary = await runIndexerProject({
         db,
-        project.id,
-        project.path,
-        getActiveQdrantSettings(),
-        async (inputs) => {
+        projectId: project.id,
+        projectPath: project.path,
+        qdrant: qdrantClient,
+        embedBatch: async (inputs) => {
           return getRuntime().embed(
             embeddingProfileId,
             { input: inputs },
@@ -2087,7 +1634,10 @@ export function createStore(db: DatabaseSync) {
             },
           );
         },
-      );
+        embeddingModel: embeddingProfile?.modelName ?? "embedding-local",
+        embeddingProvider: embeddingProfile?.providerId ?? "provider_heuristic_local",
+        embeddingDimension: 0,
+      });
       if (indexSummary.qdrantFailed) {
         disableQdrant();
       }
@@ -2186,7 +1736,11 @@ export function createStore(db: DatabaseSync) {
         role: "answer",
         mode,
         cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-        details: { depth, question: input.question },
+        details: {
+          depth,
+          question: input.question,
+          contextTokens: depth === "deep" ? 8192 : depth === "shallow" ? 2048 : 4096,
+        },
         fallbackProfileId: "ask-fast-local",
       });
       const selectedAnswerProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile(mode, { depth, question: input.question });
@@ -2252,26 +1806,15 @@ export function createStore(db: DatabaseSync) {
         });
       }
       const queryRewriteProfileId = modelsRepo.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
-      const queryRewritePrompt = compilePrompt({
-        mode: "query_rewrite",
-        role: "query_rewrite",
-        userRequest: input.question,
-        taskConstraints: [
-          `Intent: ${retrievalQuery.intent}`,
-          `Mode: ${mode}`,
-          "Return retrieval rewrites, path hints, and symbol hints only.",
-        ],
-        outputSchema: {
-          type: "object",
-          properties: {
-            rewrites: { type: "array", items: { type: "string" } },
-            pathHints: { type: "array", items: { type: "string" } },
-            symbolHints: { type: "array", items: { type: "string" } },
-          },
-          required: ["rewrites", "pathHints", "symbolHints"],
-        },
-        metadata: { retrievalQueryId: retrievalQuery.id, analysis },
-      });
+      const queryRewritePrompt = compilePrompt(
+        buildAskQueryRewritePrompt({
+          question: input.question,
+          retrievalQueryId: retrievalQuery.id,
+          intent: retrievalQuery.intent,
+          mode,
+          analysis,
+        }),
+      );
       let queryRewriteCallId: string | null = null;
       try {
         await invokeModel(
@@ -2331,14 +1874,7 @@ export function createStore(db: DatabaseSync) {
       const selected = pipelineOutput.selected;
       const dropped = pipelineOutput.dropped;
       const chunks = selected.map((entry) => entry.chunk);
-      const citations = selected.map((entry) => ({
-        chunkId: entry.chunk.id,
-        path: entry.chunk.path,
-        startLine: entry.chunk.startLine,
-        endLine: entry.chunk.endLine,
-        excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
-        score: entry.finalScore,
-      }));
+      const citations = buildAskCitations(selected);
 
       retrievalRepo.recordResults(
         retrievalQuery.id,
@@ -2426,31 +1962,20 @@ export function createStore(db: DatabaseSync) {
       const confidence = pipelineOutput.confidence;
       const insufficientReason = selected.length === 0 ? "No matching chunks were found in the selected project." : null;
       const retrievalJudgeProfileId = modelsRepo.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
-      const retrievalJudgePrompt = compilePrompt({
-        mode: "retrieval_judge",
-        role: "retrieval_judge",
-        contextPackId: contextPack.id,
-        userRequest: input.question,
-        retrievalChunks: chunks,
-        taskConstraints: [
-          `Rewritten query: ${rewritten.variant}`,
-          `Ranked: ${ranked.length}`,
-          `Selected: ${selected.length}`,
-          `Dropped: ${dropped.length}`,
-          `Mode: ${mode}`,
-          `Depth: ${depth}`,
-        ],
-        outputSchema: {
-          type: "object",
-          properties: {
-            confidence: { type: "number" },
-            confidenceNotes: { type: "array", items: { type: "string" } },
-            miss: { type: ["object", "null"] },
-          },
-          required: ["confidence", "confidenceNotes"],
-        },
-        metadata: { retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
-      });
+      const retrievalJudgePrompt = compilePrompt(
+        buildAskRetrievalJudgePrompt({
+          question: input.question,
+          retrievalQueryId: retrievalQuery.id,
+          contextPackId: contextPack.id,
+          rewrittenQuery: rewritten.variant,
+          mode,
+          depth,
+          retrievalChunks: chunks,
+          rankedCount: ranked.length,
+          selectedCount: selected.length,
+          droppedCount: dropped.length,
+        }),
+      );
       const retrievalJudgeTrace = {
         confidence,
         insufficientReason,
@@ -2521,46 +2046,36 @@ export function createStore(db: DatabaseSync) {
         input: { question: input.question, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
       });
       const answerProfileId = session.modelProfile ?? selectModelProfile(input.mode ?? "local", { depth: input.depth, question: input.question });
-      const compiledAnswer = compilePrompt({
-        mode: "answer",
-        role: "answer",
-        contextPackId: contextPack.id,
-        userRequest: input.question,
-        projectRules: rules,
-        memoryEntries,
-        facts,
-        retrievalChunks: chunks,
-        contextPackItems: contextRepo.listItems(contextPack.id)
-          .filter((item) => item.included)
-          .map((item) => ({
-            kind: item.kind,
-            rank: item.rank,
-            tokenCount: item.tokenCount,
-            excerpt: item.excerpt,
-            sourceId: item.sourceId,
-          })),
-        previousMessages,
-        taskConstraints: [
-          `Project: ${project.name}`,
-          `Confidence before synthesis: ${Math.round(confidence * 100)}%`,
-          insufficientReason ?? "Answer only from provided context and cite paths.",
-        ],
-        outputSchema: {
-          type: "object",
-          properties: {
-            answer: { type: "string" },
-            citations: { type: "array" },
-            confidence: { type: "number" },
-          },
-          required: ["answer", "citations", "confidence"],
-        },
-        metadata: { sessionId: session.id, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
-        tokenBudget: 4096,
-      });
+      const compiledAnswer = compilePrompt(
+        buildAskAnswerPrompt({
+          question: input.question,
+          projectName: project.name,
+          contextPackId: contextPack.id,
+          confidence,
+          insufficientReason,
+          projectRules: rules,
+          memoryEntries,
+          facts,
+          retrievalChunks: chunks,
+          contextPackItems: contextRepo.listItems(contextPack.id)
+            .filter((item) => item.included)
+            .map((item) => ({
+              kind: item.kind,
+              rank: item.rank,
+              tokenCount: item.tokenCount,
+              excerpt: item.excerpt,
+              sourceId: item.sourceId,
+            })),
+          previousMessages,
+          sessionId: session.id,
+          retrievalQueryId: retrievalQuery.id,
+          tokenBudget: 4096,
+        }),
+      );
       let answer: string;
       let answerCallId: string | null = null;
       if (selected.length === 0) {
-        answer = `I could not find enough local context in ${project.name} to answer "${input.question}".`;
+        answer = buildAskFallbackAnswer(project.name, input.question);
       } else {
         try {
           const result = await invokeModel(
@@ -2592,7 +2107,7 @@ export function createStore(db: DatabaseSync) {
           answerCallId = matchingCalls.at(-1)?.id ?? null;
           answer = buildAnswerFromCompiledPrompt(compiledAnswer, result.text, citations, confidence);
         } catch (error) {
-          answer = `I could not synthesize a model answer for "${input.question}" from the selected context.`;
+          answer = buildAskSynthesisFailure(input.question);
           store.appendEvent(
             createEvent(
               "model.failed",
@@ -2747,194 +2262,6 @@ function detectLanguageFromPath(projectPath: string): string | null {
   if (name.includes("python") || name.includes("py")) return "python";
   if (name.includes("web") || name.includes("frontend")) return "typescript";
   return null;
-}
-
-function detectFrameworkFromPath(projectPath: string): string | null {
-  const name = basename(projectPath).toLowerCase();
-  if (name.includes("react")) return "react";
-  if (name.includes("next")) return "next.js";
-  if (name.includes("expo")) return "expo";
-  return null;
-}
-
-async function indexProjectFiles(
-  db: DatabaseSync,
-  projectId: string,
-  projectPath: string,
-  qdrantSettings: QdrantRuntimeSettings | null,
-  embedBatch: IndexEmbeddingBatcher,
-) {
-  const files = await walkFiles(projectPath);
-  let filesIndexed = 0;
-  let chunksIndexed = 0;
-  let qdrantFailed = false;
-  const ts = now();
-  const upsertFile = db.prepare(
-    `INSERT INTO files (
-      id, project_id, path, language, size_bytes, content_hash, is_indexed, is_generated, last_seen_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(project_id, path) DO UPDATE SET
-      language = excluded.language,
-      size_bytes = excluded.size_bytes,
-      content_hash = excluded.content_hash,
-      is_indexed = excluded.is_indexed,
-      is_generated = excluded.is_generated,
-      last_seen_at = excluded.last_seen_at,
-      updated_at = excluded.updated_at`,
-  );
-  const upsertDocument = db.prepare(
-    `INSERT INTO rag_documents (
-      id, project_id, file_id, path, content_hash, chunk_count, indexed_at, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(project_id, path) DO UPDATE SET
-      file_id = excluded.file_id,
-      content_hash = excluded.content_hash,
-      chunk_count = excluded.chunk_count,
-      indexed_at = excluded.indexed_at,
-      updated_at = excluded.updated_at`,
-  );
-  const deleteChunks = db.prepare("DELETE FROM rag_chunks WHERE document_id = ?");
-  const insertChunk = db.prepare(
-    `INSERT INTO rag_chunks (
-      id, project_id, document_id, chunk_index, content, content_hash, start_line, end_line, token_count,
-      embedding_id, metadata_json, created_at, embedding_model, embedding_dim, embedding_provider
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  );
-  const qdrantPoints: QdrantPoint[] = [];
-
-  for (const filePath of files) {
-    const absolutePath = resolve(filePath);
-    if (!(await isReadableFile(absolutePath))) {
-      continue;
-    }
-    const content = await safeReadText(absolutePath);
-    if (content == null || content.length > 256_000 || !isProbablyTextFile(absolutePath)) {
-      continue;
-    }
-
-    const contentHash = hashContent(content);
-    const fileId = createId("file");
-    const documentId = createId("doc");
-    const relativePath = normalize(relative(projectPath, absolutePath));
-    const language = inferLanguage(relativePath);
-    const chunks = chunkContent(content);
-    const indexedChunks: Array<{ id: string; content: string }> = [];
-
-    upsertFile.run(fileId, projectId, relativePath, language, new TextEncoder().encode(content).length, contentHash, 1, 0, ts, ts, ts);
-    upsertDocument.run(documentId, projectId, fileId, relativePath, contentHash, chunks.length, ts, ts, ts);
-    deleteChunks.run(documentId);
-
-    const embeddingInput = chunks.map((chunk) => `${relativePath}\n${chunk.content}`);
-    const embeddingResult = embeddingInput.length > 0
-      ? await embedBatch(embeddingInput)
-      : { embeddings: [], dimensions: 0, modelName: "none", providerId: "none" };
-
-    chunks.forEach((chunk, index) => {
-      const chunkId = createId("chunk");
-      const chunkHash = hashContent(`${relativePath}\n${chunk.content}\n${chunk.startLine}\n${chunk.endLine}`);
-      const vector = embeddingResult.embeddings[index] ?? [];
-      insertChunk.run(
-        chunkId,
-        projectId,
-        documentId,
-        index,
-        chunk.content,
-        chunkHash,
-        chunk.startLine,
-        chunk.endLine,
-        chunk.tokenCount,
-        null,
-        JSON.stringify({
-          path: relativePath,
-          language,
-          embedding: {
-            model: embeddingResult.modelName,
-            dimensions: embeddingResult.dimensions,
-            provider: embeddingResult.providerId,
-          },
-        }),
-        ts,
-        embeddingResult.modelName,
-        embeddingResult.dimensions || null,
-        embeddingResult.providerId,
-      );
-      indexedChunks.push({ id: chunkId, content: chunk.content });
-      if (qdrantSettings && vector.length > 0) {
-        qdrantPoints.push(
-          qdrantPointForChunk(
-            projectId,
-            documentId,
-            relativePath,
-            {
-              id: chunkId,
-              content: chunk.content,
-              startLine: chunk.startLine,
-              endLine: chunk.endLine,
-              tokenCount: chunk.tokenCount,
-            },
-            language,
-            vector,
-          ),
-        );
-      }
-      chunksIndexed += 1;
-    });
-    syncSearchIndexForFile(db, projectId, relativePath, indexedChunks);
-    filesIndexed += 1;
-  }
-
-  if (qdrantSettings && qdrantPoints.length > 0) {
-    const upserted = upsertQdrantChunksSync(qdrantSettings, qdrantPoints);
-    if (!upserted) {
-      qdrantFailed = true;
-    }
-  }
-
-  db.prepare("UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?").run("ready", ts, ts, projectId);
-  return { filesIndexed, chunksIndexed, qdrantFailed };
-}
-
-async function walkFiles(root: string): Promise<string[]> {
-  const entries: string[] = [];
-  async function visit(current: string): Promise<void> {
-    const items = (await readdir(current, { withFileTypes: true })) as Array<{ name: string; isDirectory(): boolean; isSymbolicLink(): boolean }>;
-    for (const item of items) {
-      if (item.name.startsWith(".")) {
-        if (!DEFAULT_IGNORE_DIRS.has(item.name)) {
-          continue;
-        }
-      }
-      if (DEFAULT_IGNORE_DIRS.has(item.name)) {
-        continue;
-      }
-      const nextPath = join(current, item.name);
-      if (item.isSymbolicLink()) continue;
-      if (item.isDirectory()) {
-        await visit(nextPath);
-        continue;
-      }
-      entries.push(nextPath);
-    }
-  }
-  await visit(root);
-  return entries;
-}
-
-function inferLanguage(path: string): string | null {
-  const extension = extname(path).toLowerCase();
-  if (extension === ".ts" || extension === ".tsx" || extension === ".js" || extension === ".jsx") {
-    return "typescript";
-  }
-  if (extension === ".py") return "python";
-  if (extension === ".rs") return "rust";
-  if (extension === ".go") return "go";
-  if (extension === ".java") return "java";
-  if (extension === ".sh") return "shell";
-  return null;
-}
-
-function hashContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
 }
 
 export function createDatabaseBootstrap(dbPath: string) {
