@@ -131,7 +131,7 @@ export interface ModelRuntime {
   route(input: ModelRouteInput): ModelRouteDecision;
   health(providerId?: string): Promise<Array<{ providerId: string; status: ModelHealthStatus; latencyMs: number | null; detail: string | null }>>;
   invoke(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
-  embed(profileId: string, request: EmbeddingRequest): Promise<EmbeddingResult>;
+  embed(profileId: string, request: EmbeddingRequest, options?: ModelInvokeOptions): Promise<EmbeddingResult>;
   rerank(profileId: string, request: RerankRequest): Promise<RerankResult>;
   listProfiles(): ModelProfileRecord[];
   listProviders(): Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
@@ -201,6 +201,22 @@ export function buildAnswer(
 
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
+}
+
+function redactMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | null {
+  if (!metadata) return null;
+  try {
+    const redacted = redactSecrets(JSON.stringify(metadata)).text;
+    return JSON.parse(redacted) as Record<string, unknown>;
+  } catch {
+    return { redacted: true };
+  }
+}
+
+function getResponseTrace(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  const trace = metadata?.responseTrace;
+  if (!trace || typeof trace !== "object" || Array.isArray(trace)) return {};
+  return redactMetadata(trace as Record<string, unknown>) ?? {};
 }
 
 export function normalizeProviderKind(kind: string): ModelProviderAdapter["kind"] {
@@ -611,6 +627,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
         temperature: request.temperature ?? 0,
         messageCount: request.messages.length,
         firstUserMessage: redactSecrets(request.messages.find((m) => m.role === "user")?.content ?? "").text.slice(0, 600),
+        metadata: redactMetadata(request.metadata),
       };
       try {
         const result = await adapter.invoke({ ...request, modelName: request.modelName ?? profile.modelName });
@@ -629,7 +646,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
             latencyMs: result.latencyMs || Date.now() - started,
             status: "ok",
             request: redactedRequest,
-            response: { text: redactSecrets(result.text).text.slice(0, 1200), usage: result.usage ?? null },
+            response: { text: redactSecrets(result.text).text.slice(0, 1200), usage: result.usage ?? null, ...getResponseTrace(request.metadata) },
             sessionId: options?.sessionId ?? null,
             taskId: options?.taskId ?? null,
             retrievalQueryId: options?.retrievalQueryId ?? null,
@@ -671,12 +688,21 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
         };
       }
     },
-    async embed(profileId: string, request: EmbeddingRequest) {
+    async embed(profileId: string, request: EmbeddingRequest, options?: ModelInvokeOptions) {
       const profile = input.profiles.find((candidate) => candidate.id === profileId);
       if (!profile) {
         throw new Error(`Unknown profile: ${profileId}`);
       }
       const provider = providerMap.get(profile.providerId);
+      const started = Date.now();
+      const inputs = Array.isArray(request.input) ? request.input : [request.input];
+      const redactedRequest = {
+        profileId,
+        role: "embedding" as const,
+        modelName: request.modelName ?? profile.modelName,
+        inputCount: inputs.length,
+        firstInput: redactSecrets(inputs[0] ?? "").text.slice(0, 300),
+      };
       if (provider) {
         const guard = checkCloudGuard({
           cloudEnabled: input.cloudEnabled,
@@ -684,17 +710,82 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
           profileLocalOnly: profile.localOnly,
         });
         if (!guard.allowed) {
+          recordCallSafely(
+            {
+              profileId,
+              role: "embedding",
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: Date.now() - started,
+              status: "blocked",
+              request: redactedRequest,
+              response: { reason: guard.reason },
+              error: guard.reason,
+              sessionId: options?.sessionId ?? null,
+              taskId: options?.taskId ?? null,
+              retrievalQueryId: options?.retrievalQueryId ?? null,
+            },
+            options,
+          );
           throw new Error(`embedding blocked: ${guard.reason}`);
         }
       }
       const adapter = getAdapter(profile);
       try {
-        if (!adapter.embed) {
-          return createHeuristicProviderAdapter(profile.providerId).embed!(request);
-        }
-        return await adapter.embed(request);
-      } catch {
-        return createHeuristicProviderAdapter(profile.providerId).embed!(request);
+        const result = adapter.embed
+          ? await adapter.embed(request)
+          : await createHeuristicProviderAdapter(profile.providerId).embed!(request);
+        const estimated = estimateTokens(inputs.join("\n"));
+        recordCallSafely(
+          {
+            profileId,
+            role: "embedding",
+            promptTokens: estimated,
+            completionTokens: Math.max(1, result.dimensions * result.embeddings.length),
+            latencyMs: Date.now() - started,
+            status: "ok",
+            request: redactedRequest,
+            response: {
+              providerId: result.providerId,
+              modelName: result.modelName,
+              dimensions: result.dimensions,
+              embeddingCount: result.embeddings.length,
+            },
+            sessionId: options?.sessionId ?? null,
+            taskId: options?.taskId ?? null,
+            retrievalQueryId: options?.retrievalQueryId ?? null,
+          },
+          options,
+        );
+        return result;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        const result = await createHeuristicProviderAdapter(profile.providerId).embed!(request);
+        const estimated = estimateTokens(inputs.join("\n"));
+        recordCallSafely(
+          {
+            profileId,
+            role: "embedding",
+            promptTokens: estimated,
+            completionTokens: Math.max(1, result.dimensions * result.embeddings.length),
+            latencyMs: Date.now() - started,
+            status: "fallback",
+            request: redactedRequest,
+            response: {
+              providerId: result.providerId,
+              modelName: result.modelName,
+              dimensions: result.dimensions,
+              embeddingCount: result.embeddings.length,
+              fallbackReason: message,
+            },
+            error: message,
+            sessionId: options?.sessionId ?? null,
+            taskId: options?.taskId ?? null,
+            retrievalQueryId: options?.retrievalQueryId ?? null,
+          },
+          options,
+        );
+        return result;
       }
     },
     async rerank(profileId: string, request: RerankRequest) {

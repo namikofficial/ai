@@ -3,6 +3,7 @@ import { resolveConfig } from "../../../packages/config/src/index.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
+import { compilePrompt } from "../../../packages/prompt-compiler/src/index.ts";
 import {
   reflect as reflectEngine,
   type ReflectionOutput,
@@ -90,6 +91,78 @@ function buildReflectionInput(store: ReturnType<typeof createStore>, sessionId: 
     existingRules,
     existingSkills,
   };
+}
+
+async function recordReflectionModelTrace(
+  store: ReturnType<typeof createStore>,
+  sessionId: string,
+  input: ReflectInput,
+): Promise<{ compiledId: string; modelCallId: string | null }> {
+  const contextItems = input.contextPacks.flatMap((pack) =>
+    store.context.listItems(pack.id)
+      .filter((item) => item.included)
+      .map((item) => ({
+        kind: item.kind,
+        rank: item.rank,
+        tokenCount: item.tokenCount,
+        excerpt: item.excerpt,
+        sourceId: item.sourceId,
+      })),
+  );
+  const compiled = compilePrompt({
+    mode: "reflection",
+    role: "reflection",
+    contextPackId: input.contextPacks.at(-1)?.id ?? null,
+    userRequest: `Reflect on completed session ${sessionId}: ${input.session.userGoal}`,
+    previousMessages: input.conversation,
+    projectRules: input.existingRules,
+    facts: input.existingFacts,
+    contextPackItems: contextItems,
+    taskConstraints: [
+      `Outcome: ${input.outcome?.outcome ?? input.session.status}`,
+      `Retrieval queries: ${input.retrievals.length}`,
+      `Model calls: ${input.modelCalls.length}`,
+      "Create reviewable candidates only. Do not auto-accept memory or skills.",
+      "Redact secrets and cite source ids in evidence.",
+    ],
+    outputSchema: {
+      type: "object",
+      properties: {
+        memoryCandidates: { type: "array" },
+        skillCandidates: { type: "array" },
+        facts: { type: "array" },
+        staleFacts: { type: "array" },
+        retrievalFeedback: { type: "array" },
+        notes: { type: "array", items: { type: "string" } },
+      },
+      required: ["memoryCandidates", "skillCandidates", "facts", "staleFacts", "retrievalFeedback", "notes"],
+    },
+    metadata: { sessionId, projectId: input.session.projectId },
+    tokenBudget: 4096,
+  });
+  await store.invokeModel(
+    "reflection-local",
+    {
+      role: "reflection",
+      messages: compiled.messages,
+      temperature: 0,
+      metadata: {
+        compiledPrompt: compiled,
+        responseTrace: {
+          deterministicReflection: true,
+          sessionId,
+          retrievalQueries: input.retrievals.length,
+          modelCalls: input.modelCalls.length,
+          contextPacks: input.contextPacks.length,
+        },
+      },
+    },
+    { sessionId },
+  );
+  const modelCallId = store.models.listCalls(sessionId, 200)
+    .filter((call) => call.role === "reflection" && call.profileId === "reflection-local")
+    .at(-1)?.id ?? null;
+  return { compiledId: compiled.id, modelCallId };
 }
 
 interface ReflectionCounts {
@@ -197,6 +270,7 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       let notes: string[] = [];
       if (sessionId) {
         const reflectInput = buildReflectionInput(store, sessionId);
+        const trace = await recordReflectionModelTrace(store, sessionId, reflectInput);
         const reflection = reflectEngine(reflectInput);
         counts = applyReflectionOutput(store, sessionId, reflection);
         notes = reflection.notes;
@@ -210,6 +284,8 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
               taskCount: taskGraph.length,
               counts,
               noteCount: notes.length,
+              compiledId: trace.compiledId,
+              modelCallId: trace.modelCallId,
             },
             { sessionId, projectId, agent: "reflection" },
           ),
@@ -248,6 +324,7 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       let notes: string[] = [];
       if (sessionId) {
         const reflectInput = buildReflectionInput(store, sessionId);
+        const trace = await recordReflectionModelTrace(store, sessionId, reflectInput);
         const reflection = reflectEngine(reflectInput);
         counts = applyReflectionOutput(store, sessionId, reflection);
         notes = reflection.notes;
@@ -260,6 +337,8 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
               target,
               counts,
               noteCount: notes.length,
+              compiledId: trace.compiledId,
+              modelCallId: trace.modelCallId,
             },
             { sessionId, projectId, agent: "reflection" },
           ),
@@ -296,6 +375,7 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
         throw new Error(`Unknown session: ${sessionId}`);
       }
       const reflectInput = buildReflectionInput(store, sessionId);
+      const trace = await recordReflectionModelTrace(store, sessionId, reflectInput);
       const reflection = reflectEngine(reflectInput);
       const counts = applyReflectionOutput(store, sessionId, reflection);
       const lesson = store.createLesson({
@@ -314,6 +394,8 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
             projectId: session.projectId,
             counts,
             noteCount: reflection.notes.length,
+            compiledId: trace.compiledId,
+            modelCallId: trace.modelCallId,
           },
           { sessionId, projectId: session.projectId, agent: "reflection" },
         ),
@@ -329,12 +411,13 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       let counts: ReflectionCounts = { memoryCandidates: 0, skillCandidates: 0, facts: 0, staleFacts: 0, retrievalFeedback: 0 };
       if (sessionId) {
         const reflectInput = buildReflectionInput(store, sessionId);
+        const trace = await recordReflectionModelTrace(store, sessionId, reflectInput);
         const reflection = reflectEngine(reflectInput);
         counts = applyReflectionOutput(store, sessionId, reflection);
         store.appendEvent(
           createEvent(
             "review.reflected",
-            { reviewId, sessionId, counts },
+            { reviewId, sessionId, counts, compiledId: trace.compiledId, modelCallId: trace.modelCallId },
             { sessionId, projectId: review.projectId, agent: "reflection" },
           ),
         );

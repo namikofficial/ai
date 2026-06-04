@@ -25,7 +25,7 @@ test("serves MCP tools and logs calls", async () => {
     apiPort: 4242,
   });
 
-  const listResponse = handleMcpRequest(store, config, {
+  const listResponse = await handleMcpRequest(store, config, {
     jsonrpc: "2.0",
     id: 1,
     method: "tools/list",
@@ -33,7 +33,7 @@ test("serves MCP tools and logs calls", async () => {
   assert.ok(listResponse?.result);
   assert.ok(JSON.stringify(listResponse?.result).includes("ai_create_plan"));
 
-  const callResponse = handleMcpRequest(store, config, {
+  const callResponse = await handleMcpRequest(store, config, {
     jsonrpc: "2.0",
     id: 2,
     method: "tools/call",
@@ -49,7 +49,7 @@ test("serves MCP tools and logs calls", async () => {
   assert.equal(callResult.content[0].type, "text");
   assert.ok(callResult.content[0].text.includes("auth"));
 
-  const blockedResponse = handleMcpRequest(store, config, {
+  const blockedResponse = await handleMcpRequest(store, config, {
     jsonrpc: "2.0",
     id: 3,
     method: "tools/call",

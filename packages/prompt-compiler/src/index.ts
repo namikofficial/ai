@@ -12,6 +12,7 @@ import { redactSecrets } from "../../safety/src/index.ts";
 export type PromptMode =
   | "answer"
   | "query_rewrite"
+  | "retrieval_judge"
   | "planner"
   | "handoff"
   | "reflection"
@@ -107,6 +108,12 @@ function defaultSystemRules(mode: PromptMode): string[] {
       return [
         "You rewrite developer questions for hybrid retrieval.",
         "Emit short, term-rich variants and useful path/symbol hints.",
+      ];
+    case "retrieval_judge":
+      return [
+        ...base,
+        "Evaluate retrieval quality, selected context coverage, confidence, and likely misses.",
+        "Return concise JSON-compatible notes; do not invent unavailable context.",
       ];
     case "planner":
       return [...base, "Produce a focused task graph with clear acceptance checks."];

@@ -73,7 +73,7 @@ export async function startMcpServer(): Promise<void> {
   proc.stdin.resume();
 
   let buffer = "";
-  proc.stdin.on("data", (chunk: string) => {
+  proc.stdin.on("data", async (chunk: string) => {
     buffer += chunk;
     try {
       const parsed = parseMessages(buffer);
@@ -83,7 +83,7 @@ export async function startMcpServer(): Promise<void> {
         if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
           continue;
         }
-        const response = handleMcpRequest(store, config, {
+        const response = await handleMcpRequest(store, config, {
           jsonrpc: "2.0",
           id: request.id ?? null,
           method: request.method,

@@ -15,7 +15,7 @@ test("worker processes queued plan jobs", async () => {
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "repo" });
 
-  const plan = store.createPlan({
+  const plan = await store.createPlan({
     project: project.id,
     goal: "reduce auth complexity",
     risk: "medium",
@@ -63,7 +63,7 @@ test("worker processes queued plan jobs", async () => {
     mode: "local",
     source: "test",
   });
-  store.createHandoff({
+  await store.createHandoff({
     sessionId: handoffSession.id,
     project: project.id,
     target: "opencode",

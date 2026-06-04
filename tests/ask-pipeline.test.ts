@@ -53,6 +53,40 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   const judgeResponse = judgeCalls[0]?.response as { confidenceNotes: string[]; boost: { good: number; missed: number; bad: number }; rankedCount?: number; droppedCount?: number };
   assert.ok(Array.isArray(judgeResponse.confidenceNotes));
   assert.ok(judgeResponse.boost);
+  const judgeRequest = judgeCalls[0]?.request as {
+    metadata?: {
+      compiledPrompt?: { mode?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };
+      responseTrace?: { confidence?: number };
+    } | null;
+  };
+  assert.equal(judgeRequest.metadata?.compiledPrompt?.mode, "retrieval_judge");
+  assert.ok(Array.isArray(judgeRequest.metadata?.compiledPrompt?.messages));
+
+  const rewriteCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "query_rewrite");
+  assert.equal(rewriteCalls.length, 1, "ask should record exactly one query rewrite model call");
+  const rewriteRequest = rewriteCalls[0]!.request as {
+    metadata?: {
+      compiledPrompt?: { id?: string; mode?: string; messages?: Array<{ role: string; content: string }> };
+      deterministicRewrite?: unknown;
+    } | null;
+  };
+  assert.equal(rewriteRequest.metadata?.compiledPrompt?.mode, "query_rewrite");
+  assert.ok(rewriteRequest.metadata?.deterministicRewrite, "query rewrite call should record deterministic fallback metadata");
+
+  const answerCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "answer");
+  assert.equal(answerCalls.length, 1, "ask should record exactly one answer model call");
+  const answerRequest = answerCalls[0]!.request as {
+    metadata?: {
+      compiledPrompt?: { id?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };
+      retrievalQueryId?: string;
+    } | null;
+  };
+  assert.ok(answerRequest.metadata?.compiledPrompt?.id, "answer call should include replayable compiled prompt metadata");
+  assert.equal(answerRequest.metadata?.retrievalQueryId, query.id);
+  assert.ok(Array.isArray(answerRequest.metadata?.compiledPrompt?.messages));
+
+  const routes = store.listModelRoutes(10).filter((route) => route.taskPattern === "ask");
+  assert.ok(routes.some((route) => route.reason?.includes("profile selected") || route.reason?.includes("local profile selected")));
 
   const contextPacks = store.context.listPacksForSession(answer.sessionId, 5);
   assert.equal(contextPacks.length, 1);

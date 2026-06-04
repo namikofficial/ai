@@ -385,7 +385,7 @@ function logMcpCall(store: Store, input: {
   });
 }
 
-function handleTool(store: Store, config: ConfigSnapshot, name: string, args: Record<string, unknown>): unknown {
+async function handleTool(store: Store, config: ConfigSnapshot, name: string, args: Record<string, unknown>): Promise<unknown> {
   switch (name) {
     case "ai_search_project": {
       const project = asString(args.project);
@@ -411,11 +411,11 @@ function handleTool(store: Store, config: ConfigSnapshot, name: string, args: Re
       return session;
     }
     case "ai_create_plan":
-      return store.createPlan({
+      return (await store.createPlan({
         project: asString(args.project),
         goal: asString(args.goal),
         risk: args.risk === "low" || args.risk === "high" ? args.risk : "medium",
-      }).response;
+      })).response;
     case "ai_get_current_task":
       return store.getCurrentTask(asString(args.sessionId));
     case "ai_get_next_subtask":
@@ -423,7 +423,7 @@ function handleTool(store: Store, config: ConfigSnapshot, name: string, args: Re
     case "ai_get_subtask_context":
       return store.getSubtaskContext(asString(args.sessionId), args.taskId == null ? null : asString(args.taskId));
     case "ai_create_handoff":
-      return store.createHandoff({
+      return await store.createHandoff({
         sessionId: asString(args.sessionId),
         project: asString(args.project),
         target: args.target === "opencode" || args.target === "codex" || args.target === "clipboard" || args.target === "file" ? args.target : "manual",
@@ -734,7 +734,7 @@ export function getToolDescriptors(): ToolDescriptor[] {
   return toolDescriptors();
 }
 
-export function handleMcpRequest(store: Store, config: ConfigSnapshot, request: JsonRpcRequest): JsonRpcResponse | null {
+export async function handleMcpRequest(store: Store, config: ConfigSnapshot, request: JsonRpcRequest): Promise<JsonRpcResponse | null> {
   if (request.method === "initialize") {
     return ok(request.id ?? null, {
       protocolVersion: "2024-11-05",
@@ -773,7 +773,7 @@ export function handleMcpRequest(store: Store, config: ConfigSnapshot, request: 
       return err(request.id ?? null, -32602, `Unknown tool: ${toolName}`);
     }
     try {
-      const output = handleTool(store, config, toolName, args);
+      const output = await handleTool(store, config, toolName, args);
       logMcpCall(store, {
         toolName,
         sessionId: args.sessionId ? asString(args.sessionId) : null,

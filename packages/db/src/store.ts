@@ -5,11 +5,11 @@ import { createRequire } from "node:module";
 import { basename, extname, join, normalize, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runMigrations } from "./migrate.ts";
-import { buildAnswer, selectModelProfile } from "../../model-runtime/src/index.ts";
+import { createModelRuntime, selectModelProfile } from "../../model-runtime/src/index.ts";
 import type { ModelInvokeOptions, ModelInvokeRequest, ModelInvokeResult, ModelRuntime } from "../../model-runtime/src/index.ts";
 import { buildContextPack } from "../../context-engine/src/index.ts";
 import { reflect as reflectEngine } from "../../reflection-engine/src/index.ts";
-import { compilePrompt } from "../../prompt-compiler/src/index.ts";
+import { buildAnswerFromCompiledPrompt, compilePrompt } from "../../prompt-compiler/src/index.ts";
 import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import {
@@ -258,6 +258,15 @@ interface QdrantPoint {
   payload: Record<string, unknown>;
 }
 
+interface IndexEmbeddingBatchResult {
+  embeddings: number[][];
+  dimensions: number;
+  modelName: string;
+  providerId: string;
+}
+
+type IndexEmbeddingBatcher = (input: string[]) => Promise<IndexEmbeddingBatchResult>;
+
 function getQdrantRuntimeSettings(): QdrantRuntimeSettings {
   const enabled = /^(1|true|yes)$/i.test(process.env.AI_QDRANT_ENABLED ?? "");
   const collection = process.env.AI_QDRANT_COLLECTION ?? "ai_chunks";
@@ -329,19 +338,44 @@ function qdrantRequestSync(
   }
 }
 
-function ensureQdrantCollectionSync(settings: QdrantRuntimeSettings): boolean {
+function qdrantVectorSize(body: string): number | null {
+  try {
+    const parsed = JSON.parse(body) as {
+      result?: {
+        config?: {
+          params?: {
+            vectors?: { size?: number; default?: { size?: number } } | Record<string, { size?: number }>;
+          };
+        };
+      };
+    };
+    const vectors = parsed.result?.config?.params?.vectors;
+    if (!vectors || typeof vectors !== "object") return null;
+    if ("size" in vectors && typeof vectors.size === "number") return vectors.size;
+    if ("default" in vectors && typeof vectors.default?.size === "number") return vectors.default.size;
+    for (const value of Object.values(vectors)) {
+      if (value && typeof value === "object" && typeof value.size === "number") return value.size;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function ensureQdrantCollectionSync(settings: QdrantRuntimeSettings, dimension: number): boolean {
   if (!settings.enabled || !settings.url) {
     return false;
   }
   const existing = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, { method: "GET" });
   if (existing?.ok) {
-    return true;
+    const existingSize = qdrantVectorSize(existing.body);
+    return existingSize == null || existingSize === dimension;
   }
   const created = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, {
     method: "PUT",
     body: {
       vectors: {
-        size: 32,
+        size: dimension,
         distance: "Cosine",
       },
     },
@@ -349,10 +383,17 @@ function ensureQdrantCollectionSync(settings: QdrantRuntimeSettings): boolean {
   return Boolean(created?.ok);
 }
 
-function qdrantPointForChunk(projectId: string, documentId: string, path: string, chunk: { id: string; content: string; startLine: number; endLine: number; tokenCount: number }, language: string | null): QdrantPoint {
+function qdrantPointForChunk(
+  projectId: string,
+  documentId: string,
+  path: string,
+  chunk: { id: string; content: string; startLine: number; endLine: number; tokenCount: number },
+  language: string | null,
+  vector: number[],
+): QdrantPoint {
   return {
     id: chunk.id,
-    vector: embedText(`${path}\n${chunk.content}`),
+    vector,
     payload: {
       chunkId: chunk.id,
       projectId,
@@ -374,7 +415,11 @@ function upsertQdrantChunksSync(settings: QdrantRuntimeSettings, points: QdrantP
   if (!settings.enabled || !settings.url || points.length === 0) {
     return false;
   }
-  if (!ensureQdrantCollectionSync(settings)) {
+  const dimension = points[0]?.vector.length ?? 0;
+  if (dimension <= 0 || !points.every((point) => point.vector.length === dimension)) {
+    return false;
+  }
+  if (!ensureQdrantCollectionSync(settings, dimension)) {
     return false;
   }
   const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points?wait=true`, {
@@ -388,13 +433,14 @@ function searchQdrantChunksSync(settings: QdrantRuntimeSettings, projectId: stri
   if (!settings.enabled || !settings.url || query.trim().length === 0) {
     return null;
   }
-  if (!ensureQdrantCollectionSync(settings)) {
+  const queryVector = embedText(query);
+  if (!ensureQdrantCollectionSync(settings, queryVector.length)) {
     return null;
   }
   const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points/search`, {
     method: "POST",
     body: {
-      vector: embedText(query),
+      vector: queryVector,
       limit: limit * 3,
       with_payload: true,
       filter: {
@@ -630,8 +676,45 @@ export function createStore(db: DatabaseSync) {
 
   seedDefaultModelCatalog(modelsRepo);
 
+  function listRuntimeProviders(): Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">> {
+    return modelsRepo.listProviders().map((provider) => ({
+      id: provider.id,
+      kind: provider.kind,
+      displayName: provider.displayName,
+      baseUrl: provider.baseUrl,
+      apiKeyEnv: provider.apiKeyEnv,
+      enabled: provider.enabled,
+    }));
+  }
+
+  function getRuntime(): ModelRuntime {
+    if (intelligenceStack) {
+      return intelligenceStack.runtime;
+    }
+    const providers = listRuntimeProviders();
+    const profiles = modelsRepo.listProfiles();
+    const runtime = createModelRuntime({
+      providers,
+      profiles,
+      cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+    });
+    intelligenceStack = { runtime, providers, profiles };
+    return runtime;
+  }
+
+  async function invokeModel(profileId: string, request: ModelInvokeRequest, options: ModelInvokeOptions = {}): Promise<ModelInvokeResult> {
+    const runtime = getRuntime();
+    return runtime.invoke(profileId, request, {
+      ...options,
+      recordCall: (call) => {
+        modelsRepo.recordCall(call);
+      },
+    });
+  }
+
   const store = {
     db,
+    invokeModel,
     setIntelligenceStack(stack: typeof intelligenceStack): void {
       intelligenceStack = stack;
     },
@@ -1434,25 +1517,35 @@ export function createStore(db: DatabaseSync) {
         projectCount: store.listProjects().length,
       };
     },
-    createPlan(input: PlanRequest): {
+    async createPlan(input: PlanRequest): Promise<{
       session: SessionRecord;
       response: PlanResponse;
-    } {
+    }> {
       const project = store.getProject(input.project);
       if (!project) throw new Error(`Unknown project: ${input.project}`);
+      const risk = input.risk ?? "medium";
+      const routeDecision = getRuntime().route({
+        role: "planner",
+        mode: "local",
+        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+        details: { risk, goal: input.goal },
+        fallbackProfileId: "planner-balanced-local",
+      });
+      const selectedPlannerProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile("plan", { risk, goal: input.goal });
       const session = store.createSession({
         projectId: project.id,
         title: `Plan: ${input.goal.slice(0, 60)}`,
         userGoal: input.goal,
         mode: "plan",
-        modelProfile: selectModelProfile("plan", { risk: input.risk, goal: input.goal }),
+        modelProfile: selectedPlannerProfile,
         source: "cli",
       });
       modelsRepo.recordRoute({
         taskPattern: "plan",
         mode: "any",
-        selectedProfileId: session.modelProfile ?? "planner-balanced-local",
-        reason: `risk=${input.risk ?? "medium"}`,
+        selectedProfileId: selectedPlannerProfile,
+        fallbackProfileId: routeDecision.fallbackProfileId,
+        reason: `${routeDecision.reason}; risk=${risk}; blocked=${routeDecision.blocked}`,
       });
       const files = store.listProjectFiles(project.id, 12).map((file) => file.path);
       const taskGraph = [
@@ -1487,7 +1580,7 @@ export function createStore(db: DatabaseSync) {
           title: task.title,
           description: task.description,
           type: `plan.${index + 1}`,
-          risk: input.risk ?? "medium",
+          risk,
           priority: index + 1,
         });
         store.updateTask(record.id, {
@@ -1504,32 +1597,72 @@ export function createStore(db: DatabaseSync) {
         return { ...task, id: record.id };
       });
       const plannerProfileId = session.modelProfile ?? "planner-balanced-local";
-      const plannerModelCall = modelsRepo.recordCall({
-        sessionId: session.id,
-        taskId: persistedTaskGraph[0]?.id ?? null,
-        profileId: plannerProfileId,
+      const compiledPlanner = compilePrompt({
+        mode: "planner",
         role: "planner",
-        promptTokens: Math.ceil(input.goal.length / 4),
-        completionTokens: Math.ceil(JSON.stringify(taskGraph).length / 4),
-        latencyMs: 0,
-        status: "ok",
-        request: { goal: input.goal, risk: input.risk ?? "medium", files },
-        response: { taskGraph: persistedTaskGraph, likelyFiles: files.slice(0, 8) },
+        userRequest: input.goal,
+        taskConstraints: [
+          `Project: ${project.name}`,
+          `Risk: ${risk}`,
+          "Return a small task graph with files and checks.",
+          "Do not propose destructive actions.",
+        ],
+        outputSchema: {
+          type: "object",
+          properties: {
+            taskGraph: { type: "array" },
+            likelyFiles: { type: "array", items: { type: "string" } },
+            checks: { type: "array", items: { type: "string" } },
+          },
+          required: ["taskGraph", "likelyFiles", "checks"],
+        },
+        metadata: { sessionId: session.id, projectId: project.id, files },
       });
-      store.appendEvent(createEvent("model.called", { role: "planner", profileId: plannerModelCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
-      store.appendEvent(createEvent("model.completed", { role: "planner", profileId: plannerModelCall.profileId, requestId: plannerModelCall.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
       const response: PlanResponse = {
         sessionId: session.id,
         projectId: project.id,
         goal: input.goal,
-        risk: input.risk ?? "medium",
+        risk,
         taskGraph: persistedTaskGraph,
         likelyFiles: files.slice(0, 8),
         checks: ["typecheck", "tests"],
         modelRecommendation:
-          input.risk === "high" ? "planner-deep-local" : input.risk === "medium" ? "planner-balanced-local" : "planner-fast-local",
-        researchDepth: input.risk === "low" ? "shallow" : input.risk === "high" ? "deep" : "standard",
+          risk === "high" ? "planner-deep-local" : risk === "medium" ? "planner-balanced-local" : "planner-fast-local",
+        researchDepth: risk === "low" ? "shallow" : risk === "high" ? "deep" : "standard",
       };
+      let plannerModelCallId: string | null = null;
+      try {
+        await invokeModel(
+          plannerProfileId,
+          {
+            role: "planner",
+            messages: compiledPlanner.messages,
+            temperature: 0,
+            maxOutputTokens: modelsRepo.getProfile(plannerProfileId)?.maxOutputTokens ?? 1024,
+            metadata: {
+              compiledPrompt: compiledPlanner,
+              responseTrace: { taskGraph: persistedTaskGraph, likelyFiles: response.likelyFiles, checks: response.checks },
+            },
+          },
+          {
+            sessionId: session.id,
+            taskId: persistedTaskGraph[0]?.id ?? null,
+          },
+        );
+        plannerModelCallId = modelsRepo.listCalls(session.id, 200)
+          .filter((call) => call.role === "planner" && call.profileId === plannerProfileId)
+          .at(-1)?.id ?? null;
+      } catch (error) {
+        store.appendEvent(
+          createEvent(
+            "model.failed",
+            { role: "planner", error: error instanceof Error ? error.message : String(error), compiledId: compiledPlanner.id },
+            { sessionId: session.id, projectId: project.id, agent: "planner", level: "warn" },
+          ),
+        );
+      }
+      store.appendEvent(createEvent("model.called", { role: "planner", profileId: plannerProfileId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
+      store.appendEvent(createEvent("model.completed", { role: "planner", profileId: plannerProfileId, requestId: plannerModelCallId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
       store.appendEvent(
         createEvent("task.created", { title: "Plan generated", goal: input.goal }, { sessionId: session.id, projectId: project.id, agent: "planner" }),
       );
@@ -1551,7 +1684,7 @@ export function createStore(db: DatabaseSync) {
       enqueueReflectionJob(store, session.id, "plan", project.id);
       return { session, response };
     },
-    createHandoff(input: HandoffRequest): HandoffResponse {
+    async createHandoff(input: HandoffRequest): Promise<HandoffResponse> {
       const project = store.getProject(input.project);
       if (!project) throw new Error(`Unknown project: ${input.project}`);
       const session = store.getSession(input.sessionId);
@@ -1681,20 +1814,42 @@ export function createStore(db: DatabaseSync) {
         `INSERT INTO handoffs (id, session_id, task_id, project_id, target, prompt, selected_context_json, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(id, session.id, session.activeTaskId, project.id, input.target, prompt, JSON.stringify(selectedContext), ts, ts);
-      const handoffModelCall = modelsRepo.recordCall({
-        sessionId: session.id,
-        taskId: session.activeTaskId,
-        profileId: modelsRepo.getProfile("handoff-local")?.id ?? "handoff-local",
-        role: "coder_handoff",
-        promptTokens: compiled.estimatedTokens,
-        completionTokens: Math.ceil(prompt.length / 4),
-        latencyMs: 0,
-        status: "ok",
-        request: { target: input.target, subtask: input.subtask, files, contextPackId: contextPack.id, compiledId: compiled.id },
-        response: { handoffId: id, prompt, selectedContext, promptCompiled: true },
-      });
-      store.appendEvent(createEvent("model.called", { role: "coder_handoff", profileId: handoffModelCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
-      store.appendEvent(createEvent("model.completed", { role: "coder_handoff", profileId: handoffModelCall.profileId, requestId: handoffModelCall.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
+      const handoffProfileId = modelsRepo.getProfile("handoff-local")?.id ?? "handoff-local";
+      let handoffModelCallId: string | null = null;
+      try {
+        await invokeModel(
+          handoffProfileId,
+          {
+            role: "coder_handoff",
+            messages: compiled.messages,
+            temperature: 0,
+            maxOutputTokens: modelsRepo.getProfile(handoffProfileId)?.maxOutputTokens ?? 1024,
+            metadata: {
+              compiledPrompt: compiled,
+              contextPackId: contextPack.id,
+              target: input.target,
+              responseTrace: { handoffId: id, prompt, selectedContext, promptCompiled: true },
+            },
+          },
+          {
+            sessionId: session.id,
+            taskId: session.activeTaskId,
+          },
+        );
+        handoffModelCallId = modelsRepo.listCalls(session.id, 200)
+          .filter((call) => call.role === "coder_handoff" && call.profileId === handoffProfileId)
+          .at(-1)?.id ?? null;
+      } catch (error) {
+        store.appendEvent(
+          createEvent(
+            "model.failed",
+            { role: "coder_handoff", error: error instanceof Error ? error.message : String(error), compiledId: compiled.id },
+            { sessionId: session.id, projectId: project.id, agent: "handoff_agent", level: "warn" },
+          ),
+        );
+      }
+      store.appendEvent(createEvent("model.called", { role: "coder_handoff", profileId: handoffProfileId, compiledId: compiled.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
+      store.appendEvent(createEvent("model.completed", { role: "coder_handoff", profileId: handoffProfileId, requestId: handoffModelCallId, compiledId: compiled.id }, { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }));
       const handoffAgentRun = agentsRepo.createRun({
         sessionId: session.id,
         taskId: session.activeTaskId,
@@ -1710,13 +1865,13 @@ export function createStore(db: DatabaseSync) {
         direction: "out",
         role: "prompt",
         content: prompt,
-        meta: { target: input.target, subtask: input.subtask, compiledId: compiled.id, safetyNotes: compiled.safetyNotes.length },
+        meta: { target: input.target, subtask: input.subtask, compiledId: compiled.id, modelCallId: handoffModelCallId, safetyNotes: compiled.safetyNotes.length },
       });
       agentsRepo.updateRun(handoffAgentRun.id, {
         status: "completed",
         finishedAt: now(),
         durationMs: 0,
-        output: { handoffId: id, contextPackId: contextPack.id, target: input.target, compiledId: compiled.id },
+        output: { handoffId: id, contextPackId: contextPack.id, target: input.target, compiledId: compiled.id, modelCallId: handoffModelCallId },
       });
       agentsRepo.recordHandoff({
         fromAgentRunId: handoffAgentRun.id,
@@ -1855,20 +2010,29 @@ export function createStore(db: DatabaseSync) {
       if (!project) {
         throw new Error(`Unknown project: ${projectIdentifier}`);
       }
+      const routeDecision = getRuntime().route({
+        role: "embedding",
+        mode: "local",
+        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+        details: { goal: project.path },
+        fallbackProfileId: "embedding-local",
+      });
+      const selectedEmbeddingProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile("index", { goal: project.path });
 
       const session = store.createSession({
         projectId: project.id,
         title: `Index ${project.name}`,
         userGoal: `Index project ${project.path}`,
         mode: "index",
-        modelProfile: selectModelProfile("index", { goal: project.path }),
+        modelProfile: selectedEmbeddingProfile,
         source: "cli",
       });
       modelsRepo.recordRoute({
         taskPattern: "index",
         mode: "any",
-        selectedProfileId: session.modelProfile ?? "indexer-local",
-        reason: `project=${project.name}`,
+        selectedProfileId: selectedEmbeddingProfile,
+        fallbackProfileId: routeDecision.fallbackProfileId,
+        reason: `${routeDecision.reason}; project=${project.name}; blocked=${routeDecision.blocked}`,
       });
 
       const events: EventEnvelope[] = [];
@@ -1904,7 +2068,26 @@ export function createStore(db: DatabaseSync) {
       push("task.created", { title: task.title, description: task.description }, { taskId: task.id, agent: "orchestrator" });
       push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
 
-      const indexSummary = await indexProjectFiles(db, project.id, project.path, getActiveQdrantSettings());
+      const embeddingProfileId = session.modelProfile ?? "embedding-local";
+      const indexSummary = await indexProjectFiles(
+        db,
+        project.id,
+        project.path,
+        getActiveQdrantSettings(),
+        async (inputs) => {
+          return getRuntime().embed(
+            embeddingProfileId,
+            { input: inputs },
+            {
+              sessionId: session.id,
+              taskId: task.id,
+              recordCall: (call) => {
+                modelsRepo.recordCall(call);
+              },
+            },
+          );
+        },
+      );
       if (indexSummary.qdrantFailed) {
         disableQdrant();
       }
@@ -1940,20 +2123,10 @@ export function createStore(db: DatabaseSync) {
         durationMs: Date.parse(now()) - Date.parse(indexerRun.startedAt),
         output: { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed, qdrantFailed: indexSummary.qdrantFailed },
       });
-      const indexModelCall = modelsRepo.recordCall({
-        sessionId: session.id,
-        taskId: task.id,
-        profileId: session.modelProfile ?? "indexer-local",
-        role: "embedding",
-        promptTokens: Math.ceil(project.path.length / 4),
-        completionTokens: Math.ceil(`${indexSummary.filesIndexed}:${indexSummary.chunksIndexed}`.length / 2),
-        latencyMs: 0,
-        status: "ok",
-        request: { projectPath: project.path, fileCount: indexSummary.filesIndexed, chunkCount: indexSummary.chunksIndexed },
-        response: { qdrantFailed: indexSummary.qdrantFailed, filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed },
-      });
-      store.appendEvent(createEvent("model.called", { role: "embedding", profileId: indexModelCall.profileId }, { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }));
-      store.appendEvent(createEvent("model.completed", { role: "embedding", profileId: indexModelCall.profileId, requestId: indexModelCall.id }, { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }));
+      const embeddingCalls = modelsRepo.listCalls(session.id, 200).filter((call) => call.role === "embedding");
+      const lastEmbeddingCall = embeddingCalls.at(-1) ?? null;
+      store.appendEvent(createEvent("model.called", { role: "embedding", profileId: embeddingProfileId, batchCalls: embeddingCalls.length }, { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }));
+      store.appendEvent(createEvent("model.completed", { role: "embedding", profileId: embeddingProfileId, requestId: lastEmbeddingCall?.id ?? null, batchCalls: embeddingCalls.length }, { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }));
 
       push("task.completed", { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed }, { taskId: task.id, agent: "indexer" });
       push("session.completed", { summary: completedSession.finalSummary }, { agent: "orchestrator" });
@@ -2007,20 +2180,31 @@ export function createStore(db: DatabaseSync) {
       if (!project) {
         throw new Error(`Unknown project: ${input.project}`);
       }
+      const mode = input.mode ?? "local";
+      const depth = input.depth ?? "standard";
+      const routeDecision = getRuntime().route({
+        role: "answer",
+        mode,
+        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+        details: { depth, question: input.question },
+        fallbackProfileId: "ask-fast-local",
+      });
+      const selectedAnswerProfile = routeDecision.profileId ?? routeDecision.fallbackProfileId ?? selectModelProfile(mode, { depth, question: input.question });
 
       const session = store.createSession({
         projectId: project.id,
         title: `Ask: ${input.question.slice(0, 60)}`,
         userGoal: input.question,
-        mode: input.mode ?? "local",
-        modelProfile: selectModelProfile(input.mode ?? "local", { depth: input.depth, question: input.question }),
+        mode,
+        modelProfile: selectedAnswerProfile,
         source: "cli",
       });
       modelsRepo.recordRoute({
         taskPattern: "ask",
-        mode: input.mode ?? "local",
-        selectedProfileId: session.modelProfile ?? "ask-fast-local",
-        reason: `depth=${input.depth ?? "standard"}`,
+        mode,
+        selectedProfileId: selectedAnswerProfile,
+        fallbackProfileId: routeDecision.fallbackProfileId,
+        reason: `${routeDecision.reason}; depth=${depth}; blocked=${routeDecision.blocked}`,
       });
 
       const userMessage = conversationRepo.appendMessage({
@@ -2029,7 +2213,7 @@ export function createStore(db: DatabaseSync) {
         role: "user",
         agent: "user",
         content: input.question,
-        meta: { mode: input.mode ?? "local", depth: input.depth ?? "standard" },
+        meta: { mode, depth },
       });
 
       const retrievalAgentRun = agentsRepo.createRun({
@@ -2039,7 +2223,7 @@ export function createStore(db: DatabaseSync) {
         role: "retrieval-pipeline",
         modelRole: "retrieval_judge",
         risk: "low",
-        input: { question: input.question, projectId: project.id, mode: input.mode ?? "local", depth: input.depth ?? "standard" },
+        input: { question: input.question, projectId: project.id, mode, depth },
       });
 
       const analysis = analyzeQuery(input.question);
@@ -2048,9 +2232,9 @@ export function createStore(db: DatabaseSync) {
         sessionId: session.id,
         projectId: project.id,
         originalQuery: input.question,
-        intent: classifyIntent(input.question, input.mode ?? "local"),
-        mode: input.mode ?? "local",
-        depth: input.depth ?? "standard",
+        intent: classifyIntent(input.question, mode),
+        mode,
+        depth,
         rewrittenQuery: rewritten.variant,
         analysis,
       });
@@ -2068,20 +2252,60 @@ export function createStore(db: DatabaseSync) {
         });
       }
       const queryRewriteProfileId = modelsRepo.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
-      const queryRewriteCall = modelsRepo.recordCall({
-        sessionId: session.id,
-        retrievalQueryId: retrievalQuery.id,
-        profileId: queryRewriteProfileId,
+      const queryRewritePrompt = compilePrompt({
+        mode: "query_rewrite",
         role: "query_rewrite",
-        promptTokens: Math.ceil(input.question.length / 4),
-        completionTokens: Math.ceil(rewritten.variant.length / 4),
-        latencyMs: 0,
-        status: "ok",
-        request: { question: input.question, analysis },
-        response: { rewritten: rewritten.variant, terms: rewritten.terms, pathHints: rewritten.pathHints, symbolHints: rewritten.symbolHints },
+        userRequest: input.question,
+        taskConstraints: [
+          `Intent: ${retrievalQuery.intent}`,
+          `Mode: ${mode}`,
+          "Return retrieval rewrites, path hints, and symbol hints only.",
+        ],
+        outputSchema: {
+          type: "object",
+          properties: {
+            rewrites: { type: "array", items: { type: "string" } },
+            pathHints: { type: "array", items: { type: "string" } },
+            symbolHints: { type: "array", items: { type: "string" } },
+          },
+          required: ["rewrites", "pathHints", "symbolHints"],
+        },
+        metadata: { retrievalQueryId: retrievalQuery.id, analysis },
       });
-      store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      store.appendEvent(createEvent("model.completed", { role: "query_rewrite", profileId: queryRewriteCall.profileId, requestId: queryRewriteCall.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+      let queryRewriteCallId: string | null = null;
+      try {
+        await invokeModel(
+          queryRewriteProfileId,
+          {
+            role: "query_rewrite",
+            messages: queryRewritePrompt.messages,
+            temperature: 0,
+            maxOutputTokens: modelsRepo.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
+            metadata: {
+              compiledPrompt: queryRewritePrompt,
+              retrievalQueryId: retrievalQuery.id,
+              deterministicRewrite: rewritten,
+            },
+          },
+          {
+            sessionId: session.id,
+            retrievalQueryId: retrievalQuery.id,
+          },
+        );
+        queryRewriteCallId = modelsRepo.listCalls(session.id, 200)
+          .filter((call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id)
+          .at(-1)?.id ?? null;
+      } catch (error) {
+        store.appendEvent(
+          createEvent(
+            "model.failed",
+            { role: "query_rewrite", error: error instanceof Error ? error.message : String(error), compiledId: queryRewritePrompt.id },
+            { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" },
+          ),
+        );
+      }
+      store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteProfileId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+      store.appendEvent(createEvent("model.completed", { role: "query_rewrite", profileId: queryRewriteProfileId, requestId: queryRewriteCallId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       agentsRepo.appendMessage({
         agentRunId: retrievalAgentRun.id,
         direction: "internal",
@@ -2098,8 +2322,8 @@ export function createStore(db: DatabaseSync) {
         projectId: project.id,
         query: rewritten.variant,
         intent: retrievalQuery.intent,
-        mode: input.mode ?? "local",
-        depth: input.depth ?? "standard",
+        mode,
+        depth,
         ftsLimit,
       });
       const pipelineOutput = runRetrievalPipeline(pipelineInput);
@@ -2154,92 +2378,126 @@ export function createStore(db: DatabaseSync) {
           notes: "no chunks returned from hybrid retrieval",
         });
       }
-      const contextPack = contextRepo.recordPack({
+      const memoryEntries = memoryRepo.listEntries(project.id, undefined, 20);
+      const facts = memoryRepo.listFacts(project.id, 20);
+      const rules = memoryRepo.listProjectRules(project.id, 20);
+      const skills = skillsRepo.listSkills("active", 20);
+      const previousMessages = conversationRepo.listMessages(session.id).slice(-8);
+      const packedContext = buildContextPack({
         sessionId: session.id,
         projectId: project.id,
         retrievalQueryId: retrievalQuery.id,
         budgetTokens: 4096,
-        usedTokens: pipelineOutput.usedTokens,
-        reason: "ask",
-        items: selected.map((entry, index) => ({
-          kind: "retrieval_chunk",
-          sourceId: entry.chunk.id,
-          rank: index,
-          tokenCount: entry.chunk.tokenCount,
-          excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
+        ranked: selected,
+        memoryEntries,
+        facts,
+        rules,
+        previousMessages,
+        skills,
+      });
+      const contextPack = contextRepo.recordPack({
+        sessionId: session.id,
+        projectId: project.id,
+        retrievalQueryId: retrievalQuery.id,
+        budgetTokens: packedContext.pack.budgetTokens,
+        usedTokens: packedContext.pack.usedTokens,
+        reason: packedContext.pack.reason ?? "ask",
+        items: packedContext.items.map((item, index) => ({
+          kind: item.kind,
+          sourceId: item.sourceId,
+          rank: item.rank ?? index,
+          tokenCount: item.tokenCount,
+          excerpt: item.excerpt,
+          included: item.included,
+          omissionReason: item.omissionReason,
         })),
-        budgetEvents: dropped.map((entry) => ({
-          deltaTokens: entry.chunk.tokenCount,
-          reason: `dropped:${entry.rerankReason}`,
-        })),
+        budgetEvents: [
+          ...packedContext.budgetEvents.map((event) => ({
+            deltaTokens: event.deltaTokens,
+            reason: event.reason,
+          })),
+          ...dropped.map((entry) => ({
+            deltaTokens: entry.chunk.tokenCount,
+            reason: `dropped:${entry.rerankReason}`,
+          })),
+        ],
       });
 
       const confidence = pipelineOutput.confidence;
       const insufficientReason = selected.length === 0 ? "No matching chunks were found in the selected project." : null;
-      const retrievalJudgeCall = modelsRepo.recordCall({
-        sessionId: session.id,
-        taskId: retrievalAgentRun.id,
-        retrievalQueryId: retrievalQuery.id,
-        profileId: modelsRepo.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local",
+      const retrievalJudgeProfileId = modelsRepo.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
+      const retrievalJudgePrompt = compilePrompt({
+        mode: "retrieval_judge",
         role: "retrieval_judge",
-        promptTokens: Math.ceil((input.question.length + rewritten.variant.length) / 4),
-        completionTokens: Math.ceil(String(ranked.length).length / 2),
-        latencyMs: 0,
-        status: "ok",
-        request: {
-          question: input.question,
-          rewritten: rewritten.variant,
-          chunkCount: selected.length,
-          rankedCount: ranked.length,
-          droppedCount: dropped.length,
-          mode: input.mode ?? "local",
+        contextPackId: contextPack.id,
+        userRequest: input.question,
+        retrievalChunks: chunks,
+        taskConstraints: [
+          `Rewritten query: ${rewritten.variant}`,
+          `Ranked: ${ranked.length}`,
+          `Selected: ${selected.length}`,
+          `Dropped: ${dropped.length}`,
+          `Mode: ${mode}`,
+          `Depth: ${depth}`,
+        ],
+        outputSchema: {
+          type: "object",
+          properties: {
+            confidence: { type: "number" },
+            confidenceNotes: { type: "array", items: { type: "string" } },
+            miss: { type: ["object", "null"] },
+          },
+          required: ["confidence", "confidenceNotes"],
         },
-        response: {
-          confidence,
-          insufficientReason,
-          confidenceNotes: pipelineOutput.confidenceNotes,
-          boost: pipelineOutput.boost,
-          miss: pipelineOutput.miss ?? null,
-          citations: citations.slice(0, 3),
-        },
+        metadata: { retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
       });
-      store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeCall.profileId, requestId: retrievalJudgeCall.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      const answer =
-        selected.length === 0
-          ? `I could not find enough local context in ${project.name} to answer "${input.question}".`
-          : buildAnswer(input.question, project, chunks, citations, confidence);
-      let intelligenceResult: ModelInvokeResult | null = null;
-      if (intelligenceStack && selected.length > 0) {
-        try {
-          const request: ModelInvokeRequest = {
-            role: "answer",
-            messages: [
-              { role: "system", content: `You are the answer_agent for project ${project.name}. Cite paths and line numbers from the context.` },
-              { role: "user", content: `Question: ${input.question}\n\nContext:\n${chunks.map((c) => `${c.path}:${c.startLine}-${c.endLine}\n${c.content}`).join("\n\n")}` },
-            ],
+      const retrievalJudgeTrace = {
+        confidence,
+        insufficientReason,
+        confidenceNotes: pipelineOutput.confidenceNotes,
+        boost: pipelineOutput.boost,
+        miss: pipelineOutput.miss ?? null,
+        citations: citations.slice(0, 3),
+        rankedCount: ranked.length,
+        selectedCount: selected.length,
+        droppedCount: dropped.length,
+      };
+      let retrievalJudgeCallId: string | null = null;
+      try {
+        await invokeModel(
+          retrievalJudgeProfileId,
+          {
+            role: "retrieval_judge",
+            messages: retrievalJudgePrompt.messages,
             temperature: 0,
-          };
-          intelligenceResult = await intelligenceStack.runtime.invoke(
-            session.modelProfile ?? "ask-fast-local",
-            request,
-            {
-              sessionId: session.id,
-              taskId: retrievalAgentRun.id,
+            maxOutputTokens: modelsRepo.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
+            metadata: {
+              compiledPrompt: retrievalJudgePrompt,
               retrievalQueryId: retrievalQuery.id,
+              contextPackId: contextPack.id,
+              responseTrace: retrievalJudgeTrace,
             },
-          );
-        } catch (error) {
-          store.appendEvent(
-            createEvent(
-              "model.failed",
-              { role: "answer", error: error instanceof Error ? error.message : String(error) },
-              { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "warn" },
-            ),
-          );
-        }
+          },
+          {
+            sessionId: session.id,
+            taskId: retrievalAgentRun.id,
+            retrievalQueryId: retrievalQuery.id,
+          },
+        );
+        retrievalJudgeCallId = modelsRepo.listCalls(session.id, 200)
+          .filter((call) => call.role === "retrieval_judge" && call.taskId === retrievalAgentRun.id && call.retrievalQueryId === retrievalQuery.id)
+          .at(-1)?.id ?? null;
+      } catch (error) {
+        store.appendEvent(
+          createEvent(
+            "model.failed",
+            { role: "retrieval_judge", error: error instanceof Error ? error.message : String(error), compiledId: retrievalJudgePrompt.id },
+            { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" },
+          ),
+        );
       }
-
+      store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+      store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, requestId: retrievalJudgeCallId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       agentsRepo.updateRun(retrievalAgentRun.id, {
         status: "completed",
         finishedAt: now(),
@@ -2263,31 +2521,89 @@ export function createStore(db: DatabaseSync) {
         input: { question: input.question, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
       });
       const answerProfileId = session.modelProfile ?? selectModelProfile(input.mode ?? "local", { depth: input.depth, question: input.question });
-      const answerModelCall = modelsRepo.recordCall({
-        sessionId: session.id,
-        taskId: answerAgentRun.id,
-        retrievalQueryId: retrievalQuery.id,
-        profileId: answerProfileId,
+      const compiledAnswer = compilePrompt({
+        mode: "answer",
         role: "answer",
-        promptTokens: Math.ceil((input.question.length + contextPack.usedTokens) / 4),
-        completionTokens: Math.ceil(answer.length / 4),
-        latencyMs: 0,
-        status: "ok",
-        request: {
-          question: input.question,
-          retrievalQueryId: retrievalQuery.id,
-          contextPackId: contextPack.id,
-          citations: citations.slice(0, 5),
+        contextPackId: contextPack.id,
+        userRequest: input.question,
+        projectRules: rules,
+        memoryEntries,
+        facts,
+        retrievalChunks: chunks,
+        contextPackItems: contextRepo.listItems(contextPack.id)
+          .filter((item) => item.included)
+          .map((item) => ({
+            kind: item.kind,
+            rank: item.rank,
+            tokenCount: item.tokenCount,
+            excerpt: item.excerpt,
+            sourceId: item.sourceId,
+          })),
+        previousMessages,
+        taskConstraints: [
+          `Project: ${project.name}`,
+          `Confidence before synthesis: ${Math.round(confidence * 100)}%`,
+          insufficientReason ?? "Answer only from provided context and cite paths.",
+        ],
+        outputSchema: {
+          type: "object",
+          properties: {
+            answer: { type: "string" },
+            citations: { type: "array" },
+            confidence: { type: "number" },
+          },
+          required: ["answer", "citations", "confidence"],
         },
-        response: {
-          answer,
-          confidence,
-          citations: citations.slice(0, 5),
-          insufficientReason,
-        },
+        metadata: { sessionId: session.id, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
+        tokenBudget: 4096,
       });
-      store.appendEvent(createEvent("model.called", { role: "answer", profileId: answerModelCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
-      store.appendEvent(createEvent("model.completed", { role: "answer", profileId: answerModelCall.profileId, requestId: answerModelCall.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
+      let answer: string;
+      let answerCallId: string | null = null;
+      if (selected.length === 0) {
+        answer = `I could not find enough local context in ${project.name} to answer "${input.question}".`;
+      } else {
+        try {
+          const result = await invokeModel(
+            answerProfileId,
+            {
+              role: "answer",
+              messages: compiledAnswer.messages,
+              temperature: 0,
+              maxOutputTokens: modelsRepo.getProfile(answerProfileId)?.maxOutputTokens ?? 1024,
+              metadata: {
+                compiledPrompt: compiledAnswer,
+                retrievalQueryId: retrievalQuery.id,
+                contextPackId: contextPack.id,
+                citations: citations.slice(0, 5),
+                confidence,
+              },
+            },
+            {
+              sessionId: session.id,
+              taskId: answerAgentRun.id,
+              retrievalQueryId: retrievalQuery.id,
+            },
+          );
+          const matchingCalls = modelsRepo.listCalls(session.id, 200).filter((call) =>
+            call.role === "answer" &&
+            call.taskId === answerAgentRun.id &&
+            call.retrievalQueryId === retrievalQuery.id
+          );
+          answerCallId = matchingCalls.at(-1)?.id ?? null;
+          answer = buildAnswerFromCompiledPrompt(compiledAnswer, result.text, citations, confidence);
+        } catch (error) {
+          answer = `I could not synthesize a model answer for "${input.question}" from the selected context.`;
+          store.appendEvent(
+            createEvent(
+              "model.failed",
+              { role: "answer", error: error instanceof Error ? error.message : String(error), compiledId: compiledAnswer.id },
+              { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "warn" },
+            ),
+          );
+        }
+      }
+      store.appendEvent(createEvent("model.called", { role: "answer", profileId: answerProfileId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
+      store.appendEvent(createEvent("model.completed", { role: "answer", profileId: answerProfileId, requestId: answerCallId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
 
       const retrievalCompleted = createEvent(
         chunks.length === 0 ? "retrieval.low_confidence" : "retrieval.completed",
@@ -2323,13 +2639,13 @@ export function createStore(db: DatabaseSync) {
         agent: "answer_agent",
         content: answer,
         parentMessageId: userMessage.id,
-        meta: { confidence, retrievalQueryId: retrievalQuery.id, citationCount: citations.length },
+        meta: { confidence, retrievalQueryId: retrievalQuery.id, citationCount: citations.length, contextPackId: contextPack.id, compiledId: compiledAnswer.id, modelCallId: answerCallId },
       });
       agentsRepo.updateRun(answerAgentRun.id, {
         status: "completed",
         finishedAt: now(),
         durationMs: Date.parse(now()) - Date.parse(answerAgentRun.startedAt),
-        output: { answer, confidence, citations: citations.length, contextPackId: contextPack.id },
+        output: { answer, confidence, citations: citations.length, contextPackId: contextPack.id, compiledId: compiledAnswer.id, modelCallId: answerCallId },
       });
 
       if (chunks.length > 0) {
@@ -2441,7 +2757,13 @@ function detectFrameworkFromPath(projectPath: string): string | null {
   return null;
 }
 
-async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPath: string, qdrantSettings: QdrantRuntimeSettings | null) {
+async function indexProjectFiles(
+  db: DatabaseSync,
+  projectId: string,
+  projectPath: string,
+  qdrantSettings: QdrantRuntimeSettings | null,
+  embedBatch: IndexEmbeddingBatcher,
+) {
   const files = await walkFiles(projectPath);
   let filesIndexed = 0;
   let chunksIndexed = 0;
@@ -2474,8 +2796,9 @@ async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPat
   const deleteChunks = db.prepare("DELETE FROM rag_chunks WHERE document_id = ?");
   const insertChunk = db.prepare(
     `INSERT INTO rag_chunks (
-      id, project_id, document_id, chunk_index, content, content_hash, start_line, end_line, token_count, embedding_id, metadata_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, project_id, document_id, chunk_index, content, content_hash, start_line, end_line, token_count,
+      embedding_id, metadata_json, created_at, embedding_model, embedding_dim, embedding_provider
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const qdrantPoints: QdrantPoint[] = [];
 
@@ -2501,9 +2824,15 @@ async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPat
     upsertDocument.run(documentId, projectId, fileId, relativePath, contentHash, chunks.length, ts, ts, ts);
     deleteChunks.run(documentId);
 
+    const embeddingInput = chunks.map((chunk) => `${relativePath}\n${chunk.content}`);
+    const embeddingResult = embeddingInput.length > 0
+      ? await embedBatch(embeddingInput)
+      : { embeddings: [], dimensions: 0, modelName: "none", providerId: "none" };
+
     chunks.forEach((chunk, index) => {
       const chunkId = createId("chunk");
       const chunkHash = hashContent(`${relativePath}\n${chunk.content}\n${chunk.startLine}\n${chunk.endLine}`);
+      const vector = embeddingResult.embeddings[index] ?? [];
       insertChunk.run(
         chunkId,
         projectId,
@@ -2515,11 +2844,22 @@ async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPat
         chunk.endLine,
         chunk.tokenCount,
         null,
-        JSON.stringify({ path: relativePath, language }),
+        JSON.stringify({
+          path: relativePath,
+          language,
+          embedding: {
+            model: embeddingResult.modelName,
+            dimensions: embeddingResult.dimensions,
+            provider: embeddingResult.providerId,
+          },
+        }),
         ts,
+        embeddingResult.modelName,
+        embeddingResult.dimensions || null,
+        embeddingResult.providerId,
       );
       indexedChunks.push({ id: chunkId, content: chunk.content });
-      if (qdrantSettings) {
+      if (qdrantSettings && vector.length > 0) {
         qdrantPoints.push(
           qdrantPointForChunk(
             projectId,
@@ -2533,6 +2873,7 @@ async function indexProjectFiles(db: DatabaseSync, projectId: string, projectPat
               tokenCount: chunk.tokenCount,
             },
             language,
+            vector,
           ),
         );
       }

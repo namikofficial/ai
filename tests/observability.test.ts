@@ -146,12 +146,25 @@ test("observability: createHandoff records agent handoff and context pack", asyn
     depth: "shallow",
   });
 
-  const handoff = store.createHandoff({
+  const handoff = await store.createHandoff({
     sessionId: answer.sessionId,
     project: project.id,
     target: "opencode",
     subtask: "explain the main file",
   });
+  assert.ok(handoff.prompt.includes("explain the main file"));
+
+  const handoffCalls = store.models.listCalls(answer.sessionId, 100).filter((call) => call.role === "coder_handoff");
+  assert.equal(handoffCalls.length, 1, "handoff should record exactly one runtime-backed model call");
+  const handoffRequest = handoffCalls[0]!.request as {
+    metadata?: {
+      compiledPrompt?: { id?: string; mode?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };
+      responseTrace?: { handoffId?: string };
+    } | null;
+  };
+  assert.equal(handoffRequest.metadata?.compiledPrompt?.mode, "handoff");
+  assert.equal(handoffRequest.metadata?.responseTrace?.handoffId, handoff.id);
+  assert.ok(Array.isArray(handoffRequest.metadata?.compiledPrompt?.messages));
 
   const handoffs = store.agents.listHandoffs(answer.sessionId);
   assert.equal(handoffs.length, 1);
@@ -190,6 +203,21 @@ test("observability: indexProject records an indexer agent run", async () => {
   const output = indexerRun!.output as Record<string, unknown> | null;
   assert.ok(output && typeof output === "object");
   assert.ok("filesIndexed" in (output as Record<string, unknown>));
+
+  const embeddingCalls = store.models.listCalls(result.session.id, 100).filter((call) => call.role === "embedding");
+  assert.ok(embeddingCalls.length >= 1, "indexing should record runtime-backed embedding calls");
+  const embeddingResponse = embeddingCalls[0]!.response as { modelName?: string; dimensions?: number; providerId?: string; embeddingCount?: number };
+  assert.ok(embeddingResponse.modelName);
+  assert.ok((embeddingResponse.dimensions ?? 0) > 0);
+  assert.ok((embeddingResponse.embeddingCount ?? 0) > 0);
+
+  const chunk = store.db
+    .prepare("SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1")
+    .get(project.id) as { embedding_model: string | null; embedding_dim: number | null; embedding_provider: string | null } | undefined;
+  assert.ok(chunk);
+  assert.equal(chunk!.embedding_model, embeddingResponse.modelName);
+  assert.equal(chunk!.embedding_dim, embeddingResponse.dimensions);
+  assert.equal(chunk!.embedding_provider, embeddingResponse.providerId);
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

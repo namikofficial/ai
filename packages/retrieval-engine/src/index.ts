@@ -14,6 +14,32 @@ import type {
 } from "../../shared/src/index.ts";
 import { redactSecrets } from "../../safety/src/index.ts";
 
+export {
+  QdrantClient,
+  checkQdrantCollectionDimension,
+  embedQueryForQdrant,
+  ensureQdrantCollectionSync,
+  hashContent,
+  qdrantPointForChunk,
+  readQdrantRuntimeSettings,
+  searchQdrantChunksSync,
+  upsertQdrantChunksSync,
+} from "./qdrant.ts";
+export type {
+  QdrantClientOptions,
+  QdrantDimensionState,
+  QdrantIndexChunkInput,
+  QdrantPoint,
+  QdrantRuntimeSettings,
+  QueryEmbeddingInput,
+} from "./qdrant.ts";
+
+export {
+  ftsSearch,
+  syncSearchIndexForFile,
+  tryEnableSearchIndex,
+} from "./fts.ts";
+
 const DEFINITION_TOKENS = new Set(["what", "where", "how", "why", "when", "which", "who"]);
 const DEBUG_TOKENS = new Set(["fix", "bug", "error", "failing", "regression", "crash", "trace", "stack", "panic", "exception"]);
 const SYMBOL_TOKEN = /[A-Za-z_][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*/g;

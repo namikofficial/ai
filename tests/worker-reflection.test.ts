@@ -55,6 +55,21 @@ test("worker session.reflect creates memory candidates from conversation", async
     (e) => e.type === "session.reflected",
   );
   assert.ok(reflectedEvent, "session.reflected event should be appended");
+  const reflectedPayload = reflectedEvent!.payload as { compiledId?: string; modelCallId?: string | null };
+  assert.ok(reflectedPayload.compiledId);
+  assert.ok(reflectedPayload.modelCallId);
+
+  const reflectionCalls = store.models.listCalls(session.id, 100).filter((call) => call.role === "reflection");
+  assert.equal(reflectionCalls.length, 1, "session.reflect should record exactly one runtime-backed reflection model call");
+  const reflectionRequest = reflectionCalls[0]!.request as {
+    metadata?: {
+      compiledPrompt?: { mode?: string; messages?: Array<{ role: string; content: string }> };
+      responseTrace?: { deterministicReflection?: boolean };
+    } | null;
+  };
+  assert.equal(reflectionRequest.metadata?.compiledPrompt?.mode, "reflection");
+  assert.equal(reflectionRequest.metadata?.responseTrace?.deterministicReflection, true);
+  assert.ok(Array.isArray(reflectionRequest.metadata?.compiledPrompt?.messages));
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

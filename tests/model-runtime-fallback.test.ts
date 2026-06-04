@@ -73,14 +73,20 @@ test("model-runtime: invoke falls back to local heuristic when cloud blocked and
 });
 
 test("model-runtime: embed falls back to hash embedding when provider fails", async () => {
+  const recorded: Array<{ role: string; status: string; completionTokens: number }> = [];
   const runtime = createModelRuntime({
     providers,
     profiles,
     cloudEnabled: true,
   });
-  const result = await runtime.embed("ask-fast-local", { input: "hello world" });
+  const result = await runtime.embed("ask-fast-local", { input: "hello world" }, {
+    recordCall: (payload) => {
+      recorded.push({ role: payload.role, status: payload.status, completionTokens: payload.completionTokens });
+    },
+  });
   assert.equal(result.embeddings.length, 1);
   assert.ok(result.dimensions > 0);
+  assert.ok(recorded.some((entry) => entry.role === "embedding" && entry.completionTokens > 0));
 });
 
 test("model-runtime: rerank ranks documents that contain query terms first", async () => {

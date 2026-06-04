@@ -7,16 +7,16 @@ import { initializeStore, createStore } from "../packages/db/src/store.ts";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
 import { resolveConfig } from "../packages/config/src/index.ts";
 
-type McpEnvelope = ReturnType<typeof handleMcpRequest>;
+type McpEnvelope = Awaited<ReturnType<typeof handleMcpRequest>>;
 
-function callTool(
+async function callTool(
   store: ReturnType<typeof createStore>,
   config: ReturnType<typeof resolveConfig>,
   id: number,
   name: string,
   args: Record<string, unknown>,
-): unknown {
-  const response = handleMcpRequest(store, config, {
+): Promise<unknown> {
+  const response = await handleMcpRequest(store, config, {
     jsonrpc: "2.0",
     id,
     method: "tools/call",
@@ -27,6 +27,17 @@ function callTool(
   }
   const result = response?.result as { content: Array<{ type: string; text: string }> };
   return JSON.parse(result.content[0].text);
+}
+
+async function assertRejects(fn: () => Promise<unknown>, pattern: RegExp): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    assert.match(message, pattern);
+    return;
+  }
+  assert.ok(false, `Expected rejection matching ${pattern}`);
 }
 
 test("ai_list_memory_candidates returns pending candidates and ai_accept_memory_candidate transitions to entry", async () => {
@@ -52,10 +63,10 @@ test("ai_list_memory_candidates returns pending candidates and ai_accept_memory_
     apiPort: 4242,
   });
 
-  const listed = callTool(store, config, 1, "ai_list_memory_candidates", { project: project.id, status: "pending" }) as Array<{ id: string }>;
+  const listed = await callTool(store, config, 1, "ai_list_memory_candidates", { project: project.id, status: "pending" }) as Array<{ id: string }>;
   assert.ok(listed.some((c) => c.id === candidate.id));
 
-  const accepted = callTool(store, config, 2, "ai_accept_memory_candidate", { candidateId: candidate.id, notes: "looks right" }) as { entry: { id: string }; candidate: { status: string } };
+  const accepted = await callTool(store, config, 2, "ai_accept_memory_candidate", { candidateId: candidate.id, notes: "looks right" }) as { entry: { id: string }; candidate: { status: string } };
   assert.equal(accepted.candidate.status, "accepted");
   assert.ok(accepted.entry.id);
 
@@ -99,7 +110,7 @@ test("ai_get_context_pack returns pack with items and budget events", async () =
     apiPort: 4242,
   });
 
-  const result = callTool(store, config, 1, "ai_get_context_pack", { contextPackId: pack.id }) as { pack: { id: string }; items: Array<{ excerpt: string }>; budgetEvents: Array<{ reason: string }> };
+  const result = await callTool(store, config, 1, "ai_get_context_pack", { contextPackId: pack.id }) as { pack: { id: string }; items: Array<{ excerpt: string }>; budgetEvents: Array<{ reason: string }> };
   assert.equal(result.pack.id, pack.id);
   assert.equal(result.items.length, 1);
   assert.equal(result.items[0]?.excerpt, "chunk excerpt");
@@ -142,7 +153,7 @@ test("ai_get_retrieval_query returns query, results, selected context, feedback,
     apiPort: 4242,
   });
 
-  const result = callTool(store, config, 1, "ai_get_retrieval_query", { retrievalQueryId: query.id }) as { query: { id: string }; results: unknown[]; selectedContext: unknown[]; feedback: Array<{ missedPath: string | null }>; misses: Array<{ missedPath: string }> };
+  const result = await callTool(store, config, 1, "ai_get_retrieval_query", { retrievalQueryId: query.id }) as { query: { id: string }; results: unknown[]; selectedContext: unknown[]; feedback: Array<{ missedPath: string | null }>; misses: Array<{ missedPath: string }> };
   assert.equal(result.query.id, query.id);
   assert.equal(result.misses.length, 1);
   assert.equal(result.misses[0]?.missedPath, "src/missing.ts");
@@ -200,7 +211,7 @@ test("ai_record_feedback records good/bad ratings on chunks and updates chunk_pa
     apiPort: 4242,
   });
 
-  const goodResult = callTool(store, config, 1, "ai_record_feedback", {
+  const goodResult = await callTool(store, config, 1, "ai_record_feedback", {
     retrievalQueryId: query.id,
     chunkId: alphaChunk.id,
     rating: "good",
@@ -211,7 +222,7 @@ test("ai_record_feedback records good/bad ratings on chunks and updates chunk_pa
   assert.equal(goodResult.pathBoost!.path, "src/alpha.ts");
   assert.ok(goodResult.pathBoost!.weight > 0.5, "good feedback should push weight above neutral");
 
-  const badResult = callTool(store, config, 2, "ai_record_feedback", {
+  const badResult = await callTool(store, config, 2, "ai_record_feedback", {
     retrievalQueryId: query.id,
     chunkId: betaChunk.id,
     rating: "bad",
@@ -223,7 +234,7 @@ test("ai_record_feedback records good/bad ratings on chunks and updates chunk_pa
   assert.ok(badResult.pathBoost!.weight < 0.5, "bad feedback should push weight below neutral");
   assert.ok(goodResult.pathBoost!.weight > badResult.pathBoost!.weight);
 
-  const missResult = callTool(store, config, 3, "ai_record_feedback", {
+  const missResult = await callTool(store, config, 3, "ai_record_feedback", {
     retrievalQueryId: query.id,
     rating: "missed",
     missedPath: "src/gamma.ts",
@@ -266,7 +277,7 @@ test("ai_reflect_session enqueues a session.reflect worker job and emits a sessi
     apiPort: 4242,
   });
 
-  const result = callTool(store, config, 1, "ai_reflect_session", { sessionId: session.id }) as {
+  const result = await callTool(store, config, 1, "ai_reflect_session", { sessionId: session.id }) as {
     queued: boolean;
     jobId: string;
     sessionId: string;
@@ -313,7 +324,7 @@ test("ai_reflect_session rejects unknown sessions", async () => {
     apiPort: 4242,
   });
 
-  assert.throws(
+  await assertRejects(
     () => callTool(store, config, 1, "ai_reflect_session", { sessionId: "nope" }),
     /Unknown session/,
   );
@@ -355,19 +366,19 @@ test("ai_record_feedback rejects bad inputs", async () => {
     apiPort: 4242,
   });
 
-  assert.throws(
+  await assertRejects(
     () => callTool(store, config, 1, "ai_record_feedback", { retrievalQueryId: query.id, rating: "good" }),
     /require a chunkId/,
   );
-  assert.throws(
+  await assertRejects(
     () => callTool(store, config, 2, "ai_record_feedback", { retrievalQueryId: query.id, rating: "missed" }),
     /requires a missedPath/,
   );
-  assert.throws(
+  await assertRejects(
     () => callTool(store, config, 3, "ai_record_feedback", { retrievalQueryId: query.id, rating: "weird" }),
     /Invalid rating/,
   );
-  assert.throws(
+  await assertRejects(
     () => callTool(store, config, 4, "ai_record_feedback", { retrievalQueryId: "nope", rating: "good", chunkId: "x" }),
     /Unknown retrieval query/,
   );
@@ -399,7 +410,7 @@ test("ai_reject_memory_candidate transitions a pending candidate to rejected", a
     apiPort: 4242,
   });
 
-  const result = callTool(store, config, 1, "ai_reject_memory_candidate", { candidateId: candidate.id, reason: "low confidence" }) as { candidate: { id: string; status: string } };
+  const result = await callTool(store, config, 1, "ai_reject_memory_candidate", { candidateId: candidate.id, reason: "low confidence" }) as { candidate: { id: string; status: string } };
   assert.equal(result.candidate.id, candidate.id);
   assert.equal(result.candidate.status, "rejected");
 
@@ -437,7 +448,7 @@ test("ai_accept_skill_candidate transitions a pending skill to active", async ()
     apiPort: 4242,
   });
 
-  const result = callTool(store, config, 1, "ai_accept_skill_candidate", { candidateId: candidate.id }) as { skill: { id: string; status: string }; candidate: { status: string } };
+  const result = await callTool(store, config, 1, "ai_accept_skill_candidate", { candidateId: candidate.id }) as { skill: { id: string; status: string }; candidate: { status: string } };
   assert.equal(result.candidate.status, "active");
   assert.ok(result.skill.id);
 
@@ -492,10 +503,10 @@ test("ai_get_model_calls filters by session and role", async () => {
     apiPort: 4242,
   });
 
-  const all = callTool(store, config, 1, "ai_get_model_calls", { sessionId: session.id }) as Array<{ role: string }>;
+  const all = await callTool(store, config, 1, "ai_get_model_calls", { sessionId: session.id }) as Array<{ role: string }>;
   assert.equal(all.length, 2);
 
-  const onlyRewrite = callTool(store, config, 2, "ai_get_model_calls", { sessionId: session.id, role: "query_rewrite" }) as Array<{ role: string }>;
+  const onlyRewrite = await callTool(store, config, 2, "ai_get_model_calls", { sessionId: session.id, role: "query_rewrite" }) as Array<{ role: string }>;
   assert.equal(onlyRewrite.length, 1);
   assert.equal(onlyRewrite[0]?.role, "query_rewrite");
 
@@ -543,7 +554,7 @@ test("ai_get_session_trace returns full replayable trace", async () => {
     apiPort: 4242,
   });
 
-  const result = callTool(store, config, 1, "ai_get_session_trace", { sessionId: session.id }) as {
+  const result = await callTool(store, config, 1, "ai_get_session_trace", { sessionId: session.id }) as {
     session: { id: string };
     conversation: Array<{ content: string }>;
     retrievals: Array<{ query: { id: string } }>;

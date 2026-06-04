@@ -1397,7 +1397,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           goal: String(body.goal ?? ""),
           risk: body.risk === "low" || body.risk === "medium" || body.risk === "high" ? body.risk : "medium",
         };
-        const result = store.createPlan(normalized);
+        const result = await store.createPlan(normalized);
         if (isHtmlRequest(req)) {
           sendHtml(res, renderPlannerPage(store, { result: result.response }));
         } else {
@@ -1467,7 +1467,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               : "manual",
           subtask: String(body.subtask ?? ""),
         };
-        const result = store.createHandoff(normalized);
+        const result = await store.createHandoff(normalized);
         if (isHtmlRequest(req)) {
           sendHtml(res, renderHandoffPage(store, { result }));
         } else {

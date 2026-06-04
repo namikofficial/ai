@@ -60,7 +60,7 @@ test("logs MCP calls through the shared store", async () => {
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "sample-repo" });
   await store.indexProject(project.id);
-  const mcpCall = handleMcpRequest(store, {
+  const mcpCall = await handleMcpRequest(store, {
     databasePath: join(workspace, "ai.db"),
     runtimeDir: join(workspace, "runtime"),
     apiUrl: "http://127.0.0.1:4242",
