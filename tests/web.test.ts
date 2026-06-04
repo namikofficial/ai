@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { initializeStore, createStore } from "../packages/db/src/store.ts";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
+import { EMPTY_SESSION_TIMELINE_COUNTS, getTimelineCounts, getTimelineItems } from "../apps/web/src/timeline.ts";
 
 test("defines the Vite React shell and router surface", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-web-"));
@@ -48,6 +49,7 @@ test("defines the Vite React shell and router surface", async () => {
     "RetrievalPage",
     "RetrievalQueryDetailPage",
     "SkillsPage",
+    "SessionTimelinePanel",
   ]) {
     assert.ok(pagesSource.includes(name), `expected pages module to export ${name}`);
   }
@@ -88,4 +90,9 @@ test("logs MCP calls through the shared store", async () => {
   assert.ok(store.listMcpCalls(10).length > 0);
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
+});
+
+test("session timeline helper handles empty timeline data safely", () => {
+  assert.deepEqual(getTimelineItems(null), []);
+  assert.deepEqual(getTimelineCounts(null), EMPTY_SESSION_TIMELINE_COUNTS);
 });

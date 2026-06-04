@@ -10,6 +10,7 @@ import { startMcpServer } from "../../../mcp/server/src/stdio.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import { runRetrievalExplain } from "../../../packages/db/src/retrieval-explain.ts";
+import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
 
 function printUsage(): void {
@@ -194,6 +195,24 @@ function formatPromptDetail(prompt: {
 async function ensureServer(baseUrl?: string) {
   const config = resolveConfig(baseUrl ? { apiUrl: baseUrl } : {});
   return createApiClient({ baseUrl: config.apiUrl });
+}
+
+async function buildTimelineFromStore(store: ReturnType<typeof createStore>, sessionId: string) {
+  const session = store.getSession(sessionId);
+  if (!session) {
+    return null;
+  }
+  return buildSessionTimeline({
+    session,
+    messages: store.conversation.listMessages(sessionId, 500),
+    events: store.listEvents(sessionId, 500),
+    agentRuns: store.agents.listRuns(sessionId, 200),
+    modelCalls: store.models.listCalls(sessionId, 200),
+    compiledPrompts: store.listCompiledPrompts(sessionId, 100),
+    retrievalQueries: store.retrieval.listQueriesForSession(sessionId, 100),
+    contextPacks: store.context.listPacksForSession(sessionId, 100),
+    outcomes: store.evals.listOutcomes(sessionId, 100),
+  });
 }
 
 async function run(): Promise<void> {
@@ -455,7 +474,18 @@ async function run(): Promise<void> {
       throw new Error("trace requires a session id");
     }
     if (subcommand === "timeline") {
-      printJson(await client.getSessionTimeline(sessionId));
+      try {
+        printJson(await client.getSessionTimeline(sessionId));
+        return;
+      } catch {
+        await withDirectStore(async (store) => {
+          const timeline = await buildTimelineFromStore(store, sessionId);
+          if (!timeline) {
+            throw new Error(`Unknown session: ${sessionId}`);
+          }
+          printJson(timeline);
+        });
+      }
       return;
     }
     const result = await client.getSessionEvents(sessionId);

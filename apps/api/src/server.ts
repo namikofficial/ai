@@ -19,11 +19,11 @@ import type {
   SessionReplayRequest,
   SessionTimelineResponse,
   SkillRecord,
-  TimelineItem,
 } from "../../../packages/shared/src/index.ts";
 import { createEvent, createId, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
 import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
+import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import { runAskWorkflow } from "../../../packages/ask-engine/src/index.ts";
 import type { ModelProviderRecord, ModelProfileRecord } from "../../../packages/shared/src/index.ts";
@@ -140,30 +140,6 @@ function readProjectGraph(store: ReturnType<typeof createStore>, projectId: stri
   }
 }
 
-function createTimelineItem(input: {
-  id: string;
-  ts: string;
-  kind: TimelineItem["kind"];
-  title: string;
-  summary: string;
-  payload: unknown;
-  status?: string;
-  durationMs?: number | null;
-  refs?: Record<string, string | null>;
-}): TimelineItem {
-  return {
-    id: input.id,
-    ts: input.ts,
-    kind: input.kind,
-    title: input.title,
-    status: input.status,
-    durationMs: input.durationMs ?? null,
-    summary: input.summary,
-    refs: input.refs ?? {},
-    payload: input.payload,
-  };
-}
-
 function buildSessionTraceData(store: ReturnType<typeof createStore>, sessionId: string): Record<string, unknown> {
   const session = store.getSession(sessionId);
   if (!session) {
@@ -206,12 +182,7 @@ function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: Conf
   const sessionCount = readCount(store, "SELECT COUNT(*) AS count FROM agent_sessions");
   const modelProviderCount = readCount(store, "SELECT COUNT(*) AS count FROM model_providers");
   const promptCount = readCount(store, "SELECT COUNT(*) AS count FROM compiled_prompts");
-  const databaseReachable =
-    migrationsApplied.ok &&
-    projectCount.ok &&
-    sessionCount.ok &&
-    modelProviderCount.ok &&
-    promptCount.ok;
+  const databaseReachable = migrationsApplied.ok && projectCount.ok && sessionCount.ok && modelProviderCount.ok && promptCount.ok;
   const qdrant = {
     enabled: config.qdrantEnabled,
     url: config.qdrantUrl,
@@ -230,305 +201,6 @@ function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: Conf
     cloudEnabled: config.cloudEnabled,
     modelProviderCount: modelProviderCount.count,
     promptCount: promptCount.count,
-  };
-}
-
-function buildSessionTimeline(store: ReturnType<typeof createStore>, sessionId: string): SessionTimelineResponse | null {
-  const session = store.getSession(sessionId);
-  if (!session) {
-    return null;
-  }
-  const trace = buildSessionTraceData(store, sessionId);
-  const items: TimelineItem[] = [];
-  const projectId = session.projectId;
-  const events = store.listEvents(sessionId, 500);
-  const messages = store.conversation.listMessages(sessionId, 500);
-  const retrievalQueries = store.retrieval.listQueriesForSession(sessionId, 100);
-  const agentRuns = store.agents.listRuns(sessionId, 100);
-  const modelCalls = store.models.listCalls(sessionId, 200);
-  const compiledPrompts = store.listCompiledPrompts(sessionId, 100);
-  const contextPacks = store.context.listPacksForSession(sessionId, 100);
-  const memoryCandidates = store.memory.listCandidates(undefined, projectId, 100).filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId);
-  const skills = store.skills.listSkills(undefined, 100);
-  const evalOutcomes = store.evals.listOutcomes(sessionId, 100);
-  const handoffs = store.agents.listHandoffs(sessionId, 100);
-  const mcpCalls = store.db.prepare("SELECT * FROM mcp_calls WHERE session_id = ? ORDER BY created_at ASC LIMIT 100").all(sessionId) as Array<{
-    id: string;
-    session_id: string | null;
-    project_id: string | null;
-    tool_name: string;
-    input_json: string;
-    output_json: string | null;
-    blocked: number;
-    created_at: string;
-  }>;
-  const checks = store.db.prepare("SELECT * FROM check_runs WHERE session_id = ? ORDER BY created_at ASC LIMIT 100").all(sessionId) as Array<{
-    id: string;
-    session_id: string | null;
-    project_id: string | null;
-    name: string;
-    status: string;
-    command: string | null;
-    output: string | null;
-    error_output: string | null;
-    exit_code: number | null;
-    started_at: string | null;
-    finished_at: string | null;
-    created_at: string;
-    updated_at: string;
-  }>;
-  const reviews = store.db.prepare("SELECT * FROM reviews WHERE session_id = ? ORDER BY created_at ASC LIMIT 100").all(sessionId) as Array<{
-    id: string;
-    project_id: string | null;
-    session_id: string | null;
-    title: string;
-    summary: string;
-    planned_files_json: string;
-    edited_files_json: string;
-    checks_json: string;
-    scope_creep_json: string;
-    missing_tests_json: string;
-    risky_changes_json: string;
-    created_at: string;
-    updated_at: string;
-  }>;
-
-  for (const event of events) {
-    items.push(
-      createTimelineItem({
-        id: event.id,
-        ts: event.ts,
-        kind: "event",
-        title: event.type,
-        summary: JSON.stringify(event.payload ?? {}),
-        payload: event,
-        refs: { sessionId: event.sessionId, taskId: event.taskId, projectId: event.projectId },
-      }),
-    );
-  }
-
-  for (const message of messages) {
-    items.push(
-      createTimelineItem({
-        id: message.id,
-        ts: message.ts,
-        kind: "message",
-        title: `${message.role} message`,
-        summary: message.content.slice(0, 200),
-        payload: message,
-        refs: { sessionId: message.sessionId, projectId: message.projectId, parentMessageId: message.parentMessageId },
-      }),
-    );
-  }
-
-  for (const run of agentRuns) {
-    items.push(
-      createTimelineItem({
-        id: run.id,
-        ts: run.startedAt,
-        kind: "agent_run",
-        title: run.agent,
-        summary: `${run.status} · ${run.role}`,
-        payload: run,
-        status: run.status,
-        durationMs: run.durationMs,
-        refs: { sessionId: run.sessionId, taskId: run.taskId, projectId: run.projectId },
-      }),
-    );
-  }
-
-  for (const call of modelCalls) {
-    items.push(
-      createTimelineItem({
-        id: call.id,
-        ts: call.ts,
-        kind: "model_call",
-        title: call.role,
-        summary: `${call.profileId} · ${call.status} · ${call.promptTokens}/${call.completionTokens}`,
-        payload: call,
-        status: call.status,
-        durationMs: call.latencyMs,
-        refs: { sessionId: call.sessionId, taskId: call.taskId, retrievalQueryId: call.retrievalQueryId, profileId: call.profileId },
-      }),
-    );
-  }
-
-  for (const prompt of compiledPrompts) {
-    items.push(
-      createTimelineItem({
-        id: prompt.id,
-        ts: prompt.createdAt,
-        kind: "compiled_prompt",
-        title: `${prompt.mode} prompt`,
-        summary: `${prompt.role} · ${prompt.estimatedTokens} tokens`,
-        payload: {
-          ...prompt,
-          messages: safeParseJson(prompt.messagesJson),
-          includedContext: safeParseJson(prompt.includedContextJson),
-          omittedContext: safeParseJson(prompt.omittedContextJson),
-          safetyNotes: safeParseJson(prompt.safetyNotesJson),
-          outputSchema: prompt.outputSchemaJson ? safeParseJson(prompt.outputSchemaJson) : null,
-        },
-        refs: { sessionId: prompt.sessionId, taskId: prompt.taskId, retrievalQueryId: prompt.retrievalQueryId, contextPackId: prompt.contextPackId },
-      }),
-    );
-  }
-
-  const retrievalQueryMap = new Map<string, RetrievalQueryRecord>();
-  for (const query of retrievalQueries) {
-    retrievalQueryMap.set(query.id, query);
-    items.push(
-      createTimelineItem({
-        id: query.id,
-        ts: query.createdAt,
-        kind: "retrieval_query",
-        title: query.originalQuery,
-        summary: `${query.intent} · ${query.mode} · ${query.depth}`,
-        payload: query,
-        refs: { sessionId: query.sessionId, taskId: query.taskId, projectId: query.projectId },
-      }),
-    );
-    for (const result of store.retrieval.listResults(query.id, 100)) {
-      items.push(
-        createTimelineItem({
-          id: result.id,
-          ts: result.createdAt,
-          kind: "retrieval_result",
-          title: result.path,
-          summary: `${result.source} · ${result.finalScore.toFixed(2)} · ${result.included ? "selected" : "dropped"}`,
-          payload: result,
-          status: result.included ? "selected" : "dropped",
-          refs: { retrievalQueryId: result.retrievalQueryId, chunkId: result.chunkId },
-        }),
-      );
-    }
-  }
-
-  for (const pack of contextPacks) {
-    const itemsForPack = store.context.listItems(pack.id);
-    const budgetEvents = store.context.listBudgetEvents(pack.id);
-    items.push(
-      createTimelineItem({
-        id: pack.id,
-        ts: pack.createdAt,
-        kind: "context_pack",
-        title: pack.reason ?? "context pack",
-        summary: `${itemsForPack.length} items · ${pack.usedTokens}/${pack.budgetTokens} tokens`,
-        payload: { pack, items: itemsForPack, budgetEvents },
-        refs: { sessionId: pack.sessionId, taskId: pack.taskId, retrievalQueryId: pack.retrievalQueryId },
-      }),
-    );
-  }
-
-  for (const candidate of memoryCandidates) {
-    items.push(
-      createTimelineItem({
-        id: candidate.id,
-        ts: candidate.createdAt,
-        kind: "memory_candidate",
-        title: candidate.title,
-        summary: `${candidate.kind} · ${candidate.status}`,
-        payload: candidate,
-        status: candidate.status,
-        refs: { sessionId: candidate.sessionId, projectId: candidate.projectId },
-      }),
-    );
-  }
-
-  for (const skill of skills) {
-    items.push(
-      createTimelineItem({
-        id: skill.id,
-        ts: skill.createdAt,
-        kind: "skill_candidate",
-        title: skill.title,
-        summary: `${skill.status} · ${skill.useCount} uses`,
-        payload: skill,
-        status: skill.status,
-        refs: { sessionId: null, projectId },
-      }),
-    );
-  }
-
-  for (const outcome of evalOutcomes) {
-    items.push(
-      createTimelineItem({
-        id: outcome.id,
-        ts: outcome.createdAt,
-        kind: "eval",
-        title: outcome.outcome,
-        summary: `${Math.round(outcome.score * 100)}% · ${outcome.notes ?? "no notes"}`,
-        payload: outcome,
-        status: outcome.outcome,
-        refs: { sessionId: outcome.sessionId },
-      }),
-    );
-  }
-
-  for (const handoff of handoffs) {
-    items.push(
-      createTimelineItem({
-        id: handoff.id,
-        ts: handoff.createdAt,
-        kind: "handoff",
-        title: handoff.toAgent,
-        summary: `handoff · ${handoff.contextPackId ?? "no context pack"}`,
-        payload: handoff,
-        refs: { sessionId: handoff.sessionId, taskId: handoff.taskId, contextPackId: handoff.contextPackId },
-      }),
-    );
-  }
-
-  for (const call of mcpCalls) {
-    items.push(
-      createTimelineItem({
-        id: call.id,
-        ts: call.created_at,
-        kind: "mcp_call",
-        title: call.tool_name,
-        summary: `${call.blocked ? "blocked" : "allowed"} · ${String(call.project_id ?? "global")}`,
-        payload: call,
-        status: call.blocked ? "blocked" : "allowed",
-        refs: { sessionId: call.session_id, projectId: call.project_id },
-      }),
-    );
-  }
-
-  for (const check of checks) {
-    items.push(
-      createTimelineItem({
-        id: check.id,
-        ts: check.created_at,
-        kind: "check",
-        title: check.name,
-        summary: `${check.status} · ${check.output ?? check.error_output ?? "no output"}`,
-        payload: check,
-        status: check.status,
-        refs: { sessionId: check.session_id, projectId: check.project_id },
-      }),
-    );
-  }
-
-  for (const review of reviews) {
-    items.push(
-      createTimelineItem({
-        id: review.id,
-        ts: review.created_at,
-        kind: "review",
-        title: review.title,
-        summary: review.summary,
-        payload: review,
-        refs: { sessionId: review.session_id, projectId: review.project_id },
-      }),
-    );
-  }
-
-  items.sort((left, right) => left.ts.localeCompare(right.ts) || left.id.localeCompare(right.id));
-
-  return {
-    session,
-    items,
-    trace,
   };
 }
 
@@ -1840,11 +1512,22 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           return;
         }
         if (method === "GET" && rest === "/timeline") {
-          const timeline = buildSessionTimeline(store, sessionId);
-          if (!timeline) {
+          const session = store.getSession(sessionId);
+          if (!session) {
             sendJson(res, json("error", undefined, { message: "session not found" }), 404);
             return;
           }
+          const timeline = buildSessionTimeline({
+            session,
+            messages: store.conversation.listMessages(sessionId, 500),
+            events: store.listEvents(sessionId, 500),
+            agentRuns: store.agents.listRuns(sessionId, 200),
+            modelCalls: store.models.listCalls(sessionId, 200),
+            compiledPrompts: store.listCompiledPrompts(sessionId, 100),
+            retrievalQueries: store.retrieval.listQueriesForSession(sessionId, 100),
+            contextPacks: store.context.listPacksForSession(sessionId, 100),
+            outcomes: store.evals.listOutcomes(sessionId, 100),
+          });
           sendJson(res, json("ok", timeline));
           return;
         }

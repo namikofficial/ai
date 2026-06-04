@@ -17,6 +17,7 @@ import type {
 } from "../../../packages/shared/src/index.ts";
 import { api } from "./api.ts";
 import { Badge, EmptyState, KeyValueList, Panel, StatCard } from "./components.tsx";
+import { getTimelineCounts, getTimelineItems } from "./timeline.ts";
 import { useWorkbenchStore } from "./store.ts";
 
 interface ResourceState<T> {
@@ -662,6 +663,168 @@ function PromptDetailPage(): ReactNode {
   );
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function safeJsonStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, null, 2) ?? "null";
+  } catch {
+    return String(value);
+  }
+}
+
+function timelineCountsSummary(counts?: SessionTimelineResponse["counts"] | null): Array<[string, number]> {
+  const value = counts ?? getTimelineCounts(null);
+  return [
+    ["Messages", value.messages ?? 0],
+    ["Events", value.events ?? 0],
+    ["Agent runs", value.agentRuns ?? 0],
+    ["Model calls", value.modelCalls ?? 0],
+    ["Prompts", value.compiledPrompts ?? 0],
+    ["Retrieval", value.retrievalQueries ?? 0],
+    ["Contexts", value.contextPacks ?? 0],
+    ["Outcomes", value.outcomes ?? 0],
+  ];
+}
+
+function timelineItemDetails(item: TimelineItem): Array<[string, ReactNode]> {
+  const payload = isRecord(item.payload) ? item.payload : null;
+  const refs = Object.entries(item.refs ?? {})
+    .filter(([, value]) => Boolean(value))
+    .map(([key, value]) => `${key}=${value}`);
+
+  switch (item.kind) {
+    case "model_call":
+      return [
+        ["Profile", String(payload?.profileId ?? item.refs.profileId ?? "unknown")],
+        ["Role", String(payload?.role ?? "unknown")],
+        ["Status", String(payload?.status ?? item.status ?? "unknown")],
+        ["Latency", `${Number(payload?.latencyMs ?? item.durationMs ?? 0)} ms`],
+        ["Prompt tokens", String(payload?.promptTokens ?? "0")],
+        ["Completion tokens", String(payload?.completionTokens ?? "0")],
+        ["Error", String(payload?.error ?? "none")],
+        ["Refs", refs.length > 0 ? refs.join(" · ") : "none"],
+      ];
+    case "compiled_prompt": {
+      const messages = Array.isArray(payload?.messages) ? payload.messages : [];
+      const safetyNotes = Array.isArray(payload?.safetyNotes) ? payload.safetyNotes : [];
+      return [
+        ["Mode", String(payload?.mode ?? "unknown")],
+        ["Role", String(payload?.role ?? "unknown")],
+        ["Estimated tokens", String(payload?.estimatedTokens ?? "0")],
+        ["Safety notes", String(safetyNotes.length)],
+        ["Messages", String(messages.length)],
+        ["Context pack", String(payload?.contextPackId ?? item.refs.contextPackId ?? "none")],
+        ["Retrieval query", String(payload?.retrievalQueryId ?? item.refs.retrievalQueryId ?? "none")],
+      ];
+    }
+    case "retrieval_query":
+      return [
+        ["Original query", String(payload?.originalQuery ?? item.title)],
+        ["Rewritten query", String(payload?.rewrittenQuery ?? "none")],
+        ["Confidence", payload?.confidence != null ? String(payload.confidence) : "none"],
+        ["Misses", payload?.misses != null ? String(payload.misses) : "none"],
+        ["Intent", String(payload?.intent ?? "unknown")],
+        ["Depth", String(payload?.depth ?? "unknown")],
+        ["Context pack", String(payload?.contextPackId ?? item.refs.contextPackId ?? "none")],
+      ];
+    case "agent_run":
+      return [
+        ["Agent", String(payload?.agent ?? "unknown")],
+        ["Role", String(payload?.role ?? "unknown")],
+        ["Model role", String(payload?.modelRole ?? "unknown")],
+        ["Status", String(payload?.status ?? item.status ?? "unknown")],
+        ["Duration", `${Number(payload?.durationMs ?? item.durationMs ?? 0)} ms`],
+        ["Task", String(payload?.taskId ?? item.refs.taskId ?? "none")],
+      ];
+    case "context_pack":
+      return [
+        ["Reason", String(payload?.reason ?? item.title)],
+        ["Used tokens", String(payload?.usedTokens ?? "0")],
+        ["Budget tokens", String(payload?.budgetTokens ?? "0")],
+        ["Retrieval query", String(payload?.retrievalQueryId ?? item.refs.retrievalQueryId ?? "none")],
+      ];
+    case "message":
+      return [
+        ["Role", String(payload?.role ?? "unknown")],
+        ["Session", String(payload?.sessionId ?? item.refs.sessionId ?? "none")],
+        ["Project", String(payload?.projectId ?? item.refs.projectId ?? "none")],
+        ["Parent", String(payload?.parentMessageId ?? item.refs.parentMessageId ?? "none")],
+      ];
+    case "event":
+      return [
+        ["Type", String(payload?.type ?? item.title)],
+        ["Session", String(payload?.sessionId ?? item.refs.sessionId ?? "none")],
+        ["Task", String(payload?.taskId ?? item.refs.taskId ?? "none")],
+        ["Project", String(payload?.projectId ?? item.refs.projectId ?? "none")],
+      ];
+    case "eval":
+      return [
+        ["Outcome", String(payload?.outcome ?? item.status ?? "unknown")],
+        ["Score", String(payload?.score ?? "0")],
+        ["Session", String(payload?.sessionId ?? item.refs.sessionId ?? "none")],
+      ];
+    default:
+      return refs.length > 0 ? [["Refs", refs.join(" · ")]] : [];
+  }
+}
+
+export function SessionTimelinePanel({ timeline }: { timeline: SessionTimelineResponse | null }): ReactNode {
+  const items = getTimelineItems(timeline);
+  const counts = getTimelineCounts(timeline);
+
+  return (
+    <Panel title="Timeline" span={12}>
+      <div className="stack">
+        <div className="row" style={{ flexWrap: "wrap" }}>
+          {timelineCountsSummary(counts).map(([label, value]) => (
+            <Badge key={label}>{label}: {value}</Badge>
+          ))}
+        </div>
+        {items.length > 0 ? (
+          <div className="timeline">
+            {items.map((item) => (
+              <details className="timeline-item" key={item.id} open={false}>
+                <summary>
+                  <div className="timeline-rail">
+                    <span className="timeline-dot" data-kind={item.kind} />
+                    <div className="timeline-line" />
+                  </div>
+                  <div className="timeline-main">
+                    <div className="row">
+                      <strong>{item.title}</strong>
+                      <div className="row">
+                        <Badge tone={item.kind === "model_call" ? "good" : item.kind === "retrieval_query" ? "warn" : item.kind === "eval" && item.status === "failed" ? "bad" : "neutral"}>
+                          {item.kind}
+                        </Badge>
+                        {item.status ? <Badge>{item.status}</Badge> : null}
+                        {typeof item.durationMs === "number" ? <Badge>{Math.round(item.durationMs)} ms</Badge> : null}
+                      </div>
+                    </div>
+                    <div className="tiny">{item.ts}</div>
+                    <div className="tiny">{item.summary}</div>
+                  </div>
+                </summary>
+                <div className="stack" style={{ padding: "0 0.85rem 0.85rem" }}>
+                  <KeyValueList items={timelineItemDetails(item)} />
+                  <details>
+                    <summary className="tiny">Payload</summary>
+                    <pre>{safeJsonStringify(item.payload ?? {})}</pre>
+                  </details>
+                </div>
+              </details>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No timeline yet" body="The session timeline will appear once the API returns trace data." />
+        )}
+      </div>
+    </Panel>
+  );
+}
+
 function SessionDetailPage(): ReactNode {
   const { sessionId = "" } = useParams();
   const resource = useResource(
@@ -673,7 +836,6 @@ function SessionDetailPage(): ReactNode {
   const tasks = resource.data?.[2].data.filter((task) => task.sessionId === sessionId) ?? [];
   const trace = resource.data?.[3].data ?? null;
   const timeline = resource.data?.[4].data ?? null;
-  const timelineItems = Array.isArray(timeline?.items) ? (timeline.items as TimelineItem[]) : [];
   const compiledPrompts = Array.isArray(trace?.compiledPrompts)
     ? (trace.compiledPrompts as Array<{
         id: string;
@@ -747,44 +909,7 @@ function SessionDetailPage(): ReactNode {
           )}
         </div>
       </Panel>
-      <Panel title="Timeline" span={12}>
-        {timelineItems.length > 0 ? (
-          <div className="timeline">
-            {timelineItems.map((item) => (
-              <details className="timeline-item" key={item.id} open={false}>
-                <summary>
-                  <div className="timeline-rail">
-                    <span className="timeline-dot" data-kind={item.kind} />
-                    <div className="timeline-line" />
-                  </div>
-                  <div className="timeline-main">
-                    <div className="row">
-                      <strong>{item.title}</strong>
-                      <div className="row">
-                        <Badge tone={item.status === "blocked" ? "bad" : item.status === "selected" ? "good" : "neutral"}>{item.kind}</Badge>
-                        {item.status ? <Badge>{item.status}</Badge> : null}
-                        {typeof item.durationMs === "number" ? <Badge>{Math.round(item.durationMs)} ms</Badge> : null}
-                      </div>
-                    </div>
-                    <div className="tiny">{item.ts}</div>
-                    <div className="tiny">{item.summary}</div>
-                  </div>
-                </summary>
-                <pre>{JSON.stringify(item.payload, null, 2)}</pre>
-                <div className="tiny">
-                  refs:{" "}
-                  {Object.entries(item.refs)
-                    .filter(([, value]) => value)
-                    .map(([key, value]) => `${key}=${value}`)
-                    .join(" · ") || "none"}
-                </div>
-              </details>
-            ))}
-          </div>
-        ) : (
-          <EmptyState title="No timeline yet" body="The session timeline will appear once the API returns replay data." />
-        )}
-      </Panel>
+      <SessionTimelinePanel timeline={timeline} />
       <Panel title="Trace Replay" span={12}>
         <div className="list">
           {trace ? (

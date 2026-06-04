@@ -318,9 +318,22 @@ export interface TimelineItem {
   payload: unknown;
 }
 
+export interface SessionTimelineCounts {
+  messages: number;
+  events: number;
+  agentRuns: number;
+  modelCalls: number;
+  compiledPrompts: number;
+  retrievalQueries: number;
+  contextPacks: number;
+  outcomes: number;
+}
+
 export interface SessionTimelineResponse {
   session: SessionRecord;
+  timeline: TimelineItem[];
   items: TimelineItem[];
+  counts: SessionTimelineCounts;
   trace: Record<string, unknown>;
 }
 

@@ -30,7 +30,6 @@ test("compiled prompt repo records, fetches, and lists prompts by session", asyn
       },
       sessionId: session.id,
       retrievalQueryId: "rq_1",
-      createdAt: "2024-01-01T00:00:00.000Z",
     });
     const second = store.recordCompiledPrompt({
       compiledPrompt: {
@@ -45,7 +44,6 @@ test("compiled prompt repo records, fetches, and lists prompts by session", asyn
       },
       sessionId: session.id,
       retrievalQueryId: "rq_2",
-      createdAt: "2024-01-01T00:00:01.000Z",
     });
 
     assert.equal(first.id, "pp_first");

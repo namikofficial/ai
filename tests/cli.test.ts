@@ -134,3 +134,51 @@ test("ai models list and health run via direct store", async () => {
   assert.ok(Array.isArray(healthOutput.health));
   assert.ok(Array.isArray(healthOutput.recentCalls));
 });
+
+test("ai trace timeline prints normalized session timeline json", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-cli-timeline-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, "src", "auth.ts"),
+    [
+      "export function handleLogin() {",
+      "  return { route: '/api/auth/login', storage: 'local sqlite' };",
+      "}",
+      "",
+      "export const authNote = 'auth is handled in the auth router';",
+    ].join("\n"),
+  );
+
+  const dbPath = join(workspace, "ai.db");
+  const runtimeDir = join(workspace, "runtime");
+  const store = createStore(initializeStore(dbPath));
+  const project = store.createProject({ path: repo, name: "repo" });
+  await store.indexProject(project.id);
+  const ask = await store.ask({
+    project: project.id,
+    question: "where is auth handled?",
+    mode: "local",
+    depth: "standard",
+  });
+  store.db.close();
+
+  const trace = await runCli(
+    {
+      AI_DATABASE_PATH: dbPath,
+      AI_RUNTIME_DIR: runtimeDir,
+    },
+    ["trace", "timeline", ask.sessionId],
+  );
+  assert.equal(trace.exitCode, 0, `trace timeline failed: ${trace.stderr}`);
+  const output = JSON.parse(trace.stdout) as {
+    session: { id: string };
+    timeline: Array<{ id: string; kind: string; ts: string }>;
+    counts: { messages: number; modelCalls: number; retrievalQueries: number };
+  };
+  assert.equal(output.session.id, ask.sessionId);
+  assert.ok(Array.isArray(output.timeline));
+  assert.ok(output.timeline.length > 0);
+  assert.ok(output.counts.messages >= 2);
+  assert.ok(output.counts.modelCalls >= 1);
+});

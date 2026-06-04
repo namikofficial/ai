@@ -120,6 +120,31 @@ test("observability api: retrieval queries endpoints return populated data", asy
     assert.ok(trace.data.contextPacks.length > 0);
     assert.ok(trace.data.compiledPrompts.length > 0);
 
+    const timeline = await getJson<{
+      status: "ok";
+      data: {
+        session: { id: string };
+        timeline: Array<{ id: string; kind: string; ts: string }>;
+        items: Array<{ id: string }>;
+        counts: {
+          messages: number;
+          events: number;
+          agentRuns: number;
+          modelCalls: number;
+          compiledPrompts: number;
+          retrievalQueries: number;
+          contextPacks: number;
+          outcomes: number;
+        };
+      };
+    }>(ctx.request, `/sessions/${ask.data.sessionId}/timeline`);
+    assert.equal(timeline.data.session.id, ask.data.sessionId);
+    assert.ok(Array.isArray(timeline.data.timeline));
+    assert.equal(timeline.data.timeline.length, timeline.data.items.length);
+    assert.ok(timeline.data.counts.messages >= 2);
+    assert.ok(timeline.data.counts.modelCalls >= 1);
+    assert.ok(timeline.data.timeline.every((item) => typeof item.ts === "string" && typeof item.kind === "string"));
+
     const prompts = await getJson<{
       status: "ok";
       data: Array<{ id: string; sessionId: string | null; mode: string; role: string }>;
