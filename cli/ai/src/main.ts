@@ -33,6 +33,8 @@ function printUsage(): void {
   ai memory list [--scope <scope>]
   ai models list
   ai models health
+  ai models route "<task>" [--mode <local|cloud|hybrid|any>] [--risk <low|medium|high>] [--depth <shallow|standard|deep>] [--question <text>] [--goal <text>]
+  ai models call --role <role> --prompt "<text>" [--profile-id <id>]
   ai trace conversation <session-id>
   ai skills candidates [--status <status>]
   ai skills accept <candidate-id>
@@ -413,6 +415,29 @@ if (process.argv[2] === "memory") {
         reason: `cli:${taskPattern}`,
       });
       printJson({ route, profile: store.models.getProfile(route.selectedProfileId) });
+      return;
+    }
+    if (sub === "call") {
+      const role = process.argv.find((arg) => arg.startsWith("--role="))?.split("=").slice(1).join("=") ?? "summarizer";
+      const prompt = process.argv.find((arg) => arg.startsWith("--prompt="))?.split("=").slice(1).join("=") ?? "";
+      const profileId = process.argv.find((arg) => arg.startsWith("--profile-id="))?.split("=").slice(1).join("=") ?? null;
+      const chosenProfileId =
+        profileId ??
+        store.recommendModelProfile(
+          role === "planner" ? "plan" : role === "coder_handoff" ? "handoff" : role === "reflection" ? "reflect" : "ask",
+          { question: prompt },
+        );
+      const call = store.models.recordCall({
+        profileId: chosenProfileId,
+        role: role as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
+        promptTokens: Math.ceil(prompt.length / 4),
+        completionTokens: Math.ceil(prompt.length / 8),
+        latencyMs: 0,
+        status: "ok",
+        request: { prompt, role },
+        response: { text: prompt ? `Recorded model call for ${role}.` : "Recorded empty model call." },
+      });
+      printJson({ call, profile: store.models.getProfile(chosenProfileId) });
       return;
     }
     throw new Error(`unknown models subcommand: ${sub}`);
