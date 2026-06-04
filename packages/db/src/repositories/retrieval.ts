@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
+  ChunkPathBoostRecord,
   QueryAnalysis,
   QueryRewriteRecord,
   RetrievalDepth,
@@ -8,6 +9,7 @@ import type {
   RetrievalIntentKind,
   RetrievalMissRecord,
   RetrievalMode,
+  RetrievalPathFeedbackRecord,
   RetrievalQueryRecord,
   RetrievalResultRecord,
   RetrievalSelectedContextRecord,
@@ -82,6 +84,28 @@ interface RetrievalMissRow {
   confidence: number;
   notes: string | null;
   created_at: string;
+}
+
+interface RetrievalPathFeedbackRow {
+  id: string;
+  project_id: string;
+  retrieval_query_id: string | null;
+  path: string;
+  rating: string;
+  weight: number;
+  notes: string | null;
+  created_at: string;
+}
+
+interface ChunkPathBoostRow {
+  id: string;
+  project_id: string;
+  path: string;
+  weight: number;
+  source: string;
+  reason: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 function rowToQuery(row: RetrievalQueryRow): RetrievalQueryRecord {
@@ -163,6 +187,32 @@ function rowToMiss(row: RetrievalMissRow): RetrievalMissRecord {
     confidence: asNumber(row.confidence),
     notes: asStringOrNull(row.notes),
     createdAt: asString(row.created_at),
+  };
+}
+
+function rowToPathFeedback(row: RetrievalPathFeedbackRow): RetrievalPathFeedbackRecord {
+  return {
+    id: asString(row.id),
+    projectId: asString(row.project_id),
+    retrievalQueryId: asStringOrNull(row.retrieval_query_id),
+    path: asString(row.path),
+    rating: asString(row.rating) as RetrievalFeedbackRating,
+    weight: asNumber(row.weight),
+    notes: asStringOrNull(row.notes),
+    createdAt: asString(row.created_at),
+  };
+}
+
+function rowToPathBoost(row: ChunkPathBoostRow): ChunkPathBoostRecord {
+  return {
+    id: asString(row.id),
+    projectId: asString(row.project_id),
+    path: asString(row.path),
+    weight: asNumber(row.weight),
+    source: asString(row.source),
+    reason: asStringOrNull(row.reason),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
   };
 }
 
@@ -378,19 +428,83 @@ export function createRetrievalRepo(db: DatabaseSync) {
     }): RetrievalFeedbackRecord {
       const id = newId("rfb");
       const ts = now();
-      db.prepare(
-        `INSERT INTO retrieval_feedback (
-          id, retrieval_query_id, chunk_id, rating, missed_path, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      ).run(
-        id,
-        input.retrievalQueryId,
-        input.chunkId ?? null,
-        input.rating,
-        input.missedPath ?? null,
-        input.notes ?? null,
-        ts,
-      );
+      db.exec("BEGIN");
+      try {
+        db.prepare(
+          `INSERT INTO retrieval_feedback (
+            id, retrieval_query_id, chunk_id, rating, missed_path, notes, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          id,
+          input.retrievalQueryId,
+          input.chunkId ?? null,
+          input.rating,
+          input.missedPath ?? null,
+          input.notes ?? null,
+          ts,
+        );
+        const queryRow = db
+          .prepare("SELECT project_id FROM retrieval_queries WHERE id = ?")
+          .get(input.retrievalQueryId) as { project_id: string | null } | undefined;
+        const projectId = queryRow?.project_id ?? null;
+        let path: string | null = null;
+        if (input.chunkId) {
+          const chunkRow = db
+            .prepare(
+              "SELECT d.path AS path FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.id = ?",
+            )
+            .get(input.chunkId) as { path: string | null } | undefined;
+          path = chunkRow?.path ?? null;
+        } else if (input.missedPath) {
+          path = input.missedPath;
+        }
+        if (projectId && path) {
+          const weight = input.rating === "good" ? 0.7 : input.rating === "bad" ? 0.2 : 0.5;
+          db.prepare(
+            `INSERT INTO retrieval_path_feedback (
+              id, project_id, retrieval_query_id, path, rating, weight, notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            newId("rpf"),
+            projectId,
+            input.retrievalQueryId,
+            path,
+            input.rating,
+            weight,
+            input.notes ?? null,
+            ts,
+          );
+          const existingRow = db
+            .prepare("SELECT weight FROM chunk_path_boosts WHERE project_id = ? AND path = ?")
+            .get(projectId, path) as { weight: number } | undefined;
+          const previousWeight = existingRow?.weight ?? 0.5;
+          const nextWeight = Math.max(0, Math.min(1, previousWeight * 0.7 + weight * 0.3));
+          if (existingRow) {
+            db.prepare(
+              "UPDATE chunk_path_boosts SET weight = ?, reason = ?, updated_at = ? WHERE project_id = ? AND path = ?",
+            ).run(nextWeight, `feedback:${input.rating}`, ts, projectId, path);
+          } else {
+            db.prepare(
+              `INSERT INTO chunk_path_boosts (
+                id, project_id, path, weight, source, reason, created_at, updated_at
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).run(
+              newId("cpb"),
+              projectId,
+              path,
+              nextWeight,
+              "feedback",
+              `feedback:${input.rating}`,
+              ts,
+              ts,
+            );
+          }
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       return {
         id,
         retrievalQueryId: input.retrievalQueryId,
@@ -441,6 +555,22 @@ export function createRetrievalRepo(db: DatabaseSync) {
         .prepare("SELECT * FROM retrieval_misses WHERE retrieval_query_id = ? ORDER BY confidence ASC")
         .all(queryId) as RetrievalMissRow[];
       return rows.map(rowToMiss);
+    },
+    listPathFeedback(projectId: string, limit = 100): RetrievalPathFeedbackRecord[] {
+      const rows = db
+        .prepare(
+          "SELECT * FROM retrieval_path_feedback WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+        )
+        .all(projectId, limit) as RetrievalPathFeedbackRow[];
+      return rows.map(rowToPathFeedback);
+    },
+    listPathBoosts(projectId: string, limit = 100): ChunkPathBoostRecord[] {
+      const rows = db
+        .prepare(
+          "SELECT * FROM chunk_path_boosts WHERE project_id = ? ORDER BY weight DESC LIMIT ?",
+        )
+        .all(projectId, limit) as ChunkPathBoostRow[];
+      return rows.map(rowToPathBoost);
     },
   };
 }

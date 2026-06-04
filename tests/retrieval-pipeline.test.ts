@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { RetrievalChunk } from "../packages/shared/src/index.ts";
 import {
   applyFeedbackBoosts,
   buildFeedbackBoosts,
@@ -69,6 +70,7 @@ test("retrieval-pipeline: rerank applies good/bad feedback and missed-path boost
     ],
     feedbackChunkPaths: new Map([["chunk_1", "src/auth.ts"], ["chunk_2", "src/db.ts"]]),
     missRecords: [],
+    pathBoosts: new Map(),
     memoryEntries: [],
     facts: [],
     rules: [],
@@ -100,6 +102,7 @@ test("retrieval-pipeline: confidence drops on bad feedback and rises on good", (
     feedback: [{ id: "f1", retrievalQueryId: "rq", chunkId: "chunk_1", rating: "good", missedPath: null, notes: null, createdAt: "2024-01-01" }],
     feedbackChunkPaths: new Map([["chunk_1", "src/auth.ts"]]),
     missRecords: [],
+    pathBoosts: new Map(),
     memoryEntries: [],
     facts: [],
     rules: [],
@@ -113,6 +116,7 @@ test("retrieval-pipeline: confidence drops on bad feedback and rises on good", (
     feedback: [{ id: "f2", retrievalQueryId: "rq", chunkId: "chunk_1", rating: "bad", missedPath: null, notes: null, createdAt: "2024-01-01" }],
     feedbackChunkPaths: new Map([["chunk_1", "src/auth.ts"]]),
     missRecords: [],
+    pathBoosts: new Map(),
     memoryEntries: [],
     facts: [],
     rules: [],
@@ -137,6 +141,7 @@ test("retrieval-pipeline: token budget trims lower-ranked chunks and keeps top i
     feedback: [],
     feedbackChunkPaths: new Map(),
     missRecords: [],
+    pathBoosts: new Map(),
     memoryEntries: [],
     facts: [],
     rules: [],
@@ -162,6 +167,7 @@ test("retrieval-pipeline: low-confidence retrieval records a miss", () => {
     feedback: [],
     feedbackChunkPaths: new Map(),
     missRecords: [],
+    pathBoosts: new Map(),
     memoryEntries: [],
     facts: [],
     rules: [],
@@ -195,4 +201,77 @@ test("retrieval-pipeline: applyFeedbackBoosts combines miss and good signals", (
   );
   assert.ok(out.applied.includes("good"));
   assert.ok(out.score > 0);
+});
+
+test("retrieval-pipeline: pathBoosts re-rank chunks when feedback is sparse", () => {
+  const chunks: RetrievalChunk[] = [
+    {
+      ...baseChunk,
+      id: "chunk_alpha",
+      path: "src/alpha.ts",
+      score: 0.5,
+    },
+    {
+      ...baseChunk,
+      id: "chunk_beta",
+      path: "src/beta.ts",
+      score: 0.5,
+    },
+  ];
+  const baseOutput = runRetrievalPipeline({
+    query: "alpha",
+    intent: "lookup",
+    mode: "local",
+    depth: "standard",
+    ftsChunks: [],
+    vectorChunks: [],
+    heuristicChunks: chunks,
+    feedback: [],
+    feedbackChunkPaths: new Map(),
+    missRecords: [],
+    pathBoosts: new Map(),
+    memoryEntries: [],
+    facts: [],
+    rules: [],
+    priorSessionPaths: [],
+    budgetTokens: 4096,
+    secretTerms: [],
+  });
+  const alphaBase = baseOutput.ranked.find((r) => r.chunk.id === "chunk_alpha");
+  const betaBase = baseOutput.ranked.find((r) => r.chunk.id === "chunk_beta");
+  assert.ok(alphaBase && betaBase);
+  const alphaBaseScore = alphaBase!.finalScore;
+  const betaBaseScore = betaBase!.finalScore;
+  assert.equal(alphaBaseScore, betaBaseScore);
+  const boostedOutput = runRetrievalPipeline({
+    query: "alpha",
+    intent: "lookup",
+    mode: "local",
+    depth: "standard",
+    ftsChunks: [],
+    vectorChunks: [],
+    heuristicChunks: chunks,
+    feedback: [],
+    feedbackChunkPaths: new Map(),
+    missRecords: [],
+    pathBoosts: new Map([
+      ["src/alpha.ts", 0.95],
+      ["src/beta.ts", 0.05],
+    ]),
+    memoryEntries: [],
+    facts: [],
+    rules: [],
+    priorSessionPaths: [],
+    budgetTokens: 4096,
+    secretTerms: [],
+  });
+  const alphaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_alpha")!;
+  const betaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_beta")!;
+  assert.ok(alphaBoosted && betaBoosted);
+  const alphaScore = alphaBoosted.finalScore;
+  const betaScore = betaBoosted.finalScore;
+  assert.ok(
+    alphaScore > betaScore,
+    `alpha (${alphaScore}) should outrank beta (${betaScore}) after pathBoosts`,
+  );
 });

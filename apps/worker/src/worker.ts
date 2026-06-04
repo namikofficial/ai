@@ -186,6 +186,28 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
         const files = (task as { expectedFiles?: unknown }).expectedFiles;
         return Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : [];
       });
+      let counts: ReflectionCounts = { memoryCandidates: 0, skillCandidates: 0, facts: 0, staleFacts: 0, retrievalFeedback: 0 };
+      let notes: string[] = [];
+      if (sessionId) {
+        const reflectInput = buildReflectionInput(store, sessionId);
+        const reflection = reflectEngine(reflectInput);
+        counts = applyReflectionOutput(store, sessionId, reflection);
+        notes = reflection.notes;
+        store.appendEvent(
+          createEvent(
+            "plan.reviewed",
+            {
+              sessionId,
+              projectId,
+              goal,
+              taskCount: taskGraph.length,
+              counts,
+              noteCount: notes.length,
+            },
+            { sessionId, projectId, agent: "reflection" },
+          ),
+        );
+      }
       output = {
         review: store.createReview({
           project: projectId ?? "",
@@ -194,22 +216,49 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
           plannedFiles: [],
           editedFiles,
           checks: ["typecheck", "tests"],
-          notes: `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
+          notes: notes.length > 0
+            ? notes.join("\n")
+            : `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
         }),
         lesson: store.createLesson({
           projectId,
           sessionId,
           title: `Plan review: ${goal}`,
-          body: `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
+          body: notes.length > 0
+            ? notes.join("\n")
+            : `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
           tags: ["worker", "review", "plan"],
           importance: 2,
         }),
+        counts,
       };
     } else if (job.type === "handoff.archive") {
       const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
       const target = typeof payload.target === "string" ? payload.target : "manual";
       const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
+      let counts: ReflectionCounts = { memoryCandidates: 0, skillCandidates: 0, facts: 0, staleFacts: 0, retrievalFeedback: 0 };
+      let notes: string[] = [];
+      if (sessionId) {
+        const reflectInput = buildReflectionInput(store, sessionId);
+        const reflection = reflectEngine(reflectInput);
+        counts = applyReflectionOutput(store, sessionId, reflection);
+        notes = reflection.notes;
+        store.appendEvent(
+          createEvent(
+            "handoff.archived",
+            {
+              sessionId,
+              projectId,
+              target,
+              counts,
+              noteCount: notes.length,
+            },
+            { sessionId, projectId, agent: "reflection" },
+          ),
+        );
+      }
+      const reflectionBody = notes.length > 0 ? notes.join("\n") : prompt.slice(0, 500);
       output = {
         review: store.createReview({
           project: projectId ?? "",
@@ -218,16 +267,17 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
           plannedFiles: [],
           editedFiles: [],
           checks: ["typecheck", "tests"],
-          notes: prompt.slice(0, 500),
+          notes: reflectionBody,
         }),
         lesson: store.createLesson({
           projectId,
           sessionId,
           title: `Handoff archive: ${target}`,
-          body: prompt.slice(0, 500),
+          body: reflectionBody,
           tags: ["worker", "handoff"],
           importance: 2,
         }),
+        counts,
       };
     } else if (job.type === "session.reflect") {
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;

@@ -230,6 +230,7 @@ export function rerankChunks(input: {
   feedback: RetrievalFeedbackRecord[];
   feedbackChunkPaths: Map<string, string>;
   missRecords: RetrievalMissRecord[];
+  pathBoosts: Map<string, number>;
   memoryEntries: MemoryEntryRecord[];
   facts: Array<{ key: string; value: string; confidence: number }>;
   rules: ProjectRuleRecord[];
@@ -262,6 +263,11 @@ export function rerankChunks(input: {
     if (goodWeight > 0) {
       rerankScore += Math.min(2, goodWeight);
       boosters.push("good");
+    }
+    const pathBoost = input.pathBoosts.get(chunk.path) ?? 0;
+    if (pathBoost > 0) {
+      const delta = (pathBoost - 0.5) * 2;
+      rerankScore += Math.max(-1, Math.min(1.5, delta));
     }
     const missWeight = missedPaths.get(chunk.path) ?? 0;
     if (missWeight > 0) {
@@ -485,6 +491,7 @@ export interface RetrievalPipelineInput {
   feedback: RetrievalFeedbackRecord[];
   feedbackChunkPaths: Map<string, string>;
   missRecords: RetrievalMissRecord[];
+  pathBoosts: Map<string, number>;
   memoryEntries: MemoryEntryRecord[];
   facts: Array<{ key: string; value: string; confidence: number; status?: string }>;
   rules: ProjectRuleRecord[];
@@ -529,6 +536,7 @@ export function runRetrievalPipeline(input: RetrievalPipelineInput): RetrievalPi
     feedback: input.feedback,
     feedbackChunkPaths: input.feedbackChunkPaths,
     missRecords: input.missRecords,
+    pathBoosts: input.pathBoosts,
     memoryEntries: input.memoryEntries,
     facts: input.facts,
     rules: input.rules,

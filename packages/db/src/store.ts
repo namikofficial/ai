@@ -35,6 +35,8 @@ import type {
   HandoffResponse,
   McpCallSummary,
   MemoryEntry,
+  ModelProviderRecord,
+  ModelProfileRecord,
   ModelUsageEntry,
   JobRecord,
   PlanRequest,
@@ -61,7 +63,9 @@ import {
   classifyIntent,
   rankChunk,
   rewriteQuery,
+  runRetrievalPipeline,
 } from "../../retrieval-engine/src/index.ts";
+import { buildRetrievalPipelineInput } from "./retrieval-explain.ts";
 import { createEvent, createId, slugifyName } from "../../shared/src/index.ts";
 
 type Row = Record<string, unknown>;
@@ -610,6 +614,8 @@ export function createStore(db: DatabaseSync) {
 
   let intelligenceStack: {
     runtime: ModelRuntime;
+    providers: Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
+    profiles: ModelProfileRecord[];
     runtimeOptions?: { sessionId?: string | null; taskId?: string | null; retrievalQueryId?: string | null };
   } | null = null;
 
@@ -2087,56 +2093,89 @@ export function createStore(db: DatabaseSync) {
       const retrievalStarted = createEvent("retrieval.started", { question: input.question }, { sessionId: session.id, projectId: project.id, agent: "retriever" });
       store.appendEvent(retrievalStarted);
 
-      const chunks = store.searchChunks(project.id, rewritten.variant, { limit: input.depth === "deep" ? 12 : input.depth === "shallow" ? 4 : 8 });
-      const citations = chunks.map((chunk) => ({
-        chunkId: chunk.id,
-        path: chunk.path,
-        startLine: chunk.startLine,
-        endLine: chunk.endLine,
-        excerpt: chunk.content.split("\n").slice(0, 4).join("\n"),
-        score: chunk.score,
+      const ftsLimit = input.depth === "deep" ? 12 : input.depth === "shallow" ? 4 : 8;
+      const pipelineInput = buildRetrievalPipelineInput(store, {
+        projectId: project.id,
+        query: rewritten.variant,
+        intent: retrievalQuery.intent,
+        mode: input.mode ?? "local",
+        depth: input.depth ?? "standard",
+        ftsLimit,
+      });
+      const pipelineOutput = runRetrievalPipeline(pipelineInput);
+      const ranked = pipelineOutput.ranked;
+      const selected = pipelineOutput.selected;
+      const dropped = pipelineOutput.dropped;
+      const chunks = selected.map((entry) => entry.chunk);
+      const citations = selected.map((entry) => ({
+        chunkId: entry.chunk.id,
+        path: entry.chunk.path,
+        startLine: entry.chunk.startLine,
+        endLine: entry.chunk.endLine,
+        excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
+        score: entry.finalScore,
       }));
 
-      const recordedResults = retrievalRepo.recordResults(
+      retrievalRepo.recordResults(
         retrievalQuery.id,
-        chunks.map((chunk) => ({
-          chunkId: chunk.id,
-          path: chunk.path,
-          startLine: chunk.startLine,
-          endLine: chunk.endLine,
+        ranked.map((entry) => ({
+          chunkId: entry.chunk.id,
+          path: entry.chunk.path,
+          startLine: entry.chunk.startLine,
+          endLine: entry.chunk.endLine,
           source: "heuristic",
-          baseScore: chunk.score,
-          finalScore: chunk.score,
-          included: true,
+          baseScore: entry.baseScore,
+          finalScore: entry.finalScore,
+          included: selected.some((s) => s.chunk.id === entry.chunk.id),
+          rerankReason: entry.rerankReason,
         })),
       );
       retrievalRepo.recordSelectedContext(
         retrievalQuery.id,
-        chunks.map((chunk, index) => ({
-          chunkId: chunk.id,
+        selected.map((entry, index) => ({
+          chunkId: entry.chunk.id,
           rank: index,
-          tokenCount: chunk.tokenCount,
-          excerpt: chunk.content.split("\n").slice(0, 4).join("\n"),
+          tokenCount: entry.chunk.tokenCount,
+          excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
         })),
       );
+      if (pipelineOutput.miss) {
+        retrievalRepo.recordMiss({
+          retrievalQueryId: retrievalQuery.id,
+          missedPath: pipelineOutput.miss.path,
+          confidence: pipelineOutput.confidence,
+          notes: pipelineOutput.miss.notes,
+        });
+      } else if (selected.length === 0) {
+        retrievalRepo.recordMiss({
+          retrievalQueryId: retrievalQuery.id,
+          missedPath: project.path,
+          confidence: pipelineOutput.confidence,
+          notes: "no chunks returned from hybrid retrieval",
+        });
+      }
       const contextPack = contextRepo.recordPack({
         sessionId: session.id,
         projectId: project.id,
         retrievalQueryId: retrievalQuery.id,
         budgetTokens: 4096,
-        usedTokens: chunks.reduce((sum, c) => sum + c.tokenCount, 0),
+        usedTokens: pipelineOutput.usedTokens,
         reason: "ask",
-        items: chunks.map((chunk, index) => ({
+        items: selected.map((entry, index) => ({
           kind: "retrieval_chunk",
-          sourceId: chunk.id,
+          sourceId: entry.chunk.id,
           rank: index,
-          tokenCount: chunk.tokenCount,
-          excerpt: chunk.content.split("\n").slice(0, 4).join("\n"),
-          })),
+          tokenCount: entry.chunk.tokenCount,
+          excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
+        })),
+        budgetEvents: dropped.map((entry) => ({
+          deltaTokens: entry.chunk.tokenCount,
+          reason: `dropped:${entry.rerankReason}`,
+        })),
       });
 
-      const confidence = chunks.length === 0 ? 0 : Math.min(0.95, Math.max(0.25, chunks[0].score / 8));
-      const insufficientReason = chunks.length === 0 ? "No matching chunks were found in the selected project." : null;
+      const confidence = pipelineOutput.confidence;
+      const insufficientReason = selected.length === 0 ? "No matching chunks were found in the selected project." : null;
       const retrievalJudgeCall = modelsRepo.recordCall({
         sessionId: session.id,
         taskId: retrievalAgentRun.id,
@@ -2144,37 +2183,34 @@ export function createStore(db: DatabaseSync) {
         profileId: modelsRepo.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local",
         role: "retrieval_judge",
         promptTokens: Math.ceil((input.question.length + rewritten.variant.length) / 4),
-        completionTokens: Math.ceil(String(chunks.length).length / 2),
+        completionTokens: Math.ceil(String(ranked.length).length / 2),
         latencyMs: 0,
         status: "ok",
         request: {
           question: input.question,
           rewritten: rewritten.variant,
-          chunkCount: chunks.length,
+          chunkCount: selected.length,
+          rankedCount: ranked.length,
+          droppedCount: dropped.length,
           mode: input.mode ?? "local",
         },
         response: {
           confidence,
           insufficientReason,
+          confidenceNotes: pipelineOutput.confidenceNotes,
+          boost: pipelineOutput.boost,
+          miss: pipelineOutput.miss ?? null,
           citations: citations.slice(0, 3),
         },
       });
       store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeCall.profileId }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
       store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeCall.profileId, requestId: retrievalJudgeCall.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-      if (chunks.length === 0) {
-        retrievalRepo.recordMiss({
-          retrievalQueryId: retrievalQuery.id,
-          missedPath: project.path,
-          confidence: 0,
-          notes: "no chunks returned from hybrid retrieval",
-        });
-      }
       const answer =
-        chunks.length === 0
+        selected.length === 0
           ? `I could not find enough local context in ${project.name} to answer "${input.question}".`
           : buildAnswer(input.question, project, chunks, citations, confidence);
       let intelligenceResult: ModelInvokeResult | null = null;
-      if (intelligenceStack && chunks.length > 0) {
+      if (intelligenceStack && selected.length > 0) {
         try {
           const request: ModelInvokeRequest = {
             role: "answer",
@@ -2208,7 +2244,13 @@ export function createStore(db: DatabaseSync) {
         status: "completed",
         finishedAt: now(),
         durationMs: Date.parse(now()) - Date.parse(retrievalAgentRun.startedAt),
-        output: { chunkCount: chunks.length, confidence, retrievalQueryId: retrievalQuery.id },
+        output: {
+          chunkCount: selected.length,
+          rankedCount: ranked.length,
+          droppedCount: dropped.length,
+          confidence,
+          retrievalQueryId: retrievalQuery.id,
+        },
       });
 
       const answerAgentRun = agentsRepo.createRun({

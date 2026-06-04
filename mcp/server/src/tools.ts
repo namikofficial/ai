@@ -244,6 +244,126 @@ function toolDescriptors(): ToolDescriptor[] {
         required: ["name"],
       },
     },
+    {
+      name: "ai_get_context_pack",
+      description: "Return a context pack by id, including its items and budget events.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          contextPackId: { type: "string" },
+        },
+        required: ["contextPackId"],
+      },
+    },
+    {
+      name: "ai_list_memory_candidates",
+      description: "List memory candidates filtered by project and status.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string" },
+          status: { type: "string", enum: ["pending", "accepted", "rejected"] },
+          limit: { type: "number" },
+        },
+      },
+    },
+    {
+      name: "ai_accept_memory_candidate",
+      description: "Accept a pending memory candidate and create a memory entry.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          candidateId: { type: "string" },
+          notes: { type: "string" },
+        },
+        required: ["candidateId"],
+      },
+    },
+    {
+      name: "ai_list_skill_candidates",
+      description: "List skill candidates filtered by status.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          status: { type: "string", enum: ["pending", "active", "rejected", "deprecated"] },
+          limit: { type: "number" },
+        },
+      },
+    },
+    {
+      name: "ai_accept_skill_candidate",
+      description: "Accept a pending skill candidate and create a skill.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          candidateId: { type: "string" },
+        },
+        required: ["candidateId"],
+      },
+    },
+    {
+      name: "ai_reject_memory_candidate",
+      description: "Reject a pending memory candidate with optional reason.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          candidateId: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["candidateId"],
+      },
+    },
+    {
+      name: "ai_reject_skill_candidate",
+      description: "Reject a pending skill candidate.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          candidateId: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["candidateId"],
+      },
+    },
+    {
+      name: "ai_get_model_calls",
+      description: "Return model call records for a session, optionally filtered by role.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          role: { type: "string" },
+          limit: { type: "number" },
+        },
+        required: ["sessionId"],
+      },
+    },
+    {
+      name: "ai_get_retrieval_query",
+      description: "Return a retrieval query, its results, selected context, feedback, and misses.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          retrievalQueryId: { type: "string" },
+        },
+        required: ["retrievalQueryId"],
+      },
+    },
+    {
+      name: "ai_record_feedback",
+      description: "Record retrieval feedback (good/bad chunk or missed path) so future rerank calls are tuned. Triggers chunk_path_boost updates.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          retrievalQueryId: { type: "string" },
+          chunkId: { type: "string" },
+          rating: { type: "string", enum: ["good", "bad", "missed"] },
+          missedPath: { type: "string" },
+          notes: { type: "string" },
+        },
+        required: ["retrievalQueryId", "rating"],
+      },
+    },
   ];
 }
 
@@ -330,26 +450,85 @@ function handleTool(store: Store, config: ConfigSnapshot, name: string, args: Re
       return project ? store.listProjectLessons(project, asNumber(args.limit, 10)) : store.listRecentLessons(asNumber(args.limit, 10));
     }
     case "ai_reflect_session": {
-      const session = store.getSession(asString(args.sessionId));
+      const sessionId = asString(args.sessionId);
+      const session = store.getSession(sessionId);
       if (!session) {
-        throw new Error(`Unknown session: ${asString(args.sessionId)}`);
+        throw new Error(`Unknown session: ${sessionId}`);
       }
-      return store.createLesson({
-        projectId: session.projectId,
-        sessionId: session.id,
-        title: `Reflection: ${session.title}`,
-        body: session.finalSummary ?? session.userGoal,
-        tags: ["reflection", "mcp"],
-        importance: 3,
+      const job = store.enqueueJob({
+        type: "session.reflect",
+        payload: { sessionId, source: "mcp" },
       });
+      store.appendEvent(
+        createEvent(
+          "session.reflected",
+          { sessionId, projectId: session.projectId, queuedJobId: job.id, source: "mcp" },
+          { sessionId, projectId: session.projectId, agent: "mcp" },
+        ),
+      );
+      return {
+        queued: true,
+        jobId: job.id,
+        sessionId,
+        note: "session.reflect job queued; the worker will build memory/skill candidates and emit a session.reflected event when finished",
+      };
     }
     case "ai_list_sessions":
       return args.project ? store.listProjectSessions(asString(args.project), asNumber(args.limit, 20)) : store.listSessions(asNumber(args.limit, 20));
-    case "ai_get_session_trace":
+    case "ai_get_session_trace": {
+      const sessionId = asString(args.sessionId);
+      const session = store.getSession(sessionId);
+      if (!session) {
+        throw new Error(`Unknown session: ${sessionId}`);
+      }
+      const retrievals = store.retrieval.listQueriesForSession(sessionId, 200);
+      const contextPacks = store.context.listPacksForSession(sessionId, 50);
+      const agentRuns = store.agents.listRuns(sessionId, 200);
+      const agentMessages = agentRuns.flatMap((run) => store.agents.listMessages(run.id, 200));
+      const memoryCandidates = session.projectId
+        ? store.memory.listCandidates(undefined, session.projectId, 200)
+        : store.memory.listCandidates(undefined, null, 200);
+      const projectId = session.projectId;
+      const memoryEntries = projectId
+        ? store.memory.listEntries(projectId, undefined, 200)
+        : store.memory.listEntries(null, undefined, 200);
+      const facts = projectId ? store.memory.listFacts(projectId, 200) : store.memory.listFacts(null, 200);
+      const rules = projectId ? store.memory.listProjectRules(projectId, 200) : [];
+      const skills = store.skills.listSkills(undefined, 200);
+      const reviews = projectId ? store.listReviews(projectId, 200) : store.listReviews(null, 200);
+      const checks = store.listCheckRuns(200);
+      const answerEvaluations = store.evals.listAnswerEvaluations(200);
+      const outcomes = store.evals.listOutcomes(sessionId, 20);
       return {
-        session: store.getSession(asString(args.sessionId)),
-        events: store.listEvents(asString(args.sessionId), asNumber(args.limit, 200)),
+        session,
+        conversation: store.conversation.listMessages(sessionId, 500),
+        retrievals: retrievals.map((query) => ({
+          query,
+          results: store.retrieval.listResults(query.id, 200),
+          selectedContext: store.retrieval.listSelectedContext(query.id),
+          feedback: store.retrieval.listFeedback(query.id, 50),
+          misses: store.retrieval.listMisses(query.id),
+        })),
+        contextPacks: contextPacks.map((pack) => ({
+          pack,
+          items: store.context.listItems(pack.id),
+          budgetEvents: store.context.listBudgetEvents(pack.id),
+        })),
+        agentRuns,
+        agentMessages,
+        modelCalls: store.models.listCalls(sessionId, 500),
+        memoryCandidates,
+        memoryEntries,
+        facts,
+        rules,
+        skills,
+        reviews,
+        checks,
+        answerEvaluations,
+        outcomes,
+        events: store.listEvents(sessionId, asNumber(args.limit, 500)),
       };
+    }
     case "ai_run_check": {
       const allowlisted = new Set(["typecheck", "tests", "build", "lint"]);
       const nameValue = asString(args.name);
@@ -365,6 +544,186 @@ function handleTool(store: Store, config: ConfigSnapshot, name: string, args: Re
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
       });
+    }
+    case "ai_get_context_pack": {
+      const packId = asString(args.contextPackId);
+      const pack = store.context.getPack(packId);
+      if (!pack) {
+        throw new Error(`Unknown context pack: ${packId}`);
+      }
+      return {
+        pack,
+        items: store.context.listItems(packId),
+        budgetEvents: store.context.listBudgetEvents(packId),
+      };
+    }
+    case "ai_list_memory_candidates": {
+      const projectId = args.project ? asString(args.project) : null;
+      const statusValue = args.status;
+      const statusFilter = statusValue === "pending" || statusValue === "accepted" || statusValue === "rejected"
+        ? statusValue
+        : undefined;
+      return store.memory.listCandidates(statusFilter, projectId, asNumber(args.limit, 50));
+    }
+    case "ai_accept_memory_candidate": {
+      const candidateId = asString(args.candidateId);
+      const before = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId);
+      if (!before) {
+        throw new Error(`Unknown memory candidate: ${candidateId}`);
+      }
+      if (before.status !== "pending") {
+        return { entry: null, candidate: before, note: `Candidate already ${before.status}; no change.` };
+      }
+      const notes = args.notes ? asString(args.notes) : null;
+      const entry = store.memory.acceptCandidate(candidateId, notes);
+      const after = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId) ?? before;
+      store.appendEvent(
+        createEvent("lesson.created", { kind: "memory", source: "mcp", candidateId }, {
+          sessionId: before.sessionId,
+          projectId: before.projectId,
+          agent: "mcp",
+        }),
+      );
+      return { entry, candidate: after };
+    }
+    case "ai_list_skill_candidates": {
+      const statusValue = args.status;
+      const statusFilter = statusValue === "pending" || statusValue === "active" || statusValue === "rejected" || statusValue === "deprecated"
+        ? statusValue
+        : "pending";
+      return store.skills.listCandidates(statusFilter, asNumber(args.limit, 50));
+    }
+    case "ai_accept_skill_candidate": {
+      const candidateId = asString(args.candidateId);
+      const candidates = store.skills.listCandidates("pending", 1000);
+      const before = candidates.find((entry) => entry.id === candidateId);
+      if (!before) {
+        throw new Error(`Unknown pending skill candidate: ${candidateId}`);
+      }
+      const skill = store.skills.acceptCandidate(candidateId);
+      const allCandidates = store.skills.listCandidates(undefined, 1000);
+      const after = allCandidates.find((entry) => entry.id === candidateId) ?? before;
+      store.appendEvent(
+        createEvent("lesson.created", { kind: "skill", source: "mcp", candidateId }, {
+          projectId: before.projectId,
+          agent: "mcp",
+        }),
+      );
+      return { skill, candidate: after };
+    }
+    case "ai_reject_memory_candidate": {
+      const candidateId = asString(args.candidateId);
+      const reason = args.reason ? asString(args.reason) : null;
+      const before = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId);
+      if (!before) {
+        throw new Error(`Unknown memory candidate: ${candidateId}`);
+      }
+      if (before.status !== "pending") {
+        return { candidate: before, note: `Candidate already ${before.status}; no change.` };
+      }
+      store.memory.reviewCandidate(candidateId, "rejected", reason);
+      const after = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId) ?? before;
+      store.appendEvent(
+        createEvent("lesson.created", { kind: "memory_rejected", source: "mcp", candidateId, reason }, {
+          sessionId: before.sessionId,
+          projectId: before.projectId,
+          agent: "mcp",
+        }),
+      );
+      return { candidate: after };
+    }
+    case "ai_reject_skill_candidate": {
+      const candidateId = asString(args.candidateId);
+      const reason = args.reason ? asString(args.reason) : null;
+      const candidates = store.skills.listCandidates("pending", 1000);
+      const candidate = candidates.find((entry) => entry.id === candidateId);
+      if (!candidate) {
+        throw new Error(`Unknown pending skill candidate: ${candidateId}`);
+      }
+      const updated = store.skills.reviewCandidate(candidateId, "rejected");
+      store.appendEvent(
+        createEvent("lesson.created", { kind: "skill_rejected", source: "mcp", candidateId, reason }, {
+          projectId: candidate.projectId,
+          agent: "mcp",
+        }),
+      );
+      return { candidate: updated };
+    }
+    case "ai_get_model_calls": {
+      const sessionId = asString(args.sessionId);
+      const role = args.role ? asString(args.role) : null;
+      const calls = store.models.listCalls(sessionId, asNumber(args.limit, 200));
+      const filtered = role ? calls.filter((entry) => entry.role === role) : calls;
+      return filtered;
+    }
+    case "ai_get_retrieval_query": {
+      const queryId = asString(args.retrievalQueryId);
+      const query = store.retrieval.getQuery(queryId);
+      if (!query) {
+        throw new Error(`Unknown retrieval query: ${queryId}`);
+      }
+      return {
+        query,
+        results: store.retrieval.listResults(queryId, 200),
+        selectedContext: store.retrieval.listSelectedContext(queryId),
+        feedback: store.retrieval.listFeedback(queryId, 50),
+        misses: store.retrieval.listMisses(queryId),
+      };
+    }
+    case "ai_record_feedback": {
+      const retrievalQueryId = asString(args.retrievalQueryId);
+      const ratingInput = asString(args.rating);
+      const rating = ratingInput === "good" || ratingInput === "bad" || ratingInput === "missed"
+        ? ratingInput
+        : null;
+      if (!rating) {
+        throw new Error(`Invalid rating: must be 'good', 'bad', or 'missed'`);
+      }
+      const chunkId = typeof args.chunkId === "string" && args.chunkId.length > 0 ? args.chunkId : null;
+      const missedPath = typeof args.missedPath === "string" && args.missedPath.length > 0 ? args.missedPath : null;
+      if (rating !== "missed" && !chunkId) {
+        throw new Error(`'good' and 'bad' feedback require a chunkId; 'missed' requires a missedPath`);
+      }
+      if (rating === "missed" && !missedPath) {
+        throw new Error(`'missed' feedback requires a missedPath`);
+      }
+      const query = store.retrieval.getQuery(retrievalQueryId);
+      if (!query) {
+        throw new Error(`Unknown retrieval query: ${retrievalQueryId}`);
+      }
+      const feedback = store.retrieval.recordFeedback({
+        retrievalQueryId,
+        chunkId,
+        rating,
+        missedPath,
+        notes: typeof args.notes === "string" ? args.notes : null,
+      });
+      const pathBoosts = query.projectId
+        ? store.retrieval.listPathBoosts(query.projectId, 200)
+        : [];
+      const matchingBoost = chunkId
+        ? pathBoosts.find((b) => {
+            const chunkRow = store.db
+              .prepare(
+                "SELECT d.path AS path FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.id = ?",
+              )
+              .get(chunkId) as { path: string | null } | undefined;
+            return chunkRow?.path === b.path;
+          })
+        : missedPath
+          ? pathBoosts.find((b) => b.path === missedPath)
+          : undefined;
+      store.appendEvent(
+        createEvent(
+          "lesson.created",
+          { kind: "retrieval_feedback", source: "mcp", retrievalQueryId, rating },
+          { projectId: query.projectId, sessionId: query.sessionId, agent: "mcp" },
+        ),
+      );
+      return {
+        feedback,
+        pathBoost: matchingBoost ?? null,
+      };
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

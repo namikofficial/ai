@@ -4,6 +4,9 @@ import type { AskRequest, ConfigSnapshot, EventEnvelope, HandoffRequest, PlanReq
 import { createEvent, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
+import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import type { ModelProviderRecord, ModelProfileRecord } from "../../../packages/shared/src/index.ts";
+import { runExplainWithStore } from "./retrieval-explain.ts";
 import {
   renderCard,
   renderEmptyState,
@@ -15,9 +18,16 @@ import {
   renderShell,
 } from "../../../packages/ui/src/index.ts";
 
+export interface IntelligenceStack {
+  runtime: ModelRuntime;
+  providers: Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">[];
+  profiles: ModelProfileRecord[];
+}
+
 export interface ServerOptions {
   config?: Partial<ConfigSnapshot>;
   inProcess?: boolean;
+  intelligenceStack?: IntelligenceStack;
 }
 
 export interface ServerHandle {
@@ -1001,6 +1011,25 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   const db = initializeStore(config.databasePath);
   const store = createStore(db);
   await store.ensureRuntimeDirs(config.runtimeDir);
+  if (options.intelligenceStack) {
+    store.setIntelligenceStack(options.intelligenceStack);
+  } else if (process.env.AI_DISABLE_INTELLIGENCE_STACK !== "true") {
+    const providers = store.models.listProviders().map((provider) => ({
+      id: provider.id,
+      kind: provider.kind,
+      displayName: provider.displayName,
+      baseUrl: provider.baseUrl,
+      apiKeyEnv: provider.apiKeyEnv,
+      enabled: provider.enabled,
+    }));
+    const profiles = store.models.listProfiles();
+    const runtime = createModelRuntime({
+      providers,
+      profiles,
+      cloudEnabled: config.cloudEnabled,
+    });
+    store.setIntelligenceStack({ runtime, providers, profiles });
+  }
 
   const listeners = new Set<any>();
   const publish = (event: EventEnvelope) => {
@@ -1547,10 +1576,14 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             .filter(Boolean),
           notes: body.notes ? String(body.notes) : undefined,
         });
+        const job = store.enqueueJob({
+          type: "review.reflect",
+          payload: { reviewId: result.id, source: "api" },
+        });
         if (isHtmlRequest(req)) {
           sendHtml(res, renderReviewsPage(store, { result }));
         } else {
-          sendJson(res, json("ok", result));
+          sendJson(res, json("ok", { result, jobId: job.id }));
         }
         return;
       }
@@ -1576,15 +1609,19 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = String(body.project ?? body.projectId ?? "");
         const query = String(body.query ?? "");
-        const chunks = store.searchChunks(projectId, query, { limit: Number(body.limit ?? 8) || 8 });
-        const explanation = {
-          query,
-          projectId,
-          evidenceCount: chunks.length,
-          topPaths: chunks.slice(0, 3).map((chunk) => chunk.path),
-          confidence: chunks.length === 0 ? 0 : chunks[0].score / 8,
-          chunks,
-        };
+        const mode = body.mode === "cloud" || body.mode === "hybrid" ? body.mode : "local";
+        const depth = body.depth === "shallow" || body.depth === "deep" ? body.depth : "standard";
+        const limit = Number(body.limit ?? 8) || 8;
+        if (!projectId || !query) {
+          sendJson(res, json("error", undefined, { message: "project and query are required" }));
+          return;
+        }
+        const projectRecord = store.getProject(projectId);
+        if (!projectRecord) {
+          sendJson(res, json("error", undefined, { message: `Unknown project: ${projectId}` }));
+          return;
+        }
+        const explanation = runExplainWithStore(store, { projectId, query, mode, depth, limit });
         sendJson(res, json("ok", explanation));
         return;
       }

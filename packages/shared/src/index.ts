@@ -302,7 +302,9 @@ export type EventType =
   | "check.completed"
   | "check.failed"
   | "handoff.created"
+  | "handoff.archived"
   | "review.reflected"
+  | "plan.reviewed"
   | "lesson.created";
 
 export interface ConfigSnapshot {
@@ -535,6 +537,28 @@ export interface RetrievalMissRecord {
   confidence: number;
   notes: string | null;
   createdAt: string;
+}
+
+export interface RetrievalPathFeedbackRecord {
+  id: string;
+  projectId: string;
+  retrievalQueryId: string | null;
+  path: string;
+  rating: RetrievalFeedbackRating;
+  weight: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface ChunkPathBoostRecord {
+  id: string;
+  projectId: string;
+  path: string;
+  weight: number;
+  source: string;
+  reason: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type ModelProviderKind = "local_openai_compat" | "cloud_openai_compat" | "heuristic" | "fastembed";

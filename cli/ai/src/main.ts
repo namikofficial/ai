@@ -6,6 +6,8 @@ import { startWorkbenchWorker } from "../../../apps/worker/src/worker.ts";
 import { startMcpServer } from "../../../mcp/server/src/stdio.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import { runRetrievalExplain } from "../../../packages/db/src/retrieval-explain.ts";
+import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
 
 function printUsage(): void {
   console.log(`ai commands:
@@ -295,14 +297,16 @@ async function run(): Promise<void> {
   }
 
   if (command === "retrieval") {
+    const subcommand = positionals.shift();
     const project = options.project;
-    const query = positionals.join(" ");
+    const query = subcommand ? `${subcommand} ${positionals.join(" ")}`.trim() : positionals.join(" ");
     if (!project) {
       throw new Error("retrieval requires --project <name>");
     }
     printJson(await client.searchRetrieval({ project, query, limit: Number(options.limit ?? 8) || 8 }));
     return;
   }
+
 
   if (command === "models") {
     printJson(await client.getModels());
@@ -342,7 +346,66 @@ function withDirectStore<T>(fn: (store: DirectStore) => T | Promise<T>): Promise
     });
 }
 
-if (process.argv[2] === "memory") {
+async function dispatchRetrievalExplain(input: { positionals: string[]; options: Record<string, string> }): Promise<void> {
+  const project = input.options.project;
+  if (!project) {
+    throw new Error("retrieval explain requires --project <name>");
+  }
+  const query = input.positionals.join(" ").trim();
+  if (!query) {
+    throw new Error("retrieval explain requires a query string");
+  }
+  const mode: RetrievalMode = input.options.mode === "cloud" || input.options.mode === "hybrid" ? input.options.mode : "local";
+  const depth: RetrievalDepth = input.options.depth === "shallow" || input.options.depth === "deep" ? input.options.depth : "standard";
+  const limit = Number(input.options.limit ?? 8) || 8;
+  await withDirectStore((store) => {
+    const projectRecord = store.getProject(project);
+    if (!projectRecord) {
+      throw new Error(`Unknown project: ${project}`);
+    }
+    const projectId = projectRecord.id;
+    const output = runRetrievalExplain(store, {
+      projectId,
+      query,
+      mode,
+      depth,
+      limit,
+    });
+    printJson(output);
+  });
+}
+
+if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
+  const explainArgs = process.argv.slice(4);
+  const options: Record<string, string> = {};
+  const positionals: string[] = [];
+  for (let i = 0; i < explainArgs.length; i++) {
+    const value = explainArgs[i]!;
+    if (value === "--project" || value === "--mode" || value === "--depth" || value === "--limit") {
+      const next = explainArgs[i + 1];
+      if (next) {
+        options[value.slice(2)] = next;
+        i++;
+      }
+      continue;
+    }
+    if (value.startsWith("--project=")) options.project = value.slice("--project=".length);
+    else if (value.startsWith("--mode=")) options.mode = value.slice("--mode=".length);
+    else if (value.startsWith("--depth=")) options.depth = value.slice("--depth=".length);
+    else if (value.startsWith("--limit=")) options.limit = value.slice("--limit=".length);
+    else if (value.startsWith("--")) {
+      // ignore unknown flag
+    } else {
+      positionals.push(value);
+    }
+  }
+  withDirectStore(async () => {
+    await dispatchRetrievalExplain({ positionals, options });
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (process.argv[2] === "memory") {
   withDirectStore(async (store) => {
     const sub = process.argv[3] ?? "candidates";
     if (sub === "candidates") {
