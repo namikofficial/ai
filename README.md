@@ -79,10 +79,25 @@ Projects can be configured via an optional `.ai-workbench.json` file in the proj
 The workbench intentionally stays local-first and read-only by default:
 - Fallback symbol extraction is implemented; Tree-sitter is not wired yet.
 - Watcher mode is not implemented yet.
-- Prompt Lab is not exposed as a separate product surface yet.
+- Prompt Lab is available but not exposed as a separate product surface yet.
 - MCP host mode is not implemented yet.
 - Terminal/Xterm mode is not implemented yet.
 - Cloud routing stays disabled unless explicitly enabled.
+
+### CLI Surfaces
+
+Project intelligence:
+- `ai project graph <project>` — Show the context graph (routes, middleware, hot paths).
+- `ai project symbols <project> [--query <text>] [--limit <n>]` — List symbols with optional search.
+- `ai project symbol <symbol-id>` — Show a single symbol with edges and chunks.
+
+Observability:
+- `ai trace timeline <session-id>` — Show the session timeline (events, model calls, retrieval).
+- `ai replay <session-id> --prompt <id> --model <profile-id>` — Replay a session with a different model.
+
+Prompt Lab:
+- `ai prompts list [--session <id>] [--limit <n>]` — List compiled prompts.
+- `ai prompts show <prompt-id>` — Show prompt details and messages.
 
 ## Environment Variables
 
