@@ -57,14 +57,23 @@ export function KeyValueList({
 export function EmptyState({
   title,
   body,
+  actionLabel,
+  onAction,
 }: {
   title: string;
   body: string;
+  actionLabel?: string;
+  onAction?: () => void;
 }): ReactNode {
   return (
     <div className="list-item">
       <strong>{title}</strong>
       <div className="tiny">{body}</div>
+      {actionLabel && onAction ? (
+        <div className="row" style={{ marginTop: "0.4rem" }}>
+          <button type="button" onClick={onAction}>{actionLabel}</button>
+        </div>
+      ) : null}
     </div>
   );
 }

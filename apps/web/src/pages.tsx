@@ -260,15 +260,31 @@ function ProjectDetailPage(): ReactNode {
   const { projectId = "" } = useParams();
   const setSelectedProjectId = useWorkbenchStore((state) => state.setSelectedProjectId);
   const [indexing, setIndexing] = useState(false);
-  const resource = useResource(
-    () => Promise.all([api.getProject(projectId), api.getProjectMemory(projectId), api.getProjectRetrieval(projectId), api.listProjectSymbols(projectId, { limit: 10 }), api.getProjectGraph(projectId)]),
+  const projectResource = useResource(
+    () => api.getProject(projectId).then((response) => response.data),
     [projectId],
   );
-  const project = resource.data?.[0].data ?? null;
-  const memory = resource.data?.[1].data ?? null;
-  const retrieval = resource.data?.[2].data ?? null;
-  const symbolsResponse = resource.data?.[3].data ?? null;
-  const graphResponse = resource.data?.[4].data ?? null;
+  const project = projectResource.data;
+  const graphResource = useResource(
+    () => api.getProjectGraph(projectId).then((response) => response.data),
+    [projectId],
+  );
+  const graphResponse = graphResource.data ?? null;
+  const symbolsResource = useResource(
+    () => api.listProjectSymbols(projectId, { limit: 10 }).then((response) => response.data),
+    [projectId],
+  );
+  const symbolsResponse = symbolsResource.data ?? null;
+  const retrievalResource = useResource(
+    () => api.getProjectRetrieval(projectId).then((response) => response.data),
+    [projectId],
+  );
+  const retrieval = retrievalResource.data ?? null;
+  const memoryResource = useResource(
+    () => api.getProjectMemory(projectId).then((response) => response.data),
+    [projectId],
+  );
+  const memory = memoryResource.data ?? null;
   const sessionsResource = useResource(() => api.listSessions(), [projectId]);
   const sessions = sessionsResource.data?.data.filter((session) => session.projectId === projectId) ?? [];
 
@@ -278,11 +294,31 @@ function ProjectDetailPage(): ReactNode {
     }
   }, [project?.id, setSelectedProjectId]);
 
-  if (!project) {
+  if (!projectId) {
+    return (
+      <PageShell title="Project" subtitle="">
+        <Panel title="Missing project" span={12}>
+          <EmptyState title="Project not selected" body="Open a project from the projects list." />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  if (projectResource.error) {
     return (
       <PageShell title="Project" subtitle={projectId}>
         <Panel title="Missing project" span={12}>
-          <EmptyState title="Project not found" body={`No project found for ${projectId}.`} />
+          <EmptyState title="Project not found" body={projectResource.error} />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  if (!project) {
+    return (
+      <PageShell title="Project" subtitle={projectId}>
+        <Panel title="Loading" span={12}>
+          <EmptyState title="Loading project" body="Fetching project metadata." />
         </Panel>
       </PageShell>
     );
@@ -292,6 +328,11 @@ function ProjectDetailPage(): ReactNode {
   const rules = Array.isArray(memory?.rules) ? memory.rules : [];
   const chunks = retrieval?.chunks ?? [];
   const graphSymbols = symbolsResponse?.symbols ?? [];
+  const symbolCount = typeof graphResponse?.symbolCount === "number"
+    ? graphResponse.symbolCount
+    : Array.isArray(symbolsResponse?.symbols)
+      ? symbolsResponse.symbols.length
+      : graphSymbols.length;
   const graphSummary = graphResponse?.graph ?? null;
   const graphRouteFiles = Array.isArray(graphSummary?.routeFiles) ? graphSummary.routeFiles : [];
   const graphMiddlewareFiles = Array.isArray(graphSummary?.middlewareFiles) ? graphSummary.middlewareFiles : [];
@@ -302,7 +343,10 @@ function ProjectDetailPage(): ReactNode {
     setIndexing(true);
     try {
       await api.indexProject(project.id);
-      resource.refresh();
+      graphResource.refresh();
+      symbolsResource.refresh();
+      retrievalResource.refresh();
+      memoryResource.refresh();
       sessionsResource.refresh();
     } finally {
       setIndexing(false);
@@ -320,36 +364,55 @@ function ProjectDetailPage(): ReactNode {
             ["Status", project.status],
             ["Files", project.fileCount],
             ["Chunks", project.chunkCount],
-            ["Symbols", graphSymbols.length],
+            ["Symbols", symbolCount],
           ]}
         />
       </Panel>
       <Panel title="Context Graph" span={6}>
-        <div className="stack">
-          <KeyValueList
-            items={[
-              ["Entrypoints", Array.isArray(graphSummary?.entrypoints) ? graphSummary.entrypoints.length : 0],
-              ["Routes", graphRouteFiles.slice(0, 3).join(", ") || "none"],
-              ["Middleware", graphMiddlewareFiles.slice(0, 3).join(", ") || "none"],
-              ["DB/Auth", [...graphDbFiles, ...graphAuthPaths].slice(0, 3).join(", ") || "none"],
-            ]}
+        {graphResource.error ? (
+          <EmptyState
+            title="Graph unavailable"
+            body={`Could not load context graph: ${graphResource.error}. Other panels will still render.`}
           />
-          {graphSymbols.length > 0 ? (
-            <div className="list">
-              {graphSymbols.slice(0, 6).map((symbol: { id: string; name: string; kind: string; path: string }) => (
-                <div className="list-item" key={symbol.id}>
-                  <div className="row">
-                    <strong>{symbol.name}</strong>
-                    <Badge>{symbol.kind}</Badge>
-                  </div>
-                  <div className="tiny">{symbol.path}</div>
+        ) : graphResource.loading && !graphResponse ? (
+          <EmptyState title="Loading graph" body="Fetching project context graph." />
+        ) : (
+          <div className="stack">
+            <KeyValueList
+              items={[
+                ["Entrypoints", Array.isArray(graphSummary?.entrypoints) ? graphSummary.entrypoints.length : 0],
+                ["Routes", graphRouteFiles.slice(0, 3).join(", ") || "none"],
+                ["Middleware", graphMiddlewareFiles.slice(0, 3).join(", ") || "none"],
+                ["DB/Auth", [...graphDbFiles, ...graphAuthPaths].slice(0, 3).join(", ") || "none"],
+              ]}
+            />
+            {graphSummary ? null : (
+              <EmptyState title="No context graph" body="Index the project to populate the context graph." />
+            )}
+          </div>
+        )}
+      </Panel>
+      <Panel title="Top Symbols" span={6}>
+        {symbolsResource.error ? (
+          <EmptyState
+            title="Symbols unavailable"
+            body={`Could not load top symbols: ${symbolsResource.error}. Other panels will still render.`}
+          />
+        ) : graphSymbols.length > 0 ? (
+          <div className="list">
+            {graphSymbols.slice(0, 6).map((symbol: { id: string; name: string; kind: string; path: string }) => (
+              <a className="list-item" href={`/symbols/${symbol.id}`} key={symbol.id}>
+                <div className="row">
+                  <strong>{symbol.name}</strong>
+                  <Badge>{symbol.kind}</Badge>
                 </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyState title="No symbols yet" body="Index the project to populate code intelligence." />
-          )}
-        </div>
+                <div className="tiny">{symbol.path}</div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No symbols yet" body="Index the project to populate code intelligence." />
+        )}
       </Panel>
       <Panel title="Actions" span={6}>
         <div className="stack">
@@ -359,9 +422,14 @@ function ProjectDetailPage(): ReactNode {
         </div>
       </Panel>
       <Panel title="Recent Chunks" span={8}>
-        <div className="list">
-          {chunks.length > 0 ? (
-            chunks.map((chunk) => (
+        {retrievalResource.error ? (
+          <EmptyState
+            title="Retrieval unavailable"
+            body={`Could not load retrieval preview: ${retrievalResource.error}. Other panels will still render.`}
+          />
+        ) : chunks.length > 0 ? (
+          <div className="list">
+            {chunks.map((chunk) => (
               <div className="list-item" key={chunk.id}>
                 <div className="row">
                   <strong>{chunk.path}</strong>
@@ -372,30 +440,40 @@ function ProjectDetailPage(): ReactNode {
                 </div>
                 <pre>{chunk.content.slice(0, 260)}</pre>
               </div>
-            ))
-          ) : (
-            <EmptyState title="No chunks yet" body="Index the project to populate retrieval data." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No chunks yet" body="Index the project to populate retrieval data." />
+        )}
       </Panel>
       <Panel title="Memory" span={4}>
-        <div className="list">
-          {[...lessons, ...rules].length > 0 ? (
-            [...lessons, ...rules].map((entry: any, index: number) => (
+        {memoryResource.error ? (
+          <EmptyState
+            title="Memory unavailable"
+            body={`Could not load memory: ${memoryResource.error}. Other panels will still render.`}
+          />
+        ) : [...lessons, ...rules].length > 0 ? (
+          <div className="list">
+            {[...lessons, ...rules].map((entry: any, index: number) => (
               <div className="list-item" key={`${String(entry?.title ?? entry?.id ?? index)}`}>
                 <strong>{entry?.title ?? entry?.id ?? "Memory"}</strong>
                 <div className="tiny">{entry?.body ?? entry?.source ?? ""}</div>
               </div>
-            ))
-          ) : (
-            <EmptyState title="No memory yet" body="Lessons and rules show up here after work happens." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No memory yet" body="Lessons and rules show up here after work happens." />
+        )}
       </Panel>
       <Panel title="Sessions" span={12}>
-        <div className="list">
-          {sessions.length > 0 ? (
-            sessions.map((session) => (
+        {sessionsResource.error ? (
+          <EmptyState
+            title="Sessions unavailable"
+            body={`Could not load sessions: ${sessionsResource.error}. Other panels will still render.`}
+          />
+        ) : sessions.length > 0 ? (
+          <div className="list">
+            {sessions.map((session) => (
               <a className="list-item" href={`/sessions/${session.id}`} key={session.id}>
                 <div className="row">
                   <div>
@@ -407,11 +485,11 @@ function ProjectDetailPage(): ReactNode {
                   <Badge>{session.status}</Badge>
                 </div>
               </a>
-            ))
-          ) : (
-            <EmptyState title="No sessions" body="Indexing or asking against this project will create traces." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No sessions" body="Indexing or asking against this project will create traces." />
+        )}
       </Panel>
     </PageShell>
   );
@@ -810,7 +888,15 @@ function timelineItemDetails(item: TimelineItem): Array<[string, ReactNode]> {
   }
 }
 
-export function SessionTimelinePanel({ timeline }: { timeline: SessionTimelineResponse | null }): ReactNode {
+export function SessionTimelinePanel({
+  timeline,
+  error,
+  onRetry,
+}: {
+  timeline: SessionTimelineResponse | null;
+  error?: string | null;
+  onRetry?: () => void;
+}): ReactNode {
   const items = getTimelineItems(timeline);
   const counts = getTimelineCounts(timeline);
 
@@ -822,7 +908,14 @@ export function SessionTimelinePanel({ timeline }: { timeline: SessionTimelineRe
             <Badge key={label}>{label}: {value}</Badge>
           ))}
         </div>
-        {items.length > 0 ? (
+        {error ? (
+          <EmptyState
+            title="Timeline unavailable"
+            body={`Could not load timeline: ${error}. Other panels will still render.`}
+            actionLabel={onRetry ? "Retry" : undefined}
+            onAction={onRetry}
+          />
+        ) : items.length > 0 ? (
           <div className="timeline">
             {items.map((item) => (
               <details className="timeline-item" key={item.id} open={false}>
@@ -866,15 +959,29 @@ export function SessionTimelinePanel({ timeline }: { timeline: SessionTimelineRe
 
 function SessionDetailPage(): ReactNode {
   const { sessionId = "" } = useParams();
-  const resource = useResource(
-    () => Promise.all([api.getSession(sessionId), api.getSessionEvents(sessionId), api.listTasks(), api.getSessionTrace(sessionId), api.getSessionTimeline(sessionId)]),
+  const sessionResource = useResource(
+    () => api.getSession(sessionId).then((response) => response.data),
     [sessionId],
   );
-  const session = resource.data?.[0].data ?? null;
-  const events = resource.data?.[1].data ?? [];
-  const tasks = resource.data?.[2].data.filter((task) => task.sessionId === sessionId) ?? [];
-  const trace = resource.data?.[3].data ?? null;
-  const timeline = resource.data?.[4].data ?? null;
+  const eventsResource = useResource(
+    () => api.getSessionEvents(sessionId).then((response) => response.data),
+    [sessionId],
+  );
+  const tasksResource = useResource(() => api.listTasks(), [sessionId]);
+  const traceResource = useResource(
+    () => api.getSessionTrace(sessionId).then((response) => response.data),
+    [sessionId],
+  );
+  const timelineResource = useResource(
+    () => api.getSessionTimeline(sessionId).then((response) => response.data),
+    [sessionId],
+  );
+
+  const session = sessionResource.data;
+  const events = eventsResource.data ?? [];
+  const tasks = (tasksResource.data?.data ?? []).filter((task) => task.sessionId === sessionId);
+  const trace = traceResource.data ?? null;
+  const timeline = timelineResource.data ?? null;
   const compiledPrompts = Array.isArray(trace?.compiledPrompts)
     ? (trace.compiledPrompts as Array<{
         id: string;
@@ -905,11 +1012,31 @@ function SessionDetailPage(): ReactNode {
       }>)
     : [];
 
-  if (!session) {
+  if (!sessionId) {
+    return (
+      <PageShell title="Session" subtitle="">
+        <Panel title="Missing session" span={12}>
+          <EmptyState title="Session not selected" body="Open a session from the sessions list." />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  if (sessionResource.error) {
     return (
       <PageShell title="Session" subtitle={sessionId}>
         <Panel title="Missing session" span={12}>
-          <EmptyState title="Session not found" body={`No session found for ${sessionId}.`} />
+          <EmptyState title="Session not found" body={sessionResource.error} />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  if (!session) {
+    return (
+      <PageShell title="Session" subtitle={sessionId}>
+        <Panel title="Loading" span={12}>
+          <EmptyState title="Loading session" body="Fetching session metadata." />
         </Panel>
       </PageShell>
     );
@@ -933,9 +1060,14 @@ function SessionDetailPage(): ReactNode {
         <pre>{session.finalSummary ?? "No final summary yet."}</pre>
       </Panel>
       <Panel title="Tasks" span={12}>
-        <div className="list">
-          {tasks.length > 0 ? (
-            tasks.map((task) => (
+        {tasksResource.error ? (
+          <EmptyState
+            title="Tasks unavailable"
+            body={`Could not load tasks: ${tasksResource.error}. Other panels will still render.`}
+          />
+        ) : tasks.length > 0 ? (
+          <div className="list">
+            {tasks.map((task) => (
               <a className="list-item" href={`/tasks/${task.id}`} key={task.id}>
                 <div className="row">
                   <strong>{task.title}</strong>
@@ -945,16 +1077,21 @@ function SessionDetailPage(): ReactNode {
                   {task.type} · {task.risk}
                 </div>
               </a>
-            ))
-          ) : (
-            <EmptyState title="No tasks yet" body="Plan generation and worker jobs create task records here." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No tasks yet" body="Plan generation and worker jobs create task records here." />
+        )}
       </Panel>
       <Panel title="Events" span={12}>
-        <div className="list">
-          {events.length > 0 ? (
-            events.map((event) => (
+        {eventsResource.error ? (
+          <EmptyState
+            title="Events unavailable"
+            body={`Could not load events: ${eventsResource.error}. Other panels will still render.`}
+          />
+        ) : events.length > 0 ? (
+          <div className="list">
+            {events.map((event) => (
               <div className="list-item" key={event.id}>
                 <div className="row">
                   <strong>{event.type}</strong>
@@ -962,17 +1099,26 @@ function SessionDetailPage(): ReactNode {
                 </div>
                 <div className="tiny">{JSON.stringify(event.payload ?? {})}</div>
               </div>
-            ))
-          ) : (
-            <EmptyState title="No events yet" body="Session events will stream here once work begins." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No events yet" body="Session events will stream here once work begins." />
+        )}
       </Panel>
-      <SessionTimelinePanel timeline={timeline} />
+      <SessionTimelinePanel
+        timeline={timeline}
+        error={timelineResource.error}
+        onRetry={() => timelineResource.refresh()}
+      />
       <Panel title="Compiled Prompts" span={12}>
-        <div className="list">
-          {compiledPrompts.length > 0 ? (
-            compiledPrompts.map((prompt) => (
+        {traceResource.error ? (
+          <EmptyState
+            title="Compiled prompts unavailable"
+            body={`Could not load compiled prompts: ${traceResource.error}. Other panels will still render.`}
+          />
+        ) : compiledPrompts.length > 0 ? (
+          <div className="list">
+            {compiledPrompts.map((prompt) => (
               <a className="list-item" href={`/prompts/${prompt.id}`} key={prompt.id}>
                 <div className="row">
                   <strong>{prompt.mode}</strong>
@@ -982,19 +1128,24 @@ function SessionDetailPage(): ReactNode {
                   {prompt.id} · {prompt.estimatedTokens} tokens
                 </div>
               </a>
-            ))
-          ) : (
-            <EmptyState title="No compiled prompts" body="Ask or plan with a live trace to create prompt records." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No compiled prompts" body="Ask or plan with a live trace to create prompt records." />
+        )}
         <div className="tiny">
           <a href={`/prompts?sessionId=${encodeURIComponent(session.id)}`}>Open full prompt trace</a>
         </div>
       </Panel>
       <Panel title="Model Calls" span={6}>
-        <div className="list">
-          {modelCalls.length > 0 ? (
-            modelCalls.map((call) => (
+        {traceResource.error ? (
+          <EmptyState
+            title="Model calls unavailable"
+            body={`Could not load model calls: ${traceResource.error}. Other panels will still render.`}
+          />
+        ) : modelCalls.length > 0 ? (
+          <div className="list">
+            {modelCalls.map((call) => (
               <div className="list-item" key={call.id}>
                 <div className="row">
                   <strong>{call.role ?? "model"}</strong>
@@ -1004,30 +1155,44 @@ function SessionDetailPage(): ReactNode {
                   {call.profileId ?? "unknown profile"} · {call.promptTokens ?? 0}/{call.completionTokens ?? 0} tokens · {call.latencyMs ?? 0} ms
                 </div>
               </div>
-            ))
-          ) : (
-            <EmptyState title="No model calls" body="The API trace will surface model call records here." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No model calls" body="The API trace will surface model call records here." />
+        )}
       </Panel>
       <Panel title="Retrieval Queries" span={6}>
-        <div className="list">
-          {retrievalQueries.length > 0 ? (
-            retrievalQueries.map((query) => (
-              <div className="list-item" key={query.id}>
+        {traceResource.error ? (
+          <EmptyState
+            title="Retrieval queries unavailable"
+            body={`Could not load retrieval queries: ${traceResource.error}. Other panels will still render.`}
+          />
+        ) : retrievalQueries.length > 0 ? (
+          <div className="list">
+            {retrievalQueries.map((query) => (
+              <a className="list-item" href={`/retrieval/queries/${query.id}`} key={query.id}>
                 <strong>{query.originalQuery ?? query.id}</strong>
                 <div className="tiny">
                   {query.rewrittenQuery ?? "no rewrite"} · {query.intent ?? "unknown"} · {query.depth ?? "unknown"}
                 </div>
-              </div>
-            ))
-          ) : (
-            <EmptyState title="No retrieval queries" body="Queries will appear once the session runs retrieval." />
-          )}
-        </div>
+              </a>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No retrieval queries" body="Queries will appear once the session runs retrieval." />
+        )}
       </Panel>
       <Panel title="Conversation Replay" span={12}>
-        {trace ? <pre>{JSON.stringify(trace.messages ?? [], null, 2).slice(0, 1200)}</pre> : <EmptyState title="No trace" body="The session trace will appear once the API returns replay data." />}
+        {traceResource.error ? (
+          <EmptyState
+            title="Trace unavailable"
+            body={`Could not load trace: ${traceResource.error}. Other panels will still render.`}
+          />
+        ) : trace ? (
+          <pre>{JSON.stringify(trace.messages ?? [], null, 2).slice(0, 1200)}</pre>
+        ) : (
+          <EmptyState title="No trace" body="The session trace will appear once the API returns replay data." />
+        )}
       </Panel>
     </PageShell>
   );
