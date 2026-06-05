@@ -11,14 +11,36 @@ export const EMPTY_SESSION_TIMELINE_COUNTS: SessionTimelineResponse["counts"] = 
   outcomes: 0,
 };
 
+function computeTimelineLink(item: TimelineItem): string | undefined {
+  const refs = item.refs ?? {};
+  switch (item.kind) {
+    case "compiled_prompt":
+      return refs.promptId ? `/prompts/${refs.promptId}` : undefined;
+    case "retrieval_query":
+      return refs.queryId ? `/retrieval/queries/${refs.queryId}` : undefined;
+    case "model_call":
+      return refs.callId ? `/models/calls/${refs.callId}` : undefined;
+    case "context_pack":
+      return refs.packId ? `/context/${refs.packId}` : undefined;
+    case "agent_run":
+      return refs.runId ? `/agent-runs/${refs.runId}` : undefined;
+    case "eval":
+      return refs.outcomeId ? `/evals/${refs.outcomeId}` : undefined;
+    default:
+      return undefined;
+  }
+}
+
 export function getTimelineItems(timeline: SessionTimelineResponse | null | undefined): TimelineItem[] {
-  if (Array.isArray(timeline?.timeline)) {
-    return [...timeline.timeline] as TimelineItem[];
-  }
-  if (Array.isArray(timeline?.items)) {
-    return [...timeline.items] as TimelineItem[];
-  }
-  return [];
+  const raw: TimelineItem[] = Array.isArray(timeline?.timeline)
+    ? [...timeline.timeline]
+    : Array.isArray(timeline?.items)
+      ? [...timeline.items]
+      : [];
+  return raw.map((item) => ({
+    ...item,
+    link: item.link ?? computeTimelineLink(item),
+  }));
 }
 
 export function getTimelineCounts(timeline: SessionTimelineResponse | null | undefined): SessionTimelineResponse["counts"] {

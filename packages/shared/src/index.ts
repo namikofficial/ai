@@ -316,6 +316,7 @@ export interface TimelineItem {
   summary: string;
   refs: Record<string, string | null>;
   payload: unknown;
+  link?: string;
 }
 
 export interface SessionTimelineCounts {
