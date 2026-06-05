@@ -195,6 +195,7 @@ test("runPromptLab preserves provider baseUrl and apiKeyEnv and records successf
   const recordCalls: Array<Parameters<ModelCallRecordedHook>[0]> = [];
   try {
     const result = await runPromptLab(makeStore({
+      compiledPrompt: { ...makeCompiledPrompt(JSON.stringify([{ role: "user", content: "hello" }])), sessionId: "session-1" },
       providers: [makeProvider({ baseUrl: `http://127.0.0.1:${getServerPort(server)}`, apiKeyEnv: "PROMPT_LAB_TEST_API_KEY" })],
       profiles: [makeProfile("provider-1")],
     }), {
@@ -209,6 +210,7 @@ test("runPromptLab preserves provider baseUrl and apiKeyEnv and records successf
     assert.equal(requests[0]?.url, "/v1/chat/completions");
     assert.equal(requests[0]?.authorization, "Bearer secret-key");
     assert.equal(recordCalls.length, 1);
+    assert.equal(recordCalls[0]?.sessionId, "session-1");
     assert.deepEqual(recordCalls[0]?.request.metadata, { source: "prompt-lab", promptId: "prompt-1", runId: result.run.id });
   } finally {
     if (previousApiKey === undefined) delete process.env.PROMPT_LAB_TEST_API_KEY;

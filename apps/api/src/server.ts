@@ -2023,16 +2023,11 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = String(body.projectId ?? body.project ?? "");
         const promptId = String(body.promptId ?? body.prompt ?? "");
-        const selectedProfiles = Array.from(
-          new Set(
-            (Array.isArray(body.modelProfileIds)
-              ? body.modelProfileIds.map((s: unknown) => String(s).trim()).filter(Boolean)
-              : Array.isArray(body.modelProfiles)
-                ? body.modelProfiles.map((s: unknown) => String(s).trim()).filter(Boolean)
-                : []
-            )
-          )
-        );
+        const selectedProfiles = Array.isArray(body.modelProfileIds)
+          ? body.modelProfileIds
+          : Array.isArray(body.modelProfiles)
+            ? body.modelProfiles
+            : [];
         const notes = typeof body.notes === "string" ? body.notes : null;
         const dryRun = body.dryRun === true || body.dryRun === "true";
         try {

@@ -254,6 +254,9 @@ export async function runPromptLab(
           promptId,
           runId,
         },
+      }, {
+        sessionId: prompt.sessionId ?? null,
+        recordCall: options.recordModelCall ?? store.recordModelCall,
       });
       const result = createPromptLabResult(store, {
         id: createId("plres"),
