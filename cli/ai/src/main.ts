@@ -580,11 +580,7 @@ async function run(): Promise<void> {
   }
 
   if (command === "status") {
-    const settings = await client.getSettings();
-    const projects = await client.listProjects();
-    const sessions = await client.listSessions();
-    const checks = await client.listChecks();
-    printJson({ settings, projects, sessions, checks });
+    printJson(await client.status());
     return;
   }
 

@@ -1,6 +1,12 @@
-import type { CompiledPromptRecord, ModelProfileRecord, ModelProviderKind, PromptLabResultRecord, PromptLabRunRecord } from "../../shared/src/index.ts";
+import type {
+  CompiledPromptRecord,
+  ModelProfileRecord,
+  ModelProviderRecord,
+  PromptLabResultRecord,
+  PromptLabRunRecord,
+} from "../../shared/src/index.ts";
 import { createId } from "../../shared/src/index.ts";
-import { createModelRuntime, type ModelInvokeMessage, type ModelRuntime } from "../../model-runtime/src/index.ts";
+import { createModelRuntime, type ModelCallRecordedHook, type ModelInvokeMessage, type ModelRuntime } from "../../model-runtime/src/index.ts";
 
 export type PromptLabRunStatus = "ok" | "failed" | "blocked" | "fallback";
 
@@ -35,7 +41,8 @@ export interface PromptLabEngineStore {
   }): PromptLabResultRecord;
   getProfile(id: string): ModelProfileRecord | null;
   listProfiles(): ModelProfileRecord[];
-  listProviders(): Array<{ id: string; kind: ModelProviderKind; enabled: boolean }>;
+  listProviders(): Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
+  recordModelCall?: ModelCallRecordedHook;
 }
 
 export interface PromptLabEngineInput {
@@ -48,6 +55,7 @@ export interface PromptLabEngineInput {
 
 export interface PromptLabEngineOptions {
   cloudEnabled: boolean;
+  recordModelCall?: ModelCallRecordedHook;
 }
 
 export interface PromptLabEngineResult {
@@ -75,18 +83,59 @@ function validateMessages(messagesJson: string): { ok: true; messages: ModelInvo
   return { ok: true, messages: parsed as ModelInvokeMessage[] };
 }
 
-function buildRuntime(store: PromptLabEngineStore, cloudEnabled: boolean): ModelRuntime {
+export function normalizeProfileIds(input: unknown[]): string[] {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const value of input) {
+    const profileId = String(value).trim();
+    if (!profileId || seen.has(profileId)) continue;
+    seen.add(profileId);
+    normalized.push(profileId);
+  }
+  return normalized;
+}
+
+function buildRuntime(store: PromptLabEngineStore, options: PromptLabEngineOptions): ModelRuntime {
   return createModelRuntime({
-    providers: store.listProviders().map((provider) => ({
-      id: provider.id,
-      kind: provider.kind,
-      displayName: "",
-      baseUrl: null,
-      apiKeyEnv: null,
-      enabled: provider.enabled,
-    })),
+    providers: store.listProviders(),
     profiles: store.listProfiles(),
-    cloudEnabled,
+    cloudEnabled: options.cloudEnabled,
+    recordCall: options.recordModelCall ?? store.recordModelCall,
+  });
+}
+
+function createPromptLabResult(
+  store: PromptLabEngineStore,
+  input: {
+    id: string;
+    runId: string;
+    profileId: string;
+    profileName: string;
+    modelName: string;
+    status: string;
+    promptTokens: number;
+    completionTokens: number;
+    latencyMs: number;
+    outputText?: string | null;
+    error?: string | null;
+    approxCost?: number | null;
+    createdAt: string;
+  },
+): PromptLabResultRecord {
+  return store.createResult({
+    id: input.id,
+    runId: input.runId,
+    profileId: input.profileId,
+    profileName: input.profileName,
+    modelName: input.modelName,
+    status: input.status,
+    promptTokens: input.promptTokens,
+    completionTokens: input.completionTokens,
+    latencyMs: input.latencyMs,
+    outputText: input.outputText ?? null,
+    error: input.error ?? null,
+    approxCost: input.approxCost ?? null,
+    createdAt: input.createdAt,
   });
 }
 
@@ -95,8 +144,9 @@ export async function runPromptLab(
   input: PromptLabEngineInput,
   options: PromptLabEngineOptions,
 ): Promise<PromptLabEngineResult> {
-  const { projectId, promptId, selectedProfiles, notes, dryRun } = input;
+  const { projectId, promptId, notes, dryRun } = input;
   const { cloudEnabled } = options;
+  const selectedProfiles = normalizeProfileIds(input.selectedProfiles);
 
   if (!projectId || !promptId || selectedProfiles.length === 0) {
     throw Object.assign(new Error("projectId, promptId, and modelProfileIds are required"), { statusCode: 400 });
@@ -134,7 +184,7 @@ export async function runPromptLab(
     updatedAt: ts,
   });
 
-  const runtime = buildRuntime(store, cloudEnabled);
+  const runtime = buildRuntime(store, options);
   const promptPayload = {
     messages: validation.messages,
     modelName: null as string | null,
@@ -144,7 +194,7 @@ export async function runPromptLab(
   for (const profileId of selectedProfiles) {
     const profile = store.getProfile(profileId);
     if (!profile) {
-      const result = store.createResult({
+      const result = createPromptLabResult(store, {
         id: createId("plres"),
         runId,
         profileId,
@@ -154,16 +204,14 @@ export async function runPromptLab(
         promptTokens: 0,
         completionTokens: 0,
         latencyMs: 0,
-        outputText: null,
         error: "unknown profile",
-        approxCost: null,
         createdAt: ts,
       });
       results.push(result);
       continue;
     }
     if (dryRun) {
-      const result = store.createResult({
+      const result = createPromptLabResult(store, {
         id: createId("plres"),
         runId,
         profileId: profile.id,
@@ -173,9 +221,7 @@ export async function runPromptLab(
         promptTokens: 0,
         completionTokens: 0,
         latencyMs: 0,
-        outputText: null,
         error: "dry run",
-        approxCost: null,
         createdAt: ts,
       });
       results.push(result);
@@ -183,7 +229,7 @@ export async function runPromptLab(
     }
     const provider = store.listProviders().find((item) => item.id === profile.providerId) ?? null;
     if (provider && /cloud_openai_compat/i.test(provider.kind) && !cloudEnabled) {
-      const result = store.createResult({
+      const result = createPromptLabResult(store, {
         id: createId("plres"),
         runId,
         profileId: profile.id,
@@ -193,9 +239,7 @@ export async function runPromptLab(
         promptTokens: 0,
         completionTokens: 0,
         latencyMs: 0,
-        outputText: null,
         error: "cloud disabled",
-        approxCost: null,
         createdAt: ts,
       });
       results.push(result);
@@ -211,7 +255,7 @@ export async function runPromptLab(
           runId,
         },
       });
-      const result = store.createResult({
+      const result = createPromptLabResult(store, {
         id: createId("plres"),
         runId,
         profileId: profile.id,
@@ -222,13 +266,11 @@ export async function runPromptLab(
         completionTokens: invocation.completionTokens,
         latencyMs: invocation.latencyMs,
         outputText: invocation.text,
-        error: null,
-        approxCost: null,
         createdAt: ts,
       });
       results.push(result);
     } catch (error) {
-      const result = store.createResult({
+      const result = createPromptLabResult(store, {
         id: createId("plres"),
         runId,
         profileId: profile.id,
@@ -238,9 +280,7 @@ export async function runPromptLab(
         promptTokens: 0,
         completionTokens: 0,
         latencyMs: 0,
-        outputText: null,
         error: error instanceof Error ? error.message : String(error),
-        approxCost: null,
         createdAt: ts,
       });
       results.push(result);

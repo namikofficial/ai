@@ -16,7 +16,7 @@ test("startWorkbenchServer wires the intelligence stack by default", async () =>
   });
   await mkdir(config.runtimeDir, { recursive: true });
 
-  const handle = await startWorkbenchServer({ config });
+  const handle = await startWorkbenchServer({ config, inProcess: true });
   try {
     const inject = await handle.inject({
       method: "GET",
@@ -50,7 +50,7 @@ test("API /retrieval/explain uses the full pipeline", async () => {
   await store.indexProject(project.id);
   store.db.close();
 
-  const handle = await startWorkbenchServer({ config });
+  const handle = await startWorkbenchServer({ config, inProcess: true });
   try {
     const inject = await handle.inject({
       method: "POST",
@@ -87,6 +87,7 @@ test("startWorkbenchServer respects an explicit intelligence stack override", as
   });
   const handle = await startWorkbenchServer({
     config,
+    inProcess: true,
     intelligenceStack: { runtime, providers: [], profiles: [] },
   });
   try {
@@ -118,7 +119,7 @@ test("API POST /reviews enqueues a review.reflect worker job", async () => {
   const project = store.createProject({ path: repo, name: "repo" });
   store.db.close();
 
-  const handle = await startWorkbenchServer({ config });
+  const handle = await startWorkbenchServer({ config, inProcess: true });
   try {
     const inject = await handle.inject({
       method: "POST",
@@ -151,4 +152,3 @@ test("API POST /reviews enqueues a review.reflect worker job", async () => {
   }
   await rm(workspace, { recursive: true, force: true });
 });
-

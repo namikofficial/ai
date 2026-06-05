@@ -26,7 +26,7 @@ import { resolveConfig, resolveProjectConfig } from "../../../packages/config/sr
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 import type { ProjectContextGraph } from "../../../packages/code-intelligence/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
-import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import { createModelRuntime, type ModelCallRecordedHook, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import { runAskWorkflow } from "../../../packages/ask-engine/src/index.ts";
 import { runPromptLab } from "../../../packages/prompt-lab-engine/src/index.ts";
 import type { ModelProviderRecord, ModelProfileRecord } from "../../../packages/shared/src/index.ts";
@@ -2050,7 +2050,10 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             getProfile(id: string) { return store.models.getProfile(id); },
             listProfiles() { return store.models.listProfiles(); },
             listProviders() { return store.models.listProviders(); },
-          }, { projectId, promptId, selectedProfiles, notes, dryRun }, { cloudEnabled: config.cloudEnabled });
+          }, { projectId, promptId, selectedProfiles, notes, dryRun }, {
+            cloudEnabled: config.cloudEnabled,
+            recordModelCall(input: Parameters<ModelCallRecordedHook>[0]) { return store.models.recordCall(input); },
+          });
           sendJson(res, json("ok", engineResult));
         } catch (error) {
           const statusCode = (error as Error & { statusCode?: number }).statusCode ?? 500;
