@@ -328,12 +328,12 @@ function ProjectDetailPage(): ReactNode {
   const rules = Array.isArray(memory?.rules) ? memory.rules : [];
   const chunks = retrieval?.chunks ?? [];
   const graphSymbols = symbolsResponse?.symbols ?? [];
-  const symbolCount = typeof graphResponse?.symbolCount === "number"
-    ? graphResponse.symbolCount
+  const graphSummary = graphResponse?.graph ?? null;
+  const symbolCount = typeof graphSummary?.symbolCount === "number"
+    ? graphSummary.symbolCount
     : Array.isArray(symbolsResponse?.symbols)
       ? symbolsResponse.symbols.length
       : graphSymbols.length;
-  const graphSummary = graphResponse?.graph ?? null;
   const graphRouteFiles = Array.isArray(graphSummary?.routeFiles) ? graphSummary.routeFiles : [];
   const graphMiddlewareFiles = Array.isArray(graphSummary?.middlewareFiles) ? graphSummary.middlewareFiles : [];
   const graphDbFiles = Array.isArray(graphSummary?.dbFiles) ? graphSummary.dbFiles : [];
@@ -604,6 +604,7 @@ function PromptLabPage(): ReactNode {
     prompt: Record<string, unknown> | null;
     results: PromptLabResultRecord[];
   } | null>(null);
+  const [running, setRunning] = useState(false);
 
   useEffect(() => {
     if (!projectId && projects[0]?.id) setProjectId(projects[0].id);
@@ -622,16 +623,24 @@ function PromptLabPage(): ReactNode {
     );
   };
 
+  const canSubmit = projectId && promptId && selectedProfiles.length > 0 && !running;
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const response = await api.runPromptLab({
-      projectId,
-      promptId,
-      modelProfileIds: selectedProfiles,
-      notes: notes || null,
-    });
-    setResult(response.data);
-    resource.refresh();
+    if (!canSubmit) return;
+    setRunning(true);
+    try {
+      const response = await api.runPromptLab({
+        projectId,
+        promptId,
+        modelProfileIds: selectedProfiles,
+        notes: notes || null,
+      });
+      setResult(response.data);
+      resource.refresh();
+    } finally {
+      setRunning(false);
+    }
   };
 
   return (
@@ -647,27 +656,32 @@ function PromptLabPage(): ReactNode {
           <input value={notes} onChange={(event) => setNotes(event.currentTarget.value)} placeholder="comparison notes" />
           <div className="stack">
             {profiles.length > 0 ? (
-              profiles.slice(0, 6).map((profile) => {
-                const id = String(profile.id);
-                const checked = selectedProfiles.includes(id);
-                return (
-                  <label className="list-item" key={id}>
-                    <div className="row">
-                      <strong>{String(profile.displayName ?? profile.modelName ?? id)}</strong>
-                      <input type="checkbox" checked={checked} onChange={() => toggleProfile(id)} />
-                    </div>
-                    <div className="tiny">
-                      {String(profile.role ?? "?")} · {String(profile.providerId ?? "provider")} · {String(profile.modelName ?? id)}
-                    </div>
-                  </label>
-                );
-              })
+              <>
+                {profiles.length > 3 ? (
+                  <div className="tiny">Select up to 3 profiles for comparison.</div>
+                ) : null}
+                {profiles.slice(0, 6).map((profile) => {
+                  const id = String(profile.id);
+                  const checked = selectedProfiles.includes(id);
+                  return (
+                    <label className="list-item" key={id}>
+                      <div className="row">
+                        <strong>{String(profile.displayName ?? profile.modelName ?? id)}</strong>
+                        <input type="checkbox" checked={checked} onChange={() => toggleProfile(id)} />
+                      </div>
+                      <div className="tiny">
+                        {String(profile.role ?? "?")} · {String(profile.providerId ?? "provider")} · {String(profile.modelName ?? id)}
+                      </div>
+                    </label>
+                  );
+                })}
+              </>
             ) : (
               <EmptyState title="No model profiles" body="Register model profiles before running prompt lab comparisons." />
             )}
           </div>
-          <button type="submit" disabled={selectedProfiles.length === 0}>
-            Run comparison
+          <button type="submit" disabled={!canSubmit}>
+            {running ? "Running..." : "Run comparison"}
           </button>
         </form>
       </Panel>
@@ -926,7 +940,11 @@ export function SessionTimelinePanel({
                   </div>
                   <div className="timeline-main">
                     <div className="row">
-                      <strong>{item.title}</strong>
+                      {item.link ? (
+                        <a href={item.link}><strong>{item.title}</strong></a>
+                      ) : (
+                        <strong>{item.title}</strong>
+                      )}
                       <div className="row">
                         <Badge tone={item.kind === "model_call" ? "good" : item.kind === "retrieval_query" ? "warn" : item.kind === "eval" && item.status === "failed" ? "bad" : "neutral"}>
                           {item.kind}
