@@ -77,10 +77,29 @@ export function createApiClient(options: ApiClientOptions) {
     getProject(projectId: string): Promise<{ status: "ok"; data: ProjectSummary | null }> {
       return requestJson(options.baseUrl, `/projects/${projectId}`);
     },
-    getProjectGraph(projectId: string): Promise<{ status: "ok"; data: { project: ProjectSummary; config: Record<string, unknown>; graph: ProjectContextGraph | null; symbols: CodeSymbolRecord[]; edges: CodeEdgeRecord[] } }> {
+    getProjectGraph(projectId: string): Promise<{
+      status: "ok";
+      data: {
+        project: ProjectSummary;
+        config: Record<string, unknown>;
+        graph: ProjectContextGraph | null;
+        counts: {
+          symbols: number;
+          edges: number;
+          routeFiles: number;
+          middlewareFiles: number;
+          dbFiles: number;
+          authPaths: number;
+        };
+        topSymbols: CodeSymbolRecord[];
+        topEdges: CodeEdgeRecord[];
+        symbols: CodeSymbolRecord[];
+        edges: CodeEdgeRecord[];
+      };
+    }> {
       return requestJson(options.baseUrl, `/projects/${projectId}/graph`);
     },
-    listProjectSymbols(projectId: string, input?: { query?: string | null; limit?: number }): Promise<{ status: "ok"; data: { project: ProjectSummary; symbols: CodeSymbolRecord[]; query: string | null; limit: number } }> {
+    listProjectSymbols(projectId: string, input?: { query?: string | null; limit?: number }): Promise<{ status: "ok"; data: { project: ProjectSummary; symbols: CodeSymbolRecord[]; query: string | null; limit: number; total: number } }> {
       const params = new URLSearchParams();
       if (input?.query !== undefined && input?.query !== null) params.set("query", input.query);
       if (input?.limit !== undefined && input?.limit !== null) params.set("limit", String(input.limit));

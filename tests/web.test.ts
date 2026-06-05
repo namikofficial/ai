@@ -96,3 +96,73 @@ test("session timeline helper handles empty timeline data safely", () => {
   assert.deepEqual(getTimelineItems(null), []);
   assert.deepEqual(getTimelineCounts(null), EMPTY_SESSION_TIMELINE_COUNTS);
 });
+
+test("timeline link generation produces correct links and avoids broken links", () => {
+  const items = getTimelineItems({
+    session: {} as any,
+    counts: EMPTY_SESSION_TIMELINE_COUNTS,
+    items: [
+      {
+        id: "1",
+        ts: "2026-01-01T00:00:00.000Z",
+        kind: "compiled_prompt",
+        title: "Prompt",
+        summary: "Compiled prompt summary",
+        refs: { promptId: "prompt-1" },
+        payload: {},
+      },
+      {
+        id: "2",
+        ts: "2026-01-01T00:00:01.000Z",
+        kind: "retrieval_query",
+        title: "Retrieval",
+        summary: "Retrieval query summary",
+        refs: { queryId: "query-1" },
+        payload: {},
+      },
+      {
+        id: "3",
+        ts: "2026-01-01T00:00:02.000Z",
+        kind: "agent_run",
+        title: "Agent Run",
+        summary: "Agent run summary",
+        refs: { runId: "run-1" },
+        payload: {},
+      },
+      {
+        id: "4",
+        ts: "2026-01-01T00:00:03.000Z",
+        kind: "model_call",
+        title: "Model Call",
+        summary: "Model call summary",
+        refs: { callId: "call-1" },
+        payload: {},
+      },
+      {
+        id: "5",
+        ts: "2026-01-01T00:00:04.000Z",
+        kind: "context_pack",
+        title: "Context Pack",
+        summary: "Context pack summary",
+        refs: { packId: "pack-1" },
+        payload: {},
+      },
+      {
+        id: "6",
+        ts: "2026-01-01T00:00:05.000Z",
+        kind: "eval",
+        title: "Outcome",
+        summary: "Outcome summary",
+        refs: { outcomeId: "outcome-1" },
+        payload: {},
+      },
+    ],
+  } as any);
+
+  assert.equal(items[0]?.link, "/prompts/prompt-1");
+  assert.equal(items[1]?.link, "/retrieval/queries/query-1");
+  assert.equal(items[2]?.link, "/agents/runs/run-1");
+  assert.equal(items[3]?.link, undefined);
+  assert.equal(items[4]?.link, undefined);
+  assert.equal(items[5]?.link, undefined);
+});

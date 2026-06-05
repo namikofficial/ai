@@ -227,6 +227,12 @@ export function createCodeIntelligenceRepo(db: DatabaseSync) {
         .all(symbolId, symbolId) as CodeEdgeRow[];
       return rows.map(rowToEdge);
     },
+    listEdges(projectId: string, limit = 50): CodeEdgeRecord[] {
+      const rows = db
+        .prepare("SELECT * FROM code_edges WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
+        .all(projectId, limit) as CodeEdgeRow[];
+      return rows.map(rowToEdge);
+    },
   };
 }
 

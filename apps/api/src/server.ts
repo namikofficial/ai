@@ -1455,14 +1455,33 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             sendJson(res, json("error", undefined, { message: "project not found" }), 404);
             return;
           }
+          const graph = readProjectGraph(store, project.id);
+          const topSymbols = store.codeIntelligence.listSymbols(project.id, null, 20);
+          const topEdges = store.codeIntelligence.listEdges(project.id, 20);
+
+          const totalSymbolsRow = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number } | undefined;
+          const totalEdgesRow = store.db.prepare("SELECT COUNT(*) as count FROM code_edges WHERE project_id = ?").get(project.id) as { count: number } | undefined;
+
+          const counts = {
+            symbols: totalSymbolsRow?.count ?? 0,
+            edges: totalEdgesRow?.count ?? 0,
+            routeFiles: graph?.routeFiles?.length ?? 0,
+            middlewareFiles: graph?.middlewareFiles?.length ?? 0,
+            dbFiles: graph?.dbFiles?.length ?? 0,
+            authPaths: graph?.authPaths?.length ?? 0,
+          };
+
           sendJson(
             res,
             json("ok", {
               project,
               config: resolveProjectConfig(project.path),
-              graph: readProjectGraph(store, project.id),
-              symbols: store.db.prepare("SELECT * FROM code_symbols WHERE project_id = ? ORDER BY kind, path, start_line").all(project.id),
-              edges: store.db.prepare("SELECT * FROM code_edges WHERE project_id = ? ORDER BY created_at DESC").all(project.id),
+              graph,
+              counts,
+              topSymbols,
+              topEdges,
+              symbols: topSymbols,
+              edges: topEdges,
             }),
           );
           return;
@@ -2096,7 +2115,16 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         const notes = typeof body.notes === "string" ? body.notes : null;
         const dryRun = body.dryRun === true || body.dryRun === "true";
         if (!projectId || !promptId || selectedProfiles.length === 0) {
-          sendJson(res, json("error", undefined, { message: "projectId, promptId, and modelProfileIds are required" }));
+          sendJson(res, json("error", undefined, { message: "projectId, promptId, and modelProfileIds are required" }), 400);
+          return;
+        }
+        if (selectedProfiles.length > 3) {
+          sendJson(res, json("error", undefined, { message: "a maximum of 3 model profiles can be selected" }), 400);
+          return;
+        }
+        const project = store.getProject(projectId);
+        if (!project) {
+          sendJson(res, json("error", undefined, { message: "project not found" }), 404);
           return;
         }
         const prompt = store.getCompiledPrompt(promptId);

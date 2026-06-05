@@ -115,6 +115,37 @@ test("timeline, replay, and prompt lab endpoints are replayable and local-first"
       verifier.db.close();
     }
 
+    // 400: missing info
+    const promptLabBadRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: project.data.id,
+      modelProfileIds: [],
+    });
+    assert.equal(promptLabBadRes.statusCode, 400);
+
+    // 400: > 3 profiles
+    const promptLabTooManyRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: project.data.id,
+      promptId: prompts.data[0].id,
+      modelProfileIds: ["1", "2", "3", "4"],
+    });
+    assert.equal(promptLabTooManyRes.statusCode, 400);
+
+    // 404: unknown project
+    const promptLabUnknownProjectRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: "unknown-proj-123",
+      promptId: prompts.data[0].id,
+      modelProfileIds: ["ask-fast-local"],
+    });
+    assert.equal(promptLabUnknownProjectRes.statusCode, 404);
+
+    // 404: unknown prompt
+    const promptLabUnknownPromptRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: project.data.id,
+      promptId: "unknown-prompt-123",
+      modelProfileIds: ["ask-fast-local"],
+    });
+    assert.equal(promptLabUnknownPromptRes.statusCode, 404);
+
     const promptLabRes = await ctx.request("POST", "/prompt-lab/run", {
       projectId: project.data.id,
       promptId: prompts.data[0].id,

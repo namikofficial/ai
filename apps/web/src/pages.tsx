@@ -329,11 +329,15 @@ function ProjectDetailPage(): ReactNode {
   const chunks = retrieval?.chunks ?? [];
   const graphSymbols = symbolsResponse?.symbols ?? [];
   const graphSummary = graphResponse?.graph ?? null;
-  const symbolCount = typeof graphSummary?.symbolCount === "number"
-    ? graphSummary.symbolCount
-    : Array.isArray(symbolsResponse?.symbols)
-      ? symbolsResponse.symbols.length
-      : graphSymbols.length;
+  const symbolCount = typeof graphResponse?.counts?.symbols === "number"
+    ? graphResponse.counts.symbols
+    : typeof graphSummary?.symbolCount === "number"
+      ? graphSummary.symbolCount
+      : typeof symbolsResponse?.total === "number"
+        ? symbolsResponse.total
+        : Array.isArray(symbolsResponse?.symbols)
+          ? symbolsResponse.symbols.length
+          : graphSymbols.length;
   const graphRouteFiles = Array.isArray(graphSummary?.routeFiles) ? graphSummary.routeFiles : [];
   const graphMiddlewareFiles = Array.isArray(graphSummary?.middlewareFiles) ? graphSummary.middlewareFiles : [];
   const graphDbFiles = Array.isArray(graphSummary?.dbFiles) ? graphSummary.dbFiles : [];
@@ -400,7 +404,7 @@ function ProjectDetailPage(): ReactNode {
           />
         ) : graphSymbols.length > 0 ? (
           <div className="list">
-            {graphSymbols.slice(0, 6).map((symbol: { id: string; name: string; kind: string; path: string }) => (
+            {graphSymbols.slice(0, 10).map((symbol: { id: string; name: string; kind: string; path: string }) => (
               <a className="list-item" href={`/symbols/${symbol.id}`} key={symbol.id}>
                 <div className="row">
                   <strong>{symbol.name}</strong>
@@ -605,6 +609,7 @@ function PromptLabPage(): ReactNode {
     results: PromptLabResultRecord[];
   } | null>(null);
   const [running, setRunning] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!projectId && projects[0]?.id) setProjectId(projects[0].id);
@@ -629,6 +634,7 @@ function PromptLabPage(): ReactNode {
     event.preventDefault();
     if (!canSubmit) return;
     setRunning(true);
+    setRunError(null);
     try {
       const response = await api.runPromptLab({
         projectId,
@@ -638,6 +644,8 @@ function PromptLabPage(): ReactNode {
       });
       setResult(response.data);
       resource.refresh();
+    } catch (err: any) {
+      setRunError(err?.message ?? String(err));
     } finally {
       setRunning(false);
     }
@@ -686,7 +694,11 @@ function PromptLabPage(): ReactNode {
         </form>
       </Panel>
       <Panel title="Results" span={6}>
-        {result ? (
+        {runError ? (
+          <div className="panel-error" style={{ color: "var(--color-error, red)", padding: "1rem" }}>
+            Could not run Prompt Lab: {runError}
+          </div>
+        ) : result ? (
           <div className="list">
             {result.results.map((entry) => (
               <div className="list-item" key={entry.id}>

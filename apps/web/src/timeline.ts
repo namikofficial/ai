@@ -19,13 +19,13 @@ function computeTimelineLink(item: TimelineItem): string | undefined {
     case "retrieval_query":
       return refs.queryId ? `/retrieval/queries/${refs.queryId}` : undefined;
     case "model_call":
-      return refs.callId ? `/models/calls/${refs.callId}` : undefined;
+      return undefined;
     case "context_pack":
-      return refs.packId ? `/context/${refs.packId}` : undefined;
+      return undefined;
     case "agent_run":
-      return refs.runId ? `/agent-runs/${refs.runId}` : undefined;
+      return refs.runId ? `/agents/runs/${refs.runId}` : undefined;
     case "eval":
-      return refs.outcomeId ? `/evals/${refs.outcomeId}` : undefined;
+      return undefined;
     default:
       return undefined;
   }

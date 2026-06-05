@@ -94,6 +94,11 @@ test("api: code intelligence endpoints", async () => {
     const body5 = JSON.parse(res5.body);
     assert.equal(res5.statusCode, 200);
     assert.ok(body5.data.graph);
+    assert.ok(body5.data.counts);
+    assert.equal(typeof body5.data.counts.symbols, "number");
+    assert.equal(typeof body5.data.counts.edges, "number");
+    assert.ok(Array.isArray(body5.data.topSymbols));
+    assert.ok(Array.isArray(body5.data.topEdges));
 
   } finally {
     await handle.close();

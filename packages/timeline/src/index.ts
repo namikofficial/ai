@@ -156,6 +156,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           sessionId: run.sessionId,
           taskId: run.taskId,
           projectId: run.projectId,
+          runId: run.id,
         },
       }),
     );
@@ -187,6 +188,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           taskId: call.taskId,
           retrievalQueryId: call.retrievalQueryId,
           profileId: call.profileId,
+          callId: call.id,
         },
       }),
     );
@@ -225,6 +227,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           taskId: prompt.taskId,
           retrievalQueryId: prompt.retrievalQueryId,
           contextPackId: prompt.contextPackId,
+          promptId: prompt.id,
         },
       }),
     );
@@ -267,6 +270,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           taskId: query.taskId,
           projectId: query.projectId,
           retrievalQueryId: query.id,
+          queryId: query.id,
           contextPackId: contextPack?.id ?? null,
         },
       }),
@@ -297,6 +301,8 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           taskId: pack.taskId,
           retrievalQueryId: pack.retrievalQueryId,
           projectId: pack.projectId,
+          contextPackId: pack.id,
+          packId: pack.id,
         },
       }),
     );
@@ -314,6 +320,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
         status: outcome.outcome,
         refs: {
           sessionId: outcome.sessionId,
+          outcomeId: outcome.id,
         },
       }),
     );
