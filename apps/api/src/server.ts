@@ -1443,7 +1443,9 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           const query = url.searchParams.get("query") || url.searchParams.get("q") || null;
           const limit = Number(url.searchParams.get("limit") || 50) || 50;
           const symbols = store.codeIntelligence.listSymbols(project.id, query, limit);
-          sendJson(res, json("ok", { project, symbols, query, limit }));
+          const totalRow = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number } | undefined;
+          const total = totalRow?.count ?? 0;
+          sendJson(res, json("ok", { project, symbols, query, limit, total }));
           return;
         }
 
@@ -2592,7 +2594,10 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           res,
           json("ok", {
             projectId: symbol.projectId,
-            projectPath: symbol.path,
+            filePath: symbol.path,
+            projectPath: project?.path ?? null,
+            // deprecated: old consumers expected the symbol path here
+            symbolPath: symbol.path,
             project: project ? { id: project.id, path: project.path, name: project.name } : null,
             symbol,
             chunks,

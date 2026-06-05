@@ -44,6 +44,7 @@ export interface ProjectContextGraph {
   packageBoundaries: string[];
   hotPaths: string[];
   notes: string[];
+  symbolCount?: number;
 }
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
@@ -757,5 +758,6 @@ export function buildProjectContextGraph(input: {
     packageBoundaries,
     hotPaths,
     notes,
+    symbolCount: input.symbols.length,
   };
 }
