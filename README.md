@@ -29,11 +29,22 @@ The `pnpm cli` command provides the main entry point for managing the workbench.
 
 ### Project Management
 - `pnpm cli -- project add <path> --name <name>`: Add a local directory as a project.
-- `pnpm cli -- project index <project>`: Scan and index project files into SQLite/Qdrant.
+- `pnpm cli -- project index <project>`: Scan and index project files into SQLite/Qdrant. Extracts code symbols and builds a project context graph.
+- `pnpm cli -- project graph <project>`: View the project context graph (entrypoints, route files, hot paths).
+- `pnpm cli -- project symbols <project> --query auth`: Search for extracted code symbols in a project.
+- `pnpm cli -- project symbol <symbol-id>`: View details for a specific code symbol, including linked chunks and edges.
 
 ### Interaction & Debugging
 - `pnpm cli -- ask "where is auth handled?" --project <project> --depth deep`: Run the hybrid RAG pipeline.
+- `pnpm cli -- plan "implement auth middleware" --project <project>`: Generate a multi-step execution plan.
 - `pnpm cli -- trace conversation <session-id>`: View the full execution trace of a session.
+- `pnpm cli -- trace timeline <session-id>`: View a visual timeline of session events (messages, model calls, retrieval).
+- `pnpm cli -- prompts list --session <session-id>`: List all compiled prompts for a session.
+- `pnpm cli -- prompts show <prompt-id>`: Show the full content and metadata of a compiled prompt.
+- `pnpm cli -- replay <session-id> --prompt <prompt-id> --model <profile>`: Re-invoke a model with a previously compiled prompt.
+- `pnpm cli -- config show --project <project>`: Show resolved configuration for a project.
+- `pnpm cli -- config init --project <project>`: Write a starter `.ai-workbench.json` for a project.
+- `pnpm cli -- config validate --project <project>`: Validate the project configuration file.
 - `pnpm cli -- models health`: Check connectivity to model providers.
 - `pnpm cli -- memory candidates`: View captured learning candidates.
 - `pnpm cli -- skills candidates`: View potential skill extractions.
@@ -61,7 +72,17 @@ Projects can be configured via an optional `.ai-workbench.json` file in the proj
 }
 ```
 
-*Note: `preferTreeSitter` is currently disabled in the heuristic implementation.*
+*Note: `preferTreeSitter` is currently ignored; the code intelligence extractor uses the fallback parser only.*
+
+## Current Scope
+
+The workbench intentionally stays local-first and read-only by default:
+- Fallback symbol extraction is implemented; Tree-sitter is not wired yet.
+- Watcher mode is not implemented yet.
+- Prompt Lab is not exposed as a separate product surface yet.
+- MCP host mode is not implemented yet.
+- Terminal/Xterm mode is not implemented yet.
+- Cloud routing stays disabled unless explicitly enabled.
 
 ## Environment Variables
 

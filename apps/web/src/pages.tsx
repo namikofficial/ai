@@ -260,10 +260,15 @@ function ProjectDetailPage(): ReactNode {
   const { projectId = "" } = useParams();
   const setSelectedProjectId = useWorkbenchStore((state) => state.setSelectedProjectId);
   const [indexing, setIndexing] = useState(false);
-  const resource = useResource(() => Promise.all([api.getProject(projectId), api.getProjectMemory(projectId), api.getProjectRetrieval(projectId)]), [projectId]);
+  const resource = useResource(
+    () => Promise.all([api.getProject(projectId), api.getProjectMemory(projectId), api.getProjectRetrieval(projectId), api.listProjectSymbols(projectId, { limit: 10 }), api.getProjectGraph(projectId)]),
+    [projectId],
+  );
   const project = resource.data?.[0].data ?? null;
   const memory = resource.data?.[1].data ?? null;
   const retrieval = resource.data?.[2].data ?? null;
+  const symbolsResponse = resource.data?.[3].data ?? null;
+  const graphResponse = resource.data?.[4].data ?? null;
   const sessionsResource = useResource(() => api.listSessions(), [projectId]);
   const sessions = sessionsResource.data?.data.filter((session) => session.projectId === projectId) ?? [];
 
@@ -286,6 +291,12 @@ function ProjectDetailPage(): ReactNode {
   const lessons = Array.isArray(memory?.lessons) ? memory.lessons : [];
   const rules = Array.isArray(memory?.rules) ? memory.rules : [];
   const chunks = retrieval?.chunks ?? [];
+  const graphSymbols = symbolsResponse?.symbols ?? [];
+  const graphSummary = graphResponse?.graph ?? null;
+  const graphRouteFiles = Array.isArray(graphSummary?.routeFiles) ? graphSummary.routeFiles : [];
+  const graphMiddlewareFiles = Array.isArray(graphSummary?.middlewareFiles) ? graphSummary.middlewareFiles : [];
+  const graphDbFiles = Array.isArray(graphSummary?.dbFiles) ? graphSummary.dbFiles : [];
+  const graphAuthPaths = Array.isArray(graphSummary?.authPaths) ? graphSummary.authPaths : [];
 
   const reindex = async () => {
     setIndexing(true);
@@ -309,8 +320,36 @@ function ProjectDetailPage(): ReactNode {
             ["Status", project.status],
             ["Files", project.fileCount],
             ["Chunks", project.chunkCount],
+            ["Symbols", graphSymbols.length],
           ]}
         />
+      </Panel>
+      <Panel title="Context Graph" span={6}>
+        <div className="stack">
+          <KeyValueList
+            items={[
+              ["Entrypoints", Array.isArray(graphSummary?.entrypoints) ? graphSummary.entrypoints.length : 0],
+              ["Routes", graphRouteFiles.slice(0, 3).join(", ") || "none"],
+              ["Middleware", graphMiddlewareFiles.slice(0, 3).join(", ") || "none"],
+              ["DB/Auth", [...graphDbFiles, ...graphAuthPaths].slice(0, 3).join(", ") || "none"],
+            ]}
+          />
+          {graphSymbols.length > 0 ? (
+            <div className="list">
+              {graphSymbols.slice(0, 6).map((symbol: { id: string; name: string; kind: string; path: string }) => (
+                <div className="list-item" key={symbol.id}>
+                  <div className="row">
+                    <strong>{symbol.name}</strong>
+                    <Badge>{symbol.kind}</Badge>
+                  </div>
+                  <div className="tiny">{symbol.path}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState title="No symbols yet" body="Index the project to populate code intelligence." />
+          )}
+        </div>
       </Panel>
       <Panel title="Actions" span={6}>
         <div className="stack">
@@ -602,7 +641,7 @@ function PromptLabPage(): ReactNode {
 function PromptDetailPage(): ReactNode {
   const { promptId = "" } = useParams();
   const resource = useResource(() => api.getCompiledPrompt(promptId), [promptId]);
-  const prompt = resource.data?.data as unknown as CompiledPromptRecord | null;
+  const prompt = resource.data?.data ?? null;
   if (!prompt) {
     return (
       <PageShell title="Prompt" subtitle={promptId}>
@@ -845,6 +884,26 @@ function SessionDetailPage(): ReactNode {
         sessionId?: string | null;
       }>)
     : [];
+  const modelCalls = Array.isArray(trace?.modelCalls)
+    ? (trace.modelCalls as Array<{
+        id: string;
+        profileId?: string | null;
+        role?: string;
+        status?: string;
+        promptTokens?: number;
+        completionTokens?: number;
+        latencyMs?: number;
+      }>)
+    : [];
+  const retrievalQueries = Array.isArray(trace?.retrievalQueries)
+    ? (trace.retrievalQueries as Array<{
+        id: string;
+        originalQuery?: string;
+        rewrittenQuery?: string | null;
+        intent?: string;
+        depth?: string;
+      }>)
+    : [];
 
   if (!session) {
     return (
@@ -910,54 +969,65 @@ function SessionDetailPage(): ReactNode {
         </div>
       </Panel>
       <SessionTimelinePanel timeline={timeline} />
-      <Panel title="Trace Replay" span={12}>
+      <Panel title="Compiled Prompts" span={12}>
         <div className="list">
-          {trace ? (
-            <>
-              <div className="list-item">
-                <strong>Model Calls</strong>
-                <div className="tiny">{Array.isArray(trace.modelCalls) ? trace.modelCalls.length : 0} calls recorded</div>
-              </div>
-              <div className="list-item">
-                <strong>Retrieval Queries</strong>
-                <div className="tiny">{Array.isArray(trace.retrievalQueries) ? trace.retrievalQueries.length : 0} queries replayable</div>
-              </div>
-              <div className="list-item">
-                <strong>Context Packs</strong>
-                <div className="tiny">{Array.isArray(trace.contextPacks) ? trace.contextPacks.length : 0} packs stored</div>
-              </div>
-              <div className="list-item">
-                <strong>Compiled Prompts</strong>
-                <div className="list">
-                  {compiledPrompts.length > 0 ? (
-                    compiledPrompts.map((prompt) => (
-                      <a className="list-item" href={`/prompts/${prompt.id}`} key={prompt.id}>
-                        <div className="row">
-                          <strong>{prompt.mode}</strong>
-                          <Badge>{prompt.role}</Badge>
-                        </div>
-                        <div className="tiny">
-                          {prompt.id} · {prompt.estimatedTokens} tokens
-                        </div>
-                      </a>
-                    ))
-                  ) : (
-                    <EmptyState title="No compiled prompts" body="Ask or plan with a live trace to create prompt records." />
-                  )}
+          {compiledPrompts.length > 0 ? (
+            compiledPrompts.map((prompt) => (
+              <a className="list-item" href={`/prompts/${prompt.id}`} key={prompt.id}>
+                <div className="row">
+                  <strong>{prompt.mode}</strong>
+                  <Badge>{prompt.role}</Badge>
                 </div>
                 <div className="tiny">
-                  <a href={`/prompts?sessionId=${encodeURIComponent(session.id)}`}>Open full prompt trace</a>
+                  {prompt.id} · {prompt.estimatedTokens} tokens
                 </div>
-              </div>
-              <div className="list-item">
-                <strong>Conversation Replay</strong>
-                <pre>{JSON.stringify(trace.messages ?? [], null, 2).slice(0, 1200)}</pre>
-              </div>
-            </>
+              </a>
+            ))
           ) : (
-            <EmptyState title="No trace" body="The session trace will appear once the API returns replay data." />
+            <EmptyState title="No compiled prompts" body="Ask or plan with a live trace to create prompt records." />
           )}
         </div>
+        <div className="tiny">
+          <a href={`/prompts?sessionId=${encodeURIComponent(session.id)}`}>Open full prompt trace</a>
+        </div>
+      </Panel>
+      <Panel title="Model Calls" span={6}>
+        <div className="list">
+          {modelCalls.length > 0 ? (
+            modelCalls.map((call) => (
+              <div className="list-item" key={call.id}>
+                <div className="row">
+                  <strong>{call.role ?? "model"}</strong>
+                  <Badge>{call.status ?? "unknown"}</Badge>
+                </div>
+                <div className="tiny">
+                  {call.profileId ?? "unknown profile"} · {call.promptTokens ?? 0}/{call.completionTokens ?? 0} tokens · {call.latencyMs ?? 0} ms
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No model calls" body="The API trace will surface model call records here." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Retrieval Queries" span={6}>
+        <div className="list">
+          {retrievalQueries.length > 0 ? (
+            retrievalQueries.map((query) => (
+              <div className="list-item" key={query.id}>
+                <strong>{query.originalQuery ?? query.id}</strong>
+                <div className="tiny">
+                  {query.rewrittenQuery ?? "no rewrite"} · {query.intent ?? "unknown"} · {query.depth ?? "unknown"}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No retrieval queries" body="Queries will appear once the session runs retrieval." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Conversation Replay" span={12}>
+        {trace ? <pre>{JSON.stringify(trace.messages ?? [], null, 2).slice(0, 1200)}</pre> : <EmptyState title="No trace" body="The session trace will appear once the API returns replay data." />}
       </Panel>
     </PageShell>
   );

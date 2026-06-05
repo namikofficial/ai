@@ -67,6 +67,7 @@ export interface IndexProjectOptions {
 
 interface ExistingFileRow {
   id: string;
+  path: string;
   content_hash: string;
   is_indexed: number;
 }
@@ -83,7 +84,7 @@ function nowIso(): string {
 function readExistingFile(db: DatabaseSync, projectId: string, path: string): ExistingFileRow | null {
   try {
     const row = db
-      .prepare("SELECT id, content_hash, is_indexed FROM files WHERE project_id = ? AND path = ? LIMIT 1")
+      .prepare("SELECT id, path, content_hash, is_indexed FROM files WHERE project_id = ? AND path = ? LIMIT 1")
       .get(projectId, path) as ExistingFileRow | undefined;
     return row ?? null;
   } catch {
@@ -177,6 +178,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
   const qdrantPoints: QdrantPoint[] = [];
+  const seenPaths = new Set<string>();
 
   let filesIndexed = 0;
   let chunksIndexed = 0;
@@ -197,6 +199,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
 
     const contentHash = hashContent(content);
     const relativePath = normalize(relative(projectPath, absolutePath));
+    seenPaths.add(relativePath);
     const language = inferLanguage(relativePath);
     const previous = readExistingFile(db, projectId, relativePath);
     const previousDocument = readExistingDocument(db, projectId, relativePath);
@@ -382,6 +385,45 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     syncSearchIndexForFile(db, projectId, relativePath, indexedChunks);
     filesIndexed += 1;
     onProgress?.({ filesIndexed, chunksIndexed });
+  }
+
+  const staleFileRows = db
+    .prepare("SELECT id, path FROM files WHERE project_id = ?")
+    .all(projectId) as Array<{ id: string; path: string }>;
+  const staleFiles = staleFileRows.filter((row) => !seenPaths.has(row.path));
+  if (staleFiles.length > 0) {
+    const deleteSearchRows = (path: string) => {
+      try {
+        db.prepare("DELETE FROM rag_chunks_fts WHERE project_id = ? AND path = ?").run(projectId, path);
+      } catch {
+        // FTS is optional.
+      }
+    };
+    for (const staleFile of staleFiles) {
+      const documentRows = db
+        .prepare("SELECT id FROM rag_documents WHERE project_id = ? AND file_id = ?")
+        .all(projectId, staleFile.id) as Array<{ id: string }>;
+      const symbolRows = db
+        .prepare("SELECT id FROM code_symbols WHERE project_id = ? AND file_id = ?")
+        .all(projectId, staleFile.id) as Array<{ id: string }>;
+      const symbolIds = symbolRows.map((row) => row.id);
+      if (symbolIds.length > 0) {
+        const placeholders = symbolIds.map(() => "?").join(", ");
+        db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
+        db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
+        db.prepare(
+          `DELETE FROM code_edges
+           WHERE project_id = ?
+             AND (from_symbol_id IN (${placeholders}) OR to_symbol_id IN (${placeholders}))`,
+        ).run(projectId, ...symbolIds, ...symbolIds);
+      }
+      for (const documentRow of documentRows) {
+        db.prepare("DELETE FROM rag_chunks WHERE document_id = ?").run(documentRow.id);
+      }
+      db.prepare("DELETE FROM rag_documents WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
+      db.prepare("DELETE FROM files WHERE project_id = ? AND id = ?").run(projectId, staleFile.id);
+      deleteSearchRows(staleFile.path);
+    }
   }
 
   try {

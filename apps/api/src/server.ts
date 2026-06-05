@@ -24,6 +24,7 @@ import type {
 import { createEvent, createId, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
 import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
+import type { ProjectContextGraph } from "../../../packages/code-intelligence/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import { runAskWorkflow } from "../../../packages/ask-engine/src/index.ts";
@@ -50,6 +51,7 @@ export interface ServerOptions {
   config?: Partial<ConfigSnapshot>;
   inProcess?: boolean;
   intelligenceStack?: IntelligenceStack;
+  store?: ReturnType<typeof createStore>;
 }
 
 export interface ServerHandle {
@@ -128,14 +130,14 @@ function safeParseJson(value: string): unknown {
   }
 }
 
-function readProjectGraph(store: ReturnType<typeof createStore>, projectId: string): Record<string, unknown> | null {
+function readProjectGraph(store: ReturnType<typeof createStore>, projectId: string): ProjectContextGraph | null {
   try {
     const row = store.db.prepare("SELECT summary_json, updated_at FROM project_context_graphs WHERE project_id = ? LIMIT 1").get(projectId) as { summary_json: string; updated_at: string } | undefined;
     if (!row) return null;
     const parsed = safeParseJson(row.summary_json);
     return typeof parsed === "object" && parsed !== null
-      ? { ...(parsed as Record<string, unknown>), updatedAt: row.updated_at }
-      : { summary: parsed, updatedAt: row.updated_at };
+      ? { ...(parsed as ProjectContextGraph), updatedAt: row.updated_at }
+      : null;
   } catch {
     return null;
   }
@@ -388,6 +390,9 @@ function renderProjectDetailPage(store: ReturnType<typeof createStore>, projectI
   const chunks = store.listProjectChunks(project.id, 10);
   const sessions = store.listProjectSessions(project.id, 8);
   const lessons = store.listProjectLessons(project.id, 8);
+  const graph = readProjectGraph(store, project.id);
+  const symbols = store.codeIntelligence.listSymbols(project.id, null, 10);
+  const symbolCount = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number };
 
   const contentHtml = [
     renderCard(
@@ -399,7 +404,25 @@ function renderProjectDetailPage(store: ReturnType<typeof createStore>, projectI
         ["Status", project.status],
         ["Files", String(project.fileCount)],
         ["Chunks", String(project.chunkCount)],
+        ["Symbols", String(symbolCount.count)],
       ]),
+      6,
+    ),
+    renderCard(
+      "Context Graph",
+      graph
+        ? renderKeyValueList([
+            ["Entrypoints", String(graph.entrypoints.length)],
+            ["Routes", graph.routeFiles.slice(0, 3).join(", ")],
+            ["Middleware", graph.middlewareFiles.slice(0, 3).join(", ")],
+            ["DB/Auth", [...graph.dbFiles, ...graph.authPaths].slice(0, 3).join(", ")],
+          ])
+        : renderEmptyState("No graph yet", "Context graph is built during indexing."),
+      6,
+    ),
+    renderCard(
+      "Top Symbols",
+      `<div class="list">${symbols.length > 0 ? symbols.map((s) => `<div class="list-item"><strong>${escapeHtml(s.name)}</strong><div class="tiny">${escapeHtml(s.kind)} · ${escapeHtml(s.path)}</div></div>`).join("") : renderEmptyState("No symbols", "Symbols are extracted during indexing.")}</div><div class="tiny" style="margin-top:8px"><a href="/projects/${encodeURIComponent(project.id)}/symbols">View all symbols</a></div>`,
       6,
     ),
     renderCard(
@@ -469,6 +492,18 @@ function renderSessionDetailPage(store: ReturnType<typeof createStore>, sessionI
 
   const events = store.listEvents(session.id, 100);
   const tasks = store.listTasks(session.id, 20);
+  const timeline = buildSessionTimeline({
+    session,
+    messages: store.conversation.listMessages(session.id, 100),
+    events,
+    agentRuns: store.agents.listRuns(session.id, 50),
+    modelCalls: store.models.listCalls(session.id, 50),
+    compiledPrompts: store.listCompiledPrompts(session.id, 50),
+    retrievalQueries: store.retrieval.listQueriesForSession(session.id, 50),
+    contextPacks: store.context.listPacksForSession(session.id, 20),
+    outcomes: store.evals.listOutcomes(session.id, 20),
+  });
+
   const contentHtml = [
     renderCard(
       "Session Summary",
@@ -480,6 +515,8 @@ function renderSessionDetailPage(store: ReturnType<typeof createStore>, sessionI
         ["Source", session.source],
         ["Started", session.startedAt],
         ["Finished", session.finishedAt ?? "running"],
+        ["Model Calls", String(timeline.counts.modelCalls)],
+        ["Retrivals", String(timeline.counts.retrievalQueries)],
       ]),
       6,
     ),
@@ -487,6 +524,11 @@ function renderSessionDetailPage(store: ReturnType<typeof createStore>, sessionI
       "Final Summary",
       `<pre>${escapeHtml(session.finalSummary ?? "No final summary yet.")}</pre>`,
       6,
+    ),
+    renderCard(
+      "Timeline",
+      `<div class="list">${timeline.items.length > 0 ? timeline.items.map((item) => `<div class="list-item"><strong>${escapeHtml(item.kind)}: ${escapeHtml(item.title)}</strong><div class="tiny">${escapeHtml(item.summary)}</div></div>`).join("") : renderEmptyState("Empty timeline", "No events captured for this session yet.")}</div>`,
+      12,
     ),
     renderCard(
       "Tasks",
@@ -1214,8 +1256,7 @@ function renderSettingsPage(store: ReturnType<typeof createStore>, config: Confi
 export async function startWorkbenchServer(options: ServerOptions = {}): Promise<ServerHandle> {
   const config = resolveConfig(options.config ?? {});
   await mkdir(config.runtimeDir, { recursive: true });
-  const db = initializeStore(config.databasePath);
-  const store = createStore(db);
+  const store = options.store ?? createStore(initializeStore(config.databasePath));
   await store.ensureRuntimeDirs(config.runtimeDir);
   if (options.intelligenceStack) {
     store.setIntelligenceStack(options.intelligenceStack);
@@ -1393,6 +1434,19 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           sendHtml(res, renderProjectDetailPage(store, projectId));
           return;
         }
+        if (method === "GET" && rest === "/symbols") {
+          const project = store.getProject(projectId);
+          if (!project) {
+            sendJson(res, json("error", undefined, { message: "project not found" }), 404);
+            return;
+          }
+          const query = url.searchParams.get("query") || url.searchParams.get("q") || null;
+          const limit = Number(url.searchParams.get("limit") || 50) || 50;
+          const symbols = store.codeIntelligence.listSymbols(project.id, query, limit);
+          sendJson(res, json("ok", { project, symbols, query, limit }));
+          return;
+        }
+
         if (method === "GET" && rest === "/graph") {
           const project = store.getProject(projectId);
           if (!project) {
@@ -2508,7 +2562,49 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
       // ---- Observability API: retrieval, memory, skills, models, agents, context, conversations, eval ----
 
+      if (path.startsWith("/symbols/") && method === "GET") {
+        const symbolId = decodeURIComponent(path.slice("/symbols/".length)).split("/")[0];
+        if (!symbolId) {
+          sendJson(res, json("error", undefined, { message: "symbol id required" }), 400);
+          return;
+        }
+        const symbol = store.codeIntelligence.getSymbol(symbolId);
+        if (!symbol) {
+          sendJson(res, json("error", undefined, { message: "symbol not found" }), 404);
+          return;
+        }
+        const project = store.getProject(symbol.projectId);
+        const chunks = store.codeIntelligence.listSymbolChunks(symbolId);
+        const edges = store.codeIntelligence.listEdgesForSymbol(symbolId);
+        const relatedSymbolIds = new Set<string>();
+        for (const edge of edges) {
+          if (edge.fromSymbolId !== symbolId) {
+            relatedSymbolIds.add(edge.fromSymbolId);
+          }
+          if (edge.toSymbolId !== symbolId) {
+            relatedSymbolIds.add(edge.toSymbolId);
+          }
+        }
+        const relatedSymbols = Array.from(relatedSymbolIds)
+          .map((id) => store.codeIntelligence.getSymbol(id))
+          .filter((item): item is NonNullable<typeof item> => Boolean(item));
+        sendJson(
+          res,
+          json("ok", {
+            projectId: symbol.projectId,
+            projectPath: symbol.path,
+            project: project ? { id: project.id, path: project.path, name: project.name } : null,
+            symbol,
+            chunks,
+            edges,
+            relatedSymbols,
+          }),
+        );
+        return;
+      }
+
       if (method === "GET" && path === "/retrieval/queries") {
+
         const sessionId = url.searchParams.get("sessionId");
         const projectId = url.searchParams.get("projectId");
         const limit = Number(url.searchParams.get("limit") ?? "50") || 50;

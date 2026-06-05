@@ -197,3 +197,33 @@ test("timeline builder handles empty data", () => {
     outcomes: 0,
   });
 });
+
+test("timeline builder tolerates malformed prompt json", () => {
+  const timeline = buildSessionTimeline({
+    session,
+    compiledPrompts: [
+      {
+        id: "prompt-bad",
+        sessionId: session.id,
+        taskId: null,
+        retrievalQueryId: null,
+        contextPackId: null,
+        mode: "answer",
+        role: "answer",
+        messagesJson: "[not valid",
+        estimatedTokens: 12,
+        includedContextJson: "{broken",
+        omittedContextJson: "",
+        safetyNotesJson: "not json",
+        outputSchemaJson: "{also broken",
+        createdAt: "2026-01-01T00:00:11.000Z",
+      },
+    ],
+  });
+
+  const payload = timeline.timeline[0]?.payload as { messages?: unknown; safetyNotes?: unknown } | undefined;
+  assert.equal(timeline.timeline.length, 1);
+  assert.equal(timeline.timeline[0]?.kind, "compiled_prompt");
+  assert.equal(payload?.messages, "[not valid");
+  assert.equal(payload?.safetyNotes, "not json");
+});

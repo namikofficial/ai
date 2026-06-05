@@ -246,3 +246,34 @@ test("ai trace timeline prints normalized session timeline json", async () => {
   assert.ok(output.counts.messages >= 2);
   assert.ok(output.counts.modelCalls >= 1);
 });
+
+test("ai prompts list accepts split session and limit flags", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-cli-prompts-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src", "auth.ts"), "export function handleLogin() { return true; }\n");
+
+  const dbPath = join(workspace, "ai.db");
+  const runtimeDir = join(workspace, "runtime");
+  const store = createStore(initializeStore(dbPath));
+  const project = store.createProject({ path: repo, name: "repo" });
+  await store.indexProject(project.id);
+  const ask = await store.ask({
+    project: project.id,
+    question: "where is auth handled?",
+    mode: "local",
+    depth: "standard",
+  });
+  store.db.close();
+
+  const prompts = await runCli(
+    {
+      AI_DATABASE_PATH: dbPath,
+      AI_RUNTIME_DIR: runtimeDir,
+    },
+    ["prompts", "list", "--session", ask.sessionId, "--limit", "5"],
+  );
+  assert.equal(prompts.exitCode, 0, `prompts list failed: ${prompts.stderr}`);
+  assert.match(prompts.stdout, /mode=/);
+  assert.match(prompts.stdout, new RegExp(ask.sessionId));
+});

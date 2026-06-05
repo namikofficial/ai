@@ -86,6 +86,21 @@ function parseArgs(argv: string[]) {
   return { command, options, positionals };
 }
 
+function readCliArg(argv: string[], name: string): string | undefined {
+  const valueArg = argv.find((arg) => arg.startsWith(`--${name}=`));
+  if (valueArg) {
+    return valueArg.slice(name.length + 3);
+  }
+  const index = argv.indexOf(`--${name}`);
+  if (index >= 0) {
+    const next = argv[index + 1];
+    if (next && !next.startsWith("--")) {
+      return next;
+    }
+  }
+  return undefined;
+}
+
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
@@ -915,8 +930,8 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
   withDirectStore(async (store) => {
     const sub = process.argv[3] ?? "list";
     if (sub === "list") {
-      const sessionId = process.argv.find((arg) => arg.startsWith("--session="))?.split("=")[1];
-      const limit = Number(process.argv.find((arg) => arg.startsWith("--limit="))?.split("=")[1] ?? 50) || 50;
+      const sessionId = readCliArg(process.argv, "session");
+      const limit = Number(readCliArg(process.argv, "limit") ?? 50) || 50;
       const prompts = store.listCompiledPrompts(sessionId ?? null, limit);
       if (prompts.length === 0) {
         console.log("No compiled prompts found.");

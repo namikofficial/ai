@@ -2,7 +2,10 @@ import type {
   AskRequest,
   AskResponse,
   CheckRunSummary,
+  CodeEdgeRecord,
+  CodeSymbolRecord,
   ConfigSnapshot,
+  CompiledPromptRecord,
   EventEnvelope,
   HandoffRequest,
   HandoffResponse,
@@ -24,6 +27,7 @@ import type {
   SessionRecord,
   SettingsSnapshot,
 } from "../../shared/src/index.ts";
+import type { ProjectContextGraph } from "../../code-intelligence/src/index.ts";
 
 export interface ApiClientOptions {
   baseUrl: string;
@@ -32,8 +36,12 @@ export interface ApiClientOptions {
 function resolveUrl(baseUrl: string, path: string): URL {
   const url = new URL(baseUrl);
   const basePath = url.pathname.endsWith("/") ? url.pathname.slice(0, -1) : url.pathname;
-  const nextPath = path.startsWith("/") ? path : `/${path}`;
+  const [pathWithQuery, hash = ""] = path.split("#");
+  const [rawPath, search = ""] = pathWithQuery.split("?");
+  const nextPath = rawPath.startsWith("/") ? rawPath : `/${rawPath}`;
   url.pathname = `${basePath}${nextPath}`.replace(/\/{2,}/g, "/");
+  url.search = search ? `?${search}` : "";
+  url.hash = hash ? `#${hash}` : "";
   return url;
 }
 
@@ -69,8 +77,18 @@ export function createApiClient(options: ApiClientOptions) {
     getProject(projectId: string): Promise<{ status: "ok"; data: ProjectSummary | null }> {
       return requestJson(options.baseUrl, `/projects/${projectId}`);
     },
-    getProjectGraph(projectId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
+    getProjectGraph(projectId: string): Promise<{ status: "ok"; data: { project: ProjectSummary; config: Record<string, unknown>; graph: ProjectContextGraph | null; symbols: CodeSymbolRecord[]; edges: CodeEdgeRecord[] } }> {
       return requestJson(options.baseUrl, `/projects/${projectId}/graph`);
+    },
+    listProjectSymbols(projectId: string, input?: { query?: string | null; limit?: number }): Promise<{ status: "ok"; data: { project: ProjectSummary; symbols: CodeSymbolRecord[]; query: string | null; limit: number } }> {
+      const params = new URLSearchParams();
+      if (input?.query !== undefined && input?.query !== null) params.set("query", input.query);
+      if (input?.limit !== undefined && input?.limit !== null) params.set("limit", String(input.limit));
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return requestJson(options.baseUrl, `/projects/${projectId}/symbols${suffix}`);
+    },
+    getCodeSymbol(symbolId: string): Promise<{ status: "ok"; data: { projectId: string; projectPath: string; project: { id: string; path: string; name: string } | null; symbol: CodeSymbolRecord; chunks: Array<Record<string, unknown>>; edges: CodeEdgeRecord[]; relatedSymbols: CodeSymbolRecord[] } }> {
+      return requestJson(options.baseUrl, `/symbols/${encodeURIComponent(symbolId)}`);
     },
     createProject(input: ProjectCreateInput): Promise<{ status: "ok"; data: ProjectSummary }> {
       return requestJson(options.baseUrl, "/projects", {
@@ -341,7 +359,7 @@ export function createApiClient(options: ApiClientOptions) {
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/prompts${suffix}`);
     },
-    getCompiledPrompt(promptId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    getCompiledPrompt(promptId: string): Promise<{ status: "ok"; data: CompiledPromptRecord }> {
       return requestJson(options.baseUrl, `/prompts/${encodeURIComponent(promptId)}`);
     },
     listEvalCases(projectId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {

@@ -101,6 +101,44 @@ test("retrieval-engine: searchProjectChunks works when no symbols exist", async 
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("retrieval-engine: searchProjectChunks still works when code intelligence is disabled", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-search-disabled-ci-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, ".ai-workbench.json"),
+    JSON.stringify({
+      include: ["src/**"],
+      codeIntelligence: {
+        enabled: false,
+      },
+    }),
+  );
+  await writeFile(join(repo, "src", "auth.ts"), "export function handleLogin() { return true; }\n");
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "disabled-ci" });
+  await store.indexProject(project.id);
+
+  const results = searchProjectChunks({
+    db: store.db,
+    projectId: project.id,
+    query: "handleLogin",
+    limit: 4,
+    qdrantSettings: null,
+  });
+
+  assert.ok(results.length > 0);
+  assert.ok(
+    results.every((chunk) => {
+      const codeSymbols = chunk.metadata.codeSymbols;
+      return !Array.isArray(codeSymbols) || codeSymbols.length === 0;
+    }),
+  );
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("retrieval-engine: searchProjectChunks gives a symbol-match boost when code symbols are indexed", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-search-symbol-boost-"));
   const repo = join(workspace, "repo");

@@ -25,6 +25,12 @@ export interface ExtractCodeSymbolsResult {
   edges: CodeEdge[];
   chunkLinks: Array<{ symbolId: string; chunkId: string; overlapLines: number }>;
   chunkMetadata: Map<string, Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null }>>;
+  graphHints: {
+    routeFiles: string[];
+    middlewareFiles: string[];
+    dbFiles: string[];
+    authPaths: string[];
+  };
 }
 
 export interface ProjectContextGraph {
@@ -71,6 +77,24 @@ function dedupe<T extends { id: string }>(items: T[]): T[] {
     if (seen.has(item.id)) continue;
     seen.add(item.id);
     result.push(item);
+  }
+  return result;
+}
+
+function dedupeCodeSymbols(symbols: CodeSymbol[]): CodeSymbol[] {
+  const seen = new Set<string>();
+  const result: CodeSymbol[] = [];
+  for (const symbol of symbols) {
+    const key = [
+      symbol.projectId,
+      symbol.fileId,
+      symbol.path,
+      symbol.kind,
+      symbol.qualifiedName,
+    ].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(symbol);
   }
   return result;
 }
@@ -226,7 +250,7 @@ function scanTsJs(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edge
 
     if (classContext && index + 1 <= classContext.endLine) {
       const methodMatch = trimmed.match(/^(?:public\s+|private\s+|protected\s+|static\s+|async\s+)*(?:readonly\s+)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)\s*(?::\s*[^{]+)?\{/);
-      if (methodMatch && !trimmed.startsWith("constructor")) {
+      if (methodMatch) {
         const name = methodMatch[1] ?? "method";
         const endLine = findBlockEnd(sourceLines, index, "typescript");
         const symbol = makeSymbol(input, "method", name, index + 1, endLine + 1, {
@@ -265,12 +289,22 @@ function scanTsJs(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edge
     if (arrowMatch) {
       const name = arrowMatch[1] ?? "constant";
       const endLine = findBlockEnd(sourceLines, index, "typescript");
-      const kind: CodeSymbol["kind"] = /^(app|router)\./i.test(name) ? "route" : "constant";
+      const kind: CodeSymbol["kind"] = /middleware/i.test(name) ? "middleware" : /route/i.test(name) || /^(app|router)\./i.test(name) ? "route" : "constant";
       const symbol = makeSymbol(input, kind, name, index + 1, endLine + 1, {
         signature: trimmed,
         doc: collectDocComment(sourceLines, index, "typescript"),
       });
       symbols.push(symbol);
+      continue;
+    }
+
+    const constantMatch = trimmed.match(/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/);
+    if (constantMatch) {
+      const name = constantMatch[1] ?? "constant";
+      symbols.push(makeSymbol(input, "constant", name, index + 1, index + 1, {
+        signature: trimmed,
+        doc: collectDocComment(sourceLines, index, "typescript"),
+      }));
       continue;
     }
 
@@ -542,12 +576,14 @@ function scanSql(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edges
     const line = sourceLines[index] ?? "";
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const match = trimmed.match(/^(create\s+(?:table|view|function|trigger|index)\s+(?:if\s+not\s+exists\s+)?([A-Za-z0-9_."]+))/i);
+    const match = trimmed.match(/^(create\s+(table|view|function|trigger|index|procedure|type)\s+(?:if\s+not\s+exists\s+)?([A-Za-z0-9_."`]+))/i);
     if (match) {
-      const name = (match[2] ?? match[1] ?? "sql").replace(/["`]/g, "");
-      symbols.push(makeSymbol(input, "constant", name, index + 1, index + 1, {
+      const kindToken = (match[2] ?? "constant").toLowerCase();
+      const name = (match[3] ?? "sql").replace(/["`]/g, "").split(".").pop() ?? "sql";
+      const kind: CodeSymbol["kind"] = kindToken === "table" || kindToken === "view" || kindToken === "type" ? "class" : "function";
+      symbols.push(makeSymbol(input, kind, name, index + 1, index + 1, {
         signature: trimmed,
-        metadata: { statement: match[1] ?? trimmed },
+        metadata: { statement: match[1] ?? trimmed, sqlKind: kindToken },
       }));
     }
   }
@@ -605,12 +641,12 @@ export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeInt
       break;
   }
 
+  result.symbols = dedupeCodeSymbols(result.symbols);
+
   const chunkMetadata = new Map<string, Array<{ id: string; kind: CodeSymbol["kind"]; name: string; qualifiedName: string; signature: string | null }>>();
   const chunkLinks: Array<{ symbolId: string; chunkId: string; overlapLines: number }> = [];
 
   for (const symbol of result.symbols) {
-    // The indexer fills chunk links once chunk IDs exist. We still carry
-    // the line-based ranges so the DB layer can match them deterministically.
     chunkMetadata.set(symbol.id, [{
       id: symbol.id,
       kind: symbol.kind,
@@ -620,11 +656,24 @@ export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeInt
     }]);
   }
 
+  const path = input.path.toLowerCase();
+  const hasRouteSymbol = result.symbols.some((s) => s.kind === "route" || /route/i.test(s.name));
+  const hasMiddlewareSymbol = result.symbols.some((s) => s.kind === "middleware" || /middleware/i.test(s.name));
+  const hasDbSymbol = result.symbols.some((s) => s.kind === "class" && /db|repository|store/i.test(s.name)) || path.endsWith(".sql");
+
+  const graphHints = {
+    routeFiles: hasRouteSymbol || /route|router|api|server|handler/i.test(path) ? [input.path] : [],
+    middlewareFiles: hasMiddlewareSymbol || /middleware|auth|guard/i.test(path) ? [input.path] : [],
+    dbFiles: hasDbSymbol || /db|migration|schema|sql|prisma|drizzle/i.test(path) ? [input.path] : [],
+    authPaths: /auth|session|jwt|tenant|login/i.test(path) ? [input.path] : [],
+  };
+
   return {
     symbols: result.symbols,
     edges: dedupe(result.edges),
     chunkLinks,
     chunkMetadata,
+    graphHints,
   };
 }
 
