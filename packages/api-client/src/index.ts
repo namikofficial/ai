@@ -106,7 +106,7 @@ export function createApiClient(options: ApiClientOptions) {
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/projects/${projectId}/symbols${suffix}`);
     },
-    getCodeSymbol(symbolId: string): Promise<{ status: "ok"; data: { projectId: string; projectPath: string; project: { id: string; path: string; name: string } | null; symbol: CodeSymbolRecord; chunks: Array<Record<string, unknown>>; edges: CodeEdgeRecord[]; relatedSymbols: CodeSymbolRecord[] } }> {
+    getCodeSymbol(symbolId: string): Promise<{ status: "ok"; data: { projectId: string; filePath: string; projectPath: string | null; symbolPath: string; project: { id: string; path: string; name: string } | null; symbol: CodeSymbolRecord; chunks: Array<Record<string, unknown>>; edges: CodeEdgeRecord[]; relatedSymbols: CodeSymbolRecord[] } }> {
       return requestJson(options.baseUrl, `/symbols/${encodeURIComponent(symbolId)}`);
     },
     createProject(input: ProjectCreateInput): Promise<{ status: "ok"; data: ProjectSummary }> {

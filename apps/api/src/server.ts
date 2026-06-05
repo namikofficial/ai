@@ -2004,98 +2004,23 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
       }
 
       if (method === "GET" && path === "/prompt-lab/runs") {
-        const runs = store.db.prepare("SELECT * FROM prompt_lab_runs ORDER BY created_at DESC LIMIT 100").all() as Array<{
-          id: string;
-          session_id: string | null;
-          project_id: string;
-          prompt_id: string;
-          mode: string;
-          selected_profiles_json: string;
-          notes: string | null;
-          created_at: string;
-          updated_at: string;
-        }>;
-        sendJson(
-          res,
-          json("ok", runs.map((run) => ({
-            id: run.id,
-            sessionId: run.session_id,
-            projectId: run.project_id,
-            promptId: run.prompt_id,
-            mode: run.mode,
-            selectedProfiles: safeParseList(run.selected_profiles_json),
-            notes: run.notes,
-            createdAt: run.created_at,
-            updatedAt: run.updated_at,
-          }))),
-        );
+        sendJson(res, json("ok", store.promptLab.listRuns(100)));
         return;
       }
 
       if (path.startsWith("/prompt-lab/runs/")) {
         const runId = decodeURIComponent(path.slice("/prompt-lab/runs/".length)).split("/")[0];
-        const run = store.db.prepare("SELECT * FROM prompt_lab_runs WHERE id = ? LIMIT 1").get(runId) as
-          | {
-              id: string;
-              session_id: string | null;
-              project_id: string;
-              prompt_id: string;
-              mode: string;
-              selected_profiles_json: string;
-              notes: string | null;
-              created_at: string;
-              updated_at: string;
-            }
-          | undefined;
+        const run = store.promptLab.getRun(runId);
         if (!run) {
           sendJson(res, json("error", undefined, { message: "prompt lab run not found" }), 404);
           return;
         }
-        const results = store.db.prepare("SELECT * FROM prompt_lab_results WHERE run_id = ? ORDER BY created_at ASC").all(run.id) as Array<{
-          id: string;
-          run_id: string;
-          profile_id: string;
-          profile_name: string;
-          model_name: string;
-          status: string;
-          prompt_tokens: number;
-          completion_tokens: number;
-          latency_ms: number;
-          output_text: string | null;
-          error: string | null;
-          approx_cost: number | null;
-          created_at: string;
-        }>;
         sendJson(
           res,
           json("ok", {
-            run: {
-              id: run.id,
-              sessionId: run.session_id,
-              projectId: run.project_id,
-              promptId: run.prompt_id,
-              mode: run.mode,
-              selectedProfiles: safeParseList(run.selected_profiles_json),
-              notes: run.notes,
-              createdAt: run.created_at,
-              updatedAt: run.updated_at,
-            },
-            prompt: store.getCompiledPrompt(run.prompt_id),
-            results: results.map((result) => ({
-              id: result.id,
-              runId: result.run_id,
-              profileId: result.profile_id,
-              profileName: result.profile_name,
-              modelName: result.model_name,
-              status: result.status,
-              promptTokens: result.prompt_tokens,
-              completionTokens: result.completion_tokens,
-              latencyMs: result.latency_ms,
-              outputText: result.output_text,
-              error: result.error,
-              approxCost: result.approx_cost,
-              createdAt: result.created_at,
-            })),
+            run,
+            prompt: store.getCompiledPrompt(run.promptId),
+            results: store.promptLab.listResults(runId),
           }),
         );
         return;
@@ -2107,11 +2032,16 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
         const projectId = String(body.projectId ?? body.project ?? "");
         const promptId = String(body.promptId ?? body.prompt ?? "");
-        const selectedProfiles = Array.isArray(body.modelProfileIds)
-          ? body.modelProfileIds.map(String).filter(Boolean)
-          : Array.isArray(body.modelProfiles)
-            ? body.modelProfiles.map(String).filter(Boolean)
-            : [];
+        const selectedProfiles = Array.from(
+          new Set(
+            (Array.isArray(body.modelProfileIds)
+              ? body.modelProfileIds.map(String).filter(Boolean)
+              : Array.isArray(body.modelProfiles)
+                ? body.modelProfiles.map(String).filter(Boolean)
+                : []
+            )
+          )
+        );
         const notes = typeof body.notes === "string" ? body.notes : null;
         const dryRun = body.dryRun === true || body.dryRun === "true";
         if (!projectId || !promptId || selectedProfiles.length === 0) {
@@ -2132,17 +2062,38 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           sendJson(res, json("error", undefined, { message: "compiled prompt not found" }), 404);
           return;
         }
+
+        const parsedMessages = safeParseJson(prompt.messagesJson);
+        const messages = Array.isArray(parsedMessages) ? parsedMessages : null;
+        if (!messages) {
+          sendJson(res, json("error", undefined, { message: "compiled prompt messages_json is not a valid JSON array" }), 400);
+          return;
+        }
+        for (let i = 0; i < messages.length; i++) {
+          const msg = messages[i];
+          if (!msg || typeof msg !== "object" || !["system", "user", "assistant"].includes((msg as Record<string, unknown>).role as string) || typeof (msg as Record<string, unknown>).content !== "string") {
+            sendJson(res, json("error", undefined, { message: `compiled prompt message at index ${i} has invalid role or content` }), 400);
+            return;
+          }
+        }
+
         const runId = createId("plr");
         const ts = new Date().toISOString();
-        store.db.prepare(
-          `INSERT INTO prompt_lab_runs (
-            id, session_id, project_id, prompt_id, mode, selected_profiles_json, notes, created_at, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).run(runId, prompt.sessionId ?? null, projectId, promptId, prompt.mode, JSON.stringify(selectedProfiles), notes, ts, ts);
+        store.promptLab.createRun({
+          id: runId,
+          sessionId: prompt.sessionId ?? null,
+          projectId,
+          promptId,
+          mode: prompt.mode,
+          selectedProfiles,
+          notes,
+          createdAt: ts,
+          updatedAt: ts,
+        });
 
         const runtime = buildRuntimeForStore(store, config.cloudEnabled);
         const promptPayload = {
-          messages: safeParseJson(prompt.messagesJson) as Array<{ role: "system" | "user" | "assistant"; content: string }>,
+          messages: messages as Array<{ role: "system" | "user" | "assistant"; content: string }>,
           modelName: null as string | null,
         };
         const results: Array<Record<string, unknown>> = [];
@@ -2164,12 +2115,21 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               approxCost: null,
               createdAt: ts,
             } as const;
-            store.db.prepare(
-              `INSERT INTO prompt_lab_results (
-                id, run_id, profile_id, profile_name, model_name, status,
-                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            store.promptLab.createResult({
+              id: result.id,
+              runId,
+              profileId: result.profileId,
+              profileName: result.profileName,
+              modelName: result.modelName,
+              status: result.status,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: result.error,
+              approxCost: null,
+              createdAt: ts,
+            });
             results.push(result);
             continue;
           }
@@ -2189,12 +2149,21 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               approxCost: null,
               createdAt: ts,
             } as const;
-            store.db.prepare(
-              `INSERT INTO prompt_lab_results (
-                id, run_id, profile_id, profile_name, model_name, status,
-                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            store.promptLab.createResult({
+              id: result.id,
+              runId,
+              profileId: result.profileId,
+              profileName: result.profileName,
+              modelName: result.modelName,
+              status: result.status,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: result.error,
+              approxCost: null,
+              createdAt: ts,
+            });
             results.push(result);
             continue;
           }
@@ -2215,12 +2184,21 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               approxCost: null,
               createdAt: ts,
             } as const;
-            store.db.prepare(
-              `INSERT INTO prompt_lab_results (
-                id, run_id, profile_id, profile_name, model_name, status,
-                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            store.promptLab.createResult({
+              id: result.id,
+              runId,
+              profileId: result.profileId,
+              profileName: result.profileName,
+              modelName: result.modelName,
+              status: result.status,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: result.error,
+              approxCost: null,
+              createdAt: ts,
+            });
             results.push(result);
             continue;
           }
@@ -2249,26 +2227,21 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               approxCost: null,
               createdAt: ts,
             } as const;
-            store.db.prepare(
-              `INSERT INTO prompt_lab_results (
-                id, run_id, profile_id, profile_name, model_name, status,
-                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(
-              result.id,
+            store.promptLab.createResult({
+              id: result.id,
               runId,
-              result.profileId,
-              result.profileName,
-              result.modelName,
-              result.status,
-              result.promptTokens,
-              result.completionTokens,
-              result.latencyMs,
-              result.outputText,
-              result.error,
-              result.approxCost,
-              ts,
-            );
+              profileId: result.profileId,
+              profileName: result.profileName,
+              modelName: result.modelName,
+              status: result.status,
+              promptTokens: result.promptTokens,
+              completionTokens: result.completionTokens,
+              latencyMs: result.latencyMs,
+              outputText: result.outputText,
+              error: result.error,
+              approxCost: result.approxCost,
+              createdAt: ts,
+            });
             results.push(result);
           } catch (error) {
             const result = {
@@ -2286,12 +2259,21 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               approxCost: null,
               createdAt: ts,
             } as const;
-            store.db.prepare(
-              `INSERT INTO prompt_lab_results (
-                id, run_id, profile_id, profile_name, model_name, status,
-                prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).run(result.id, runId, result.profileId, result.profileName, result.modelName, result.status, 0, 0, 0, null, result.error, null, ts);
+            store.promptLab.createResult({
+              id: result.id,
+              runId,
+              profileId: result.profileId,
+              profileName: result.profileName,
+              modelName: result.modelName,
+              status: result.status,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              outputText: null,
+              error: result.error,
+              approxCost: null,
+              createdAt: ts,
+            });
             results.push(result);
           }
         }

@@ -27,7 +27,11 @@ interface ResourceState<T> {
   refresh(): void;
 }
 
-function useResource<T>(loader: () => Promise<T>, deps: ReadonlyArray<unknown> = []): ResourceState<T> {
+function useResource<T>(
+  loader: () => Promise<T>,
+  deps: ReadonlyArray<unknown> = [],
+  options?: { live?: boolean },
+): ResourceState<T> {
   const liveTick = useWorkbenchStore((state) => state.liveTick);
   const [reloadTick, setReloadTick] = useState(0);
   const [data, setData] = useState<T | null>(null);
@@ -60,7 +64,7 @@ function useResource<T>(loader: () => Promise<T>, deps: ReadonlyArray<unknown> =
     return () => {
       active = false;
     };
-  }, [liveTick, reloadTick, ...deps]);
+  }, [options?.live ? liveTick : 0, reloadTick, ...deps]);
 
   return { data, loading, error, refresh };
 }
@@ -101,7 +105,7 @@ function formatList(items: string[]): ReactNode {
 }
 
 function DashboardPage(): ReactNode {
-  const resource = useResource(() => api.status());
+  const resource = useResource(() => api.status(), [], { live: true });
   const status = resource.data?.data as any;
   const projects = Array.isArray(status?.projects) ? (status.projects as ProjectSummary[]) : [];
   const sessions = Array.isArray(status?.sessions) ? (status.sessions as SessionRecord[]) : [];
@@ -1005,6 +1009,7 @@ function SessionDetailPage(): ReactNode {
   const timelineResource = useResource(
     () => api.getSessionTimeline(sessionId).then((response) => response.data),
     [sessionId],
+    { live: true },
   );
 
   const session = sessionResource.data;

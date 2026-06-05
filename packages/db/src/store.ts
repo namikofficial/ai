@@ -32,6 +32,7 @@ import {
   createEvalRepo,
   createMemoryRepo,
   createModelsRepo,
+  createPromptLabRepo,
   createPromptRepo,
   createRetrievalRepo,
   createSkillsRepo,
@@ -297,6 +298,7 @@ export function createStore(db: DatabaseSync) {
   const memoryRepo = createMemoryRepo(db);
   const skillsRepo = createSkillsRepo(db);
   const evalRepo = createEvalRepo(db);
+  const promptLabRepo = createPromptLabRepo(db);
   const promptRepo = createPromptRepo(db);
 
   seedDefaultModelCatalog(modelsRepo);
@@ -1858,6 +1860,7 @@ export function createStore(db: DatabaseSync) {
     memory: memoryRepo,
     skills: skillsRepo,
     evals: evalRepo,
+    promptLab: promptLabRepo,
   };
   return store;
 }

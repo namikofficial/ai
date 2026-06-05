@@ -6,5 +6,6 @@ export { createEvalRepo, type EvalRepo } from "./eval.ts";
 export { createMemoryRepo, type MemoryRepo } from "./memory.ts";
 export { createModelsRepo, type ModelsRepo } from "./models.ts";
 export { createPromptRepo, type PromptRepo } from "./prompts.ts";
+export { createPromptLabRepo, type PromptLabRepo } from "./prompt-lab.ts";
 export { createRetrievalRepo, type RetrievalRepo } from "./retrieval.ts";
 export { createSkillsRepo, type SkillsRepo } from "./skills.ts";
