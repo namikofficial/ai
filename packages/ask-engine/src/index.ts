@@ -27,6 +27,7 @@ import { buildContextPack } from "../../context-engine/src/index.ts";
 import type { ModelInvokeOptions, ModelInvokeRequest, ModelInvokeResult, ModelRuntime } from "../../model-runtime/src/index.ts";
 import type { ModelProfileRecord, ModelRouteRecord, ModelCallRecord, ModelRole } from "../../shared/src/index.ts";
 import { createEvent, createId } from "../../shared/src/index.ts";
+import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
 
 export interface BuildAskQueryRewritePromptInput {
   question: string;
@@ -176,6 +177,57 @@ export function buildAskFallbackAnswer(projectName: string, question: string): s
 
 export function buildAskSynthesisFailure(question: string): string {
   return `I could not synthesize a model answer for "${question}" from the selected context.`;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function toStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  if (!value.every((item) => typeof item === "string")) return null;
+  return value;
+}
+
+function parseQueryRewriteOutput(value: unknown): {
+  rewrites: string[];
+  pathHints: string[];
+  symbolHints: string[];
+} | null {
+  if (!isObjectRecord(value)) return null;
+  const rewrites = toStringArray(value.rewrites);
+  const pathHints = toStringArray(value.pathHints);
+  const symbolHints = toStringArray(value.symbolHints);
+  if (!rewrites || !pathHints || !symbolHints) return null;
+  return {
+    rewrites: rewrites.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+    pathHints: pathHints.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+    symbolHints: symbolHints.map((entry) => entry.trim()).filter((entry) => entry.length > 0),
+  };
+}
+
+function parseRetrievalJudgeOutput(value: unknown): {
+  confidence: number;
+  confidenceNotes: string[];
+  miss: { path: string | null; notes: string | null } | null;
+} | null {
+  if (!isObjectRecord(value)) return null;
+  if (typeof value.confidence !== "number" || Number.isNaN(value.confidence)) return null;
+  const confidenceNotes = toStringArray(value.confidenceNotes);
+  if (!confidenceNotes) return null;
+  let miss: { path: string | null; notes: string | null } | null = null;
+  if (value.miss !== null && value.miss !== undefined) {
+    if (!isObjectRecord(value.miss)) return null;
+    miss = {
+      path: typeof value.miss.path === "string" ? value.miss.path : null,
+      notes: typeof value.miss.notes === "string" ? value.miss.notes : null,
+    };
+  }
+  return {
+    confidence: Math.max(0, Math.min(1, value.confidence)),
+    confidenceNotes,
+    miss,
+  };
 }
 
 export interface AskWorkflowStore extends RetrievalPipelineSource {
@@ -449,19 +501,32 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     meta: { mode, depth },
   });
 
-  const retrievalAgentRun = input.store.agents.createRun({
-    sessionId: session.id,
-    projectId: project.id,
-    agent: "retrieval_agent",
-    role: "retrieval-pipeline",
-    modelRole: "retrieval_judge",
-    risk: "low",
-    input: { question: input.input.question, projectId: project.id, mode, depth },
-  });
-
   const analysis = analyzeQuery(input.input.question);
   const rewritten = rewriteQuery(input.input.question, analysis);
   const intent: RetrievalIntentKind = classifyIntent(input.input.question, mode);
+  const intentAgentRun = input.store.agents.createRun({
+    sessionId: session.id,
+    projectId: project.id,
+    agent: "intent_agent",
+    role: "intent-classifier",
+    modelRole: "intent",
+    risk: "low",
+    input: { question: input.input.question, mode },
+  });
+  input.store.agents.appendMessage({
+    agentRunId: intentAgentRun.id,
+    direction: "internal",
+    role: "intent",
+    content: JSON.stringify({ intent, analysis }),
+    meta: { analysis },
+  });
+  input.store.agents.updateRun(intentAgentRun.id, {
+    status: "completed",
+    finishedAt: new Date().toISOString(),
+    durationMs: 0,
+    output: { intent, analysis },
+  });
+
   const retrievalQuery = input.store.retrieval.createQuery({
     sessionId: session.id,
     projectId: project.id,
@@ -472,19 +537,15 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     rewrittenQuery: rewritten.variant,
     analysis,
   });
-  if (rewritten.variant !== input.input.question.trim()) {
-    input.store.retrieval.updateRewrittenQuery(retrievalQuery.id, rewritten.variant);
-  }
-  if (rewritten.terms.length > 0) {
-    input.store.retrieval.createRewrite({
-      retrievalQueryId: retrievalQuery.id,
-      variant: rewritten.variant,
-      terms: rewritten.terms,
-      pathHints: rewritten.pathHints,
-      symbolHints: rewritten.symbolHints,
-      score: 1.0,
-    });
-  }
+  const queryRewriterAgentRun = input.store.agents.createRun({
+    sessionId: session.id,
+    projectId: project.id,
+    agent: "query_rewriter_agent",
+    role: "query-rewriter",
+    modelRole: "query_rewrite",
+    risk: "low",
+    input: { question: input.input.question, retrievalQueryId: retrievalQuery.id, intent, mode },
+  });
   const queryRewriteProfileId = input.store.models.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
   const queryRewritePrompt = compilePrompt(
     buildAskQueryRewritePrompt({
@@ -501,9 +562,13 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     retrievalQueryId: retrievalQuery.id,
   });
   let queryRewriteCallId: string | null = null;
+  let queryRewriteParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
+  let rewriteVariants = [rewritten.variant];
+  let rewritePathHints = [...rewritten.pathHints];
+  let rewriteSymbolHints = [...rewritten.symbolHints];
   try {
     input.store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteProfileId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-    await input.store.invokeModel(
+    const queryRewriteResult = await input.store.invokeModel(
       queryRewriteProfileId,
       {
         role: "query_rewrite",
@@ -521,6 +586,69 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         retrievalQueryId: retrievalQuery.id,
       },
     );
+    const parseQueryRewriteResult = (text: string): ReturnType<typeof parseQueryRewriteOutput> => {
+      try {
+        return parseQueryRewriteOutput(parseJsonFragment(text));
+      } catch {
+        return null;
+      }
+    };
+    let parsedRewrite = parseQueryRewriteResult(queryRewriteResult.text);
+    if (parsedRewrite) {
+      queryRewriteParseStatus = "parsed";
+    } else if (isLikelyJsonOutput(queryRewriteResult.text)) {
+      const repaired = await input.store.invokeModel(
+        queryRewriteProfileId,
+        {
+          role: "query_rewrite",
+          messages: [
+            ...queryRewritePrompt.messages,
+            { role: "assistant", content: queryRewriteResult.text },
+            { role: "user", content: "Return ONLY valid JSON matching the output schema. No markdown fences." },
+          ],
+          temperature: 0,
+          maxOutputTokens: input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
+          metadata: {
+            compiledPrompt: queryRewritePrompt,
+            retrievalQueryId: retrievalQuery.id,
+            repairAttempt: true,
+          },
+        },
+        {
+          sessionId: session.id,
+          retrievalQueryId: retrievalQuery.id,
+        },
+      );
+      parsedRewrite = parseQueryRewriteResult(repaired.text);
+      if (parsedRewrite) {
+        queryRewriteParseStatus = "repaired";
+      }
+    }
+    if (parsedRewrite) {
+      const normalized = parsedRewrite.rewrites
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0);
+      if (normalized.length > 0) {
+        rewriteVariants = normalized.slice(0, 6);
+      }
+      rewritePathHints = parsedRewrite.pathHints.length > 0 ? parsedRewrite.pathHints : rewritePathHints;
+      rewriteSymbolHints = parsedRewrite.symbolHints.length > 0 ? parsedRewrite.symbolHints : rewriteSymbolHints;
+    }
+    const selectedRewrite = rewriteVariants[0] ?? rewritten.variant;
+    if (selectedRewrite !== rewritten.variant || selectedRewrite !== input.input.question.trim()) {
+      input.store.retrieval.updateRewrittenQuery(retrievalQuery.id, selectedRewrite);
+    }
+    for (const [index, variant] of rewriteVariants.entries()) {
+      const terms = variant.toLowerCase().split(/[^a-z0-9_]+/g).filter((term) => term.length >= 2);
+      input.store.retrieval.createRewrite({
+        retrievalQueryId: retrievalQuery.id,
+        variant,
+        terms,
+        pathHints: rewritePathHints,
+        symbolHints: rewriteSymbolHints,
+        score: Math.max(0.1, 1 - index * 0.1),
+      });
+    }
     queryRewriteCallId = input.store.models.listCalls(session.id, 200)
       .filter((call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id)
       .at(-1)?.id ?? null;
@@ -533,7 +661,36 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" },
       ),
     );
+    input.store.retrieval.createRewrite({
+      retrievalQueryId: retrievalQuery.id,
+      variant: rewritten.variant,
+      terms: rewritten.terms,
+      pathHints: rewritten.pathHints,
+      symbolHints: rewritten.symbolHints,
+      score: 1,
+    });
   }
+  const selectedRewriteVariant = rewriteVariants[0] ?? rewritten.variant;
+  const retrievalAgentRun = input.store.agents.createRun({
+    sessionId: session.id,
+    projectId: project.id,
+    agent: "retrieval_agent",
+    role: "retrieval-pipeline",
+    modelRole: "retrieval_judge",
+    risk: "low",
+    input: { question: input.input.question, rewrittenQuery: selectedRewriteVariant, projectId: project.id, mode, depth },
+  });
+  input.store.agents.updateRun(queryRewriterAgentRun.id, {
+    status: "completed",
+    finishedAt: new Date().toISOString(),
+    durationMs: 0,
+    output: {
+      retrievalQueryId: retrievalQuery.id,
+      selectedRewrite: selectedRewriteVariant,
+      variantCount: rewriteVariants.length,
+      parseStatus: queryRewriteParseStatus,
+    },
+  });
   input.store.agents.appendMessage({
     agentRunId: retrievalAgentRun.id,
     direction: "internal",
@@ -551,7 +708,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   const queryEmbedding = await input.runtime.embed(
     embeddingProfileId,
     {
-      input: rewritten.variant,
+      input: selectedRewriteVariant,
       modelName: embeddingProfile?.modelName ?? "embedding-local",
     },
     {
@@ -566,7 +723,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   const queryVector = queryEmbedding.embeddings[0] ?? [];
   const pipelineInput = buildRetrievalPipelineInput(input.store, {
     projectId: project.id,
-    query: rewritten.variant,
+    query: selectedRewriteVariant,
     intent,
     mode,
     depth,
@@ -604,26 +761,28 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
     })),
   );
-  if (pipelineOutput.miss) {
-    input.store.retrieval.recordMiss({
-      retrievalQueryId: retrievalQuery.id,
-      missedPath: pipelineOutput.miss.path,
-      confidence: pipelineOutput.confidence,
-      notes: pipelineOutput.miss.notes,
-    });
-  } else if (selected.length === 0) {
-    input.store.retrieval.recordMiss({
-      retrievalQueryId: retrievalQuery.id,
-      missedPath: project.path,
-      confidence: pipelineOutput.confidence,
-      notes: "no chunks returned from hybrid retrieval",
-    });
-  }
   const memoryEntries = input.store.memory.listEntries(project.id, undefined, 20);
   const facts = input.store.memory.listFacts(project.id, 20);
   const rules = input.store.memory.listProjectRules(project.id, 20);
   const skills = input.store.skills.listSkills("active", 20);
   const previousMessages = input.store.conversation.listMessages(session.id).slice(-8);
+  const contextAgentRun = input.store.agents.createRun({
+    sessionId: session.id,
+    projectId: project.id,
+    agent: "context_agent",
+    role: "context-packer",
+    modelRole: "summarizer",
+    risk: "low",
+    input: {
+      retrievalQueryId: retrievalQuery.id,
+      selectedChunkCount: selected.length,
+      previousMessageCount: previousMessages.length,
+      memoryCount: memoryEntries.length,
+      factCount: facts.length,
+      ruleCount: rules.length,
+      skillCount: skills.length,
+    },
+  });
   const packedContext = buildContextPack({
     sessionId: session.id,
     projectId: project.id,
@@ -663,16 +822,32 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       })),
     ],
   });
+  input.store.agents.updateRun(contextAgentRun.id, {
+    status: "completed",
+    finishedAt: new Date().toISOString(),
+    durationMs: 0,
+    output: {
+      contextPackId: contextPack.id,
+      itemCount: packedContext.items.length,
+      usedTokens: packedContext.pack.usedTokens,
+      budgetTokens: packedContext.pack.budgetTokens,
+    },
+  });
 
-  const confidence = pipelineOutput.confidence;
-  const insufficientReason = selected.length === 0 ? "No matching chunks were found in the selected project." : null;
+  const baseConfidence = pipelineOutput.confidence;
+  let confidence = baseConfidence;
+  let confidenceNotes = [...pipelineOutput.confidenceNotes];
+  let resolvedMiss: { path: string; notes: string | null } | null = pipelineOutput.miss
+    ? { path: pipelineOutput.miss.path, notes: pipelineOutput.miss.notes }
+    : null;
+  let retrievalJudgeParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
   const retrievalJudgeProfileId = input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
   const retrievalJudgePrompt = compilePrompt(
     buildAskRetrievalJudgePrompt({
       question: input.input.question,
       retrievalQueryId: retrievalQuery.id,
       contextPackId: contextPack.id,
-      rewrittenQuery: rewritten.variant,
+      rewrittenQuery: selectedRewriteVariant,
       mode,
       depth,
       retrievalChunks: chunks,
@@ -689,8 +864,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     contextPackId: contextPack.id,
   });
   const retrievalJudgeTrace = {
-    confidence,
-    insufficientReason,
+    confidence: baseConfidence,
     confidenceNotes: pipelineOutput.confidenceNotes,
     boost: pipelineOutput.boost,
     miss: pipelineOutput.miss ?? null,
@@ -702,7 +876,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   let retrievalJudgeCallId: string | null = null;
   try {
     input.store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
-    await input.store.invokeModel(
+    const retrievalJudgeResult = await input.store.invokeModel(
       retrievalJudgeProfileId,
       {
         role: "retrieval_judge",
@@ -722,6 +896,55 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         retrievalQueryId: retrievalQuery.id,
       },
     );
+    const parseRetrievalJudgeResult = (text: string): ReturnType<typeof parseRetrievalJudgeOutput> => {
+      try {
+        return parseRetrievalJudgeOutput(parseJsonFragment(text));
+      } catch {
+        return null;
+      }
+    };
+    let parsedJudge = parseRetrievalJudgeResult(retrievalJudgeResult.text);
+    if (parsedJudge) {
+      retrievalJudgeParseStatus = "parsed";
+    } else if (isLikelyJsonOutput(retrievalJudgeResult.text)) {
+      const repaired = await input.store.invokeModel(
+        retrievalJudgeProfileId,
+        {
+          role: "retrieval_judge",
+          messages: [
+            ...retrievalJudgePrompt.messages,
+            { role: "assistant", content: retrievalJudgeResult.text },
+            { role: "user", content: "Return ONLY valid JSON matching the output schema. No markdown fences." },
+          ],
+          temperature: 0,
+          maxOutputTokens: input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
+          metadata: {
+            compiledPrompt: retrievalJudgePrompt,
+            retrievalQueryId: retrievalQuery.id,
+            contextPackId: contextPack.id,
+            repairAttempt: true,
+          },
+        },
+        {
+          sessionId: session.id,
+          taskId: retrievalAgentRun.id,
+          retrievalQueryId: retrievalQuery.id,
+        },
+      );
+      parsedJudge = parseRetrievalJudgeResult(repaired.text);
+      if (parsedJudge) {
+        retrievalJudgeParseStatus = "repaired";
+      }
+    }
+    if (parsedJudge) {
+      confidence = parsedJudge.confidence;
+      confidenceNotes = parsedJudge.confidenceNotes;
+      if (parsedJudge.miss?.path) {
+        resolvedMiss = { path: parsedJudge.miss.path, notes: parsedJudge.miss.notes };
+      } else if (parsedJudge.miss === null) {
+        resolvedMiss = null;
+      }
+    }
     retrievalJudgeCallId = input.store.models.listCalls(session.id, 200)
       .filter((call) => call.role === "retrieval_judge" && call.taskId === retrievalAgentRun.id && call.retrievalQueryId === retrievalQuery.id)
       .at(-1)?.id ?? null;
@@ -735,6 +958,26 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       ),
     );
   }
+  const insufficientReason = selected.length === 0
+    ? "No matching chunks were found in the selected project."
+    : confidence < 0.35
+    ? (resolvedMiss?.notes ?? "retrieval confidence is low")
+    : null;
+  if (resolvedMiss) {
+    input.store.retrieval.recordMiss({
+      retrievalQueryId: retrievalQuery.id,
+      missedPath: resolvedMiss.path,
+      confidence,
+      notes: resolvedMiss.notes ?? null,
+    });
+  } else if (selected.length === 0) {
+    input.store.retrieval.recordMiss({
+      retrievalQueryId: retrievalQuery.id,
+      missedPath: project.path,
+      confidence,
+      notes: "no chunks returned from hybrid retrieval",
+    });
+  }
   input.store.agents.updateRun(retrievalAgentRun.id, {
     status: "completed",
     finishedAt: new Date().toISOString(),
@@ -744,6 +987,8 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       rankedCount: ranked.length,
       droppedCount: dropped.length,
       confidence,
+      confidenceNotes,
+      parseStatus: retrievalJudgeParseStatus,
       retrievalQueryId: retrievalQuery.id,
     },
   });

@@ -382,3 +382,163 @@ test("runAskWorkflow records model.failed and still completes with synthesis fai
     await rm(fixture.workspace, { recursive: true, force: true });
   }
 });
+
+test("runAskWorkflow prefers parsed JSON rewrite and retrieval judge outputs when valid", async () => {
+  const fixture = await createAskWorkspace(
+    {
+      "src/auth.ts": [
+        "export function handleLogin() {",
+        "  return { route: '/api/auth/login', storage: 'local sqlite' };",
+        "}",
+      ].join("\n"),
+    },
+    "json-primary-repo",
+  );
+  const originalInvoke = fixture.store.invokeModel;
+  fixture.store.invokeModel = async (profileId, request, options) => {
+    const text = request.role === "query_rewrite"
+      ? JSON.stringify({
+        rewrites: ["src/auth.ts handleLogin auth", "auth route login"],
+        pathHints: ["src/auth.ts"],
+        symbolHints: ["handleLogin"],
+      })
+      : request.role === "retrieval_judge"
+      ? JSON.stringify({
+        confidence: 0.88,
+        confidenceNotes: ["strong rewrite and path evidence"],
+        miss: null,
+      })
+      : request.role === "answer"
+      ? "parsed-json-answer"
+      : "ok";
+    fixture.store.models.recordCall({
+      profileId,
+      role: request.role,
+      promptTokens: 10,
+      completionTokens: 10,
+      latencyMs: 1,
+      status: "ok",
+      request: { role: request.role, metadata: request.metadata ?? null },
+      response: { text },
+      sessionId: options?.sessionId ?? null,
+      taskId: options?.taskId ?? null,
+      retrievalQueryId: options?.retrievalQueryId ?? null,
+    });
+    return {
+      text,
+      promptTokens: 10,
+      completionTokens: 10,
+      latencyMs: 1,
+      usage: { promptTokens: 10, completionTokens: 10, totalTokens: 20 },
+      status: "ok",
+      profileId,
+      providerId: "provider_heuristic_local",
+    };
+  };
+  try {
+    await fixture.store.indexProject(fixture.project.id);
+    const response = await runAskWorkflow({
+      store: fixture.store,
+      runtime: createMockRuntime(),
+      cloudEnabled: false,
+      input: {
+        project: fixture.project.id,
+        question: "where is auth handled?",
+        mode: "local",
+        depth: "standard",
+      },
+    });
+    assert.equal(response.confidence, 0.88);
+    const query = fixture.store.retrieval.listQueriesForSession(response.sessionId, 5)[0]!;
+    assert.equal(query.rewrittenQuery, "src/auth.ts handleLogin auth");
+    const rewrites = fixture.store.retrieval.listRewrites(query.id);
+    assert.ok(rewrites.length >= 2);
+    assert.equal(rewrites[0]?.variant, "src/auth.ts handleLogin auth");
+  } finally {
+    fixture.store.invokeModel = originalInvoke;
+    fixture.store.db.close();
+    await rm(fixture.workspace, { recursive: true, force: true });
+  }
+});
+
+test("runAskWorkflow performs one repair attempt for JSON-like invalid rewrite/judge outputs", async () => {
+  const fixture = await createAskWorkspace(
+    {
+      "src/auth.ts": "export const auth = true;\n",
+    },
+    "json-repair-repo",
+  );
+  const originalInvoke = fixture.store.invokeModel;
+  let queryRewriteCalls = 0;
+  let retrievalJudgeCalls = 0;
+  fixture.store.invokeModel = async (profileId, request, options) => {
+    let text = "ok";
+    if (request.role === "query_rewrite") {
+      queryRewriteCalls += 1;
+      text = queryRewriteCalls === 1
+        ? "{broken"
+        : JSON.stringify({
+          rewrites: ["auth repaired rewrite"],
+          pathHints: ["src/auth.ts"],
+          symbolHints: ["auth"],
+        });
+    } else if (request.role === "retrieval_judge") {
+      retrievalJudgeCalls += 1;
+      text = retrievalJudgeCalls === 1
+        ? "{oops"
+        : JSON.stringify({
+          confidence: 0.73,
+          confidenceNotes: ["repair succeeded"],
+          miss: null,
+        });
+    } else if (request.role === "answer") {
+      text = "repair-answer";
+    }
+    fixture.store.models.recordCall({
+      profileId,
+      role: request.role,
+      promptTokens: 9,
+      completionTokens: 9,
+      latencyMs: 1,
+      status: "ok",
+      request: { role: request.role, metadata: request.metadata ?? null },
+      response: { text },
+      sessionId: options?.sessionId ?? null,
+      taskId: options?.taskId ?? null,
+      retrievalQueryId: options?.retrievalQueryId ?? null,
+    });
+    return {
+      text,
+      promptTokens: 9,
+      completionTokens: 9,
+      latencyMs: 1,
+      usage: { promptTokens: 9, completionTokens: 9, totalTokens: 18 },
+      status: "ok",
+      profileId,
+      providerId: "provider_heuristic_local",
+    };
+  };
+  try {
+    await fixture.store.indexProject(fixture.project.id);
+    const response = await runAskWorkflow({
+      store: fixture.store,
+      runtime: createMockRuntime(),
+      cloudEnabled: false,
+      input: {
+        project: fixture.project.id,
+        question: "where auth?",
+        mode: "local",
+        depth: "standard",
+      },
+    });
+    assert.equal(queryRewriteCalls, 2);
+    assert.equal(retrievalJudgeCalls, 2);
+    assert.equal(response.confidence, 0.73);
+    const query = fixture.store.retrieval.listQueriesForSession(response.sessionId, 5)[0]!;
+    assert.equal(query.rewrittenQuery, "auth repaired rewrite");
+  } finally {
+    fixture.store.invokeModel = originalInvoke;
+    fixture.store.db.close();
+    await rm(fixture.workspace, { recursive: true, force: true });
+  }
+});

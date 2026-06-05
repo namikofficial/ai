@@ -1071,3 +1071,9 @@ export interface SkillUsageRecord {
   notes: string | null;
   createdAt: string;
 }
+
+export {
+  extractJsonFragment,
+  isLikelyJsonOutput,
+  parseJsonFragment,
+} from "./model-output.ts";

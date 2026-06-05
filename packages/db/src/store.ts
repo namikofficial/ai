@@ -78,6 +78,7 @@ import {
   rankChunk,
 } from "../../retrieval-engine/src/index.ts";
 import { createEvent, createId, slugifyName } from "../../shared/src/index.ts";
+import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
 
 type Row = Record<string, unknown>;
 const require = createRequire(import.meta.url);
@@ -1188,54 +1189,26 @@ export function createStore(db: DatabaseSync) {
         reason: `${routeDecision.reason}; risk=${risk}; blocked=${routeDecision.blocked}`,
       });
       const files = store.listProjectFiles(project.id, 12).map((file) => file.path);
-      const taskGraph = [
+      const defaultTaskGraph: PlannerTaskDraft[] = [
         {
-          id: createId("task"),
           title: "Inspect current implementation",
           description: `Read the relevant files for ${input.goal}.`,
-          status: "queued" as const,
           expectedFiles: files.slice(0, 4),
           checks: ["typecheck"],
         },
         {
-          id: createId("task"),
           title: "Make the smallest correct change",
           description: `Implement the change while keeping the edit scope narrow.`,
-          status: "queued" as const,
           expectedFiles: files.slice(0, 3),
           checks: ["typecheck", "tests"],
         },
         {
-          id: createId("task"),
           title: "Validate and hand off",
           description: "Run the relevant checks and package the result.",
-          status: "queued" as const,
           expectedFiles: files.slice(0, 2),
           checks: ["typecheck", "tests"],
         },
       ];
-      const persistedTaskGraph = taskGraph.map((task, index) => {
-        const record = store.createTask({
-          sessionId: session.id,
-          title: task.title,
-          description: task.description,
-          type: `plan.${index + 1}`,
-          risk,
-          priority: index + 1,
-        });
-        store.updateTask(record.id, {
-          expectedFilesJson: JSON.stringify(task.expectedFiles),
-          checksJson: JSON.stringify(task.checks),
-        });
-        store.appendEvent(
-          createEvent(
-            "task.created",
-            { title: task.title, description: task.description, expectedFiles: task.expectedFiles, checks: task.checks },
-            { sessionId: session.id, projectId: project.id, taskId: record.id, agent: "planner" },
-          ),
-        );
-        return { ...task, id: record.id };
-      });
       const plannerProfileId = session.modelProfile ?? "planner-balanced-local";
       const compiledPlanner = compilePrompt({
         mode: "planner",
@@ -1261,24 +1234,18 @@ export function createStore(db: DatabaseSync) {
       store.recordCompiledPrompt({
         compiledPrompt: compiledPlanner,
         sessionId: session.id,
-        taskId: persistedTaskGraph[0]?.id ?? null,
+        taskId: null,
       });
-      const response: PlanResponse = {
-        sessionId: session.id,
-        projectId: project.id,
-        goal: input.goal,
-        risk,
-        taskGraph: persistedTaskGraph,
-        likelyFiles: files.slice(0, 8),
-        checks: ["typecheck", "tests"],
-        modelRecommendation:
-          risk === "high" ? "planner-deep-local" : risk === "medium" ? "planner-balanced-local" : "planner-fast-local",
-        researchDepth: risk === "low" ? "shallow" : risk === "high" ? "deep" : "standard",
-      };
+      let plannerParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
+      let taskGraphDraft = defaultTaskGraph;
+      let likelyFiles = files.slice(0, 8);
+      let checks = ["typecheck", "tests"];
+      let modelRecommendation =
+        risk === "high" ? "planner-deep-local" : risk === "medium" ? "planner-balanced-local" : "planner-fast-local";
       let plannerModelCallId: string | null = null;
       try {
         store.appendEvent(createEvent("model.called", { role: "planner", profileId: plannerProfileId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
-        await invokeModel(
+        const plannerResult = await invokeModel(
           plannerProfileId,
           {
             role: "planner",
@@ -1287,18 +1254,61 @@ export function createStore(db: DatabaseSync) {
             maxOutputTokens: modelsRepo.getProfile(plannerProfileId)?.maxOutputTokens ?? 1024,
             metadata: {
               compiledPrompt: compiledPlanner,
-              responseTrace: { taskGraph: persistedTaskGraph, likelyFiles: response.likelyFiles, checks: response.checks },
+              responseTrace: { taskGraph: taskGraphDraft, likelyFiles, checks },
             },
           },
           {
             sessionId: session.id,
-            taskId: persistedTaskGraph[0]?.id ?? null,
+            taskId: null,
           },
         );
+        const parsePlannerResult = (text: string): ReturnType<typeof parsePlannerOutput> => {
+          try {
+            return parsePlannerOutput(parseJsonFragment(text));
+          } catch {
+            return null;
+          }
+        };
+        let parsedPlanner = parsePlannerResult(plannerResult.text);
+        if (parsedPlanner) {
+          plannerParseStatus = "parsed";
+        } else if (isLikelyJsonOutput(plannerResult.text)) {
+          const repaired = await invokeModel(
+            plannerProfileId,
+            {
+              role: "planner",
+              messages: [
+                ...compiledPlanner.messages,
+                { role: "assistant", content: plannerResult.text },
+                { role: "user", content: "Return ONLY valid JSON matching the output schema. No markdown fences." },
+              ],
+              temperature: 0,
+              maxOutputTokens: modelsRepo.getProfile(plannerProfileId)?.maxOutputTokens ?? 1024,
+              metadata: {
+                compiledPrompt: compiledPlanner,
+                repairAttempt: true,
+              },
+            },
+            {
+              sessionId: session.id,
+              taskId: null,
+            },
+          );
+          parsedPlanner = parsePlannerResult(repaired.text);
+          if (parsedPlanner) {
+            plannerParseStatus = "repaired";
+          }
+        }
+        if (parsedPlanner) {
+          taskGraphDraft = parsedPlanner.taskGraph;
+          likelyFiles = parsedPlanner.likelyFiles.length > 0 ? parsedPlanner.likelyFiles.slice(0, 8) : likelyFiles;
+          checks = parsedPlanner.checks.length > 0 ? parsedPlanner.checks : checks;
+          modelRecommendation = parsedPlanner.modelRecommendation ?? modelRecommendation;
+        }
         plannerModelCallId = modelsRepo.listCalls(session.id, 200)
           .filter((call) => call.role === "planner" && call.profileId === plannerProfileId)
           .at(-1)?.id ?? null;
-        store.appendEvent(createEvent("model.completed", { role: "planner", profileId: plannerProfileId, requestId: plannerModelCallId, compiledId: compiledPlanner.id }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
+        store.appendEvent(createEvent("model.completed", { role: "planner", profileId: plannerProfileId, requestId: plannerModelCallId, compiledId: compiledPlanner.id, parseStatus: plannerParseStatus }, { sessionId: session.id, projectId: project.id, agent: "planner" }));
       } catch (error) {
         store.appendEvent(
           createEvent(
@@ -1308,6 +1318,46 @@ export function createStore(db: DatabaseSync) {
           ),
         );
       }
+      const persistedTaskGraph = taskGraphDraft.map((task, index) => {
+        const record = store.createTask({
+          sessionId: session.id,
+          title: task.title,
+          description: task.description,
+          type: `plan.${index + 1}`,
+          risk,
+          priority: index + 1,
+        });
+        store.updateTask(record.id, {
+          expectedFilesJson: JSON.stringify(task.expectedFiles),
+          checksJson: JSON.stringify(task.checks),
+        });
+        store.appendEvent(
+          createEvent(
+            "task.created",
+            { title: task.title, description: task.description, expectedFiles: task.expectedFiles, checks: task.checks },
+            { sessionId: session.id, projectId: project.id, taskId: record.id, agent: "planner" },
+          ),
+        );
+        return {
+          id: record.id,
+          title: task.title,
+          description: task.description,
+          status: "queued" as const,
+          expectedFiles: task.expectedFiles,
+          checks: task.checks,
+        };
+      });
+      const response: PlanResponse = {
+        sessionId: session.id,
+        projectId: project.id,
+        goal: input.goal,
+        risk,
+        taskGraph: persistedTaskGraph,
+        likelyFiles,
+        checks,
+        modelRecommendation,
+        researchDepth: risk === "low" ? "shallow" : risk === "high" ? "deep" : "standard",
+      };
       store.appendEvent(
         createEvent("task.created", { title: "Plan generated", goal: input.goal }, { sessionId: session.id, projectId: project.id, agent: "planner" }),
       );
@@ -1872,6 +1922,56 @@ function safeParseJson(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+interface PlannerTaskDraft {
+  title: string;
+  description: string;
+  expectedFiles: string[];
+  checks: string[];
+}
+
+function parsePlannerOutput(value: unknown): {
+  taskGraph: PlannerTaskDraft[];
+  likelyFiles: string[];
+  checks: string[];
+  modelRecommendation: string | null;
+} | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const record = value as Record<string, unknown>;
+  if (!Array.isArray(record.taskGraph) || !Array.isArray(record.likelyFiles) || !Array.isArray(record.checks)) {
+    return null;
+  }
+  const likelyFiles = record.likelyFiles.filter((entry): entry is string => typeof entry === "string");
+  const checks = record.checks.filter((entry): entry is string => typeof entry === "string");
+  const taskGraph = record.taskGraph
+    .filter((entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && !Array.isArray(entry))
+    .map((entry) => {
+      const expectedFiles = Array.isArray(entry.expectedFiles)
+        ? entry.expectedFiles.filter((file): file is string => typeof file === "string")
+        : [];
+      const taskChecks = Array.isArray(entry.checks)
+        ? entry.checks.filter((check): check is string => typeof check === "string")
+        : [];
+      return {
+        title: typeof entry.title === "string" ? entry.title : "",
+        description: typeof entry.description === "string" ? entry.description : "",
+        expectedFiles,
+        checks: taskChecks,
+      };
+    })
+    .filter((entry) => entry.title.length > 0 && entry.description.length > 0);
+  if (taskGraph.length === 0) {
+    return null;
+  }
+  return {
+    taskGraph,
+    likelyFiles,
+    checks,
+    modelRecommendation: typeof record.modelRecommendation === "string" ? record.modelRecommendation : null,
+  };
 }
 
 function detectLanguageFromPath(projectPath: string): string | null {
