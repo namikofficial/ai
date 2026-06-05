@@ -1093,15 +1093,7 @@ If a check fails:
 - No unsafe shell execution.
 - No editing outside the allowed project path.
 
-## 19. Immediate Next Actions
-
-1. Finish the intelligence upgrade in section 25.
-2. Keep the existing observability schema, API routes, CLI trace output, MCP call logging, and web pages intact.
-3. Replace remaining heuristic orchestration in `packages/db/src/store.ts` with calls into the modular intelligence packages.
-4. Verify the full local-first ask path with model-call, retrieval, context-pack, agent-run, and replayable prompt records.
-5. Run `pnpm typecheck` and `pnpm test` after each completed slice.
-
-## 20. Notes And Decisions
+## 19. Notes And Decisions
 
 - TypeScript is the main implementation language for the product boundary.
 - Python is a migration target, not the long-term center.
@@ -1109,7 +1101,7 @@ If a check fails:
 - The first serious orchestration surface is sessions and events, not autonomous editing.
 - Retrieval quality matters, but the product boundary must be stable first.
 
-## 21. Current Implementation Status
+## 20. Current Implementation Status
 
 Implemented in this bootstrap slice:
 
@@ -1133,7 +1125,7 @@ Implemented in this bootstrap slice:
 - Environment overrides for local runtime paths and ports via `AI_DATABASE_PATH`, `AI_RUNTIME_DIR`, `AI_API_PORT`, `AI_WEB_PORT`, and `AI_API_URL`.
 - Review-created background reflection jobs and a worker path for review learning follow-ups.
 
-## 22. Observability Slice (in progress)
+## 21. Observability Slice (in progress)
 
 Per the user's explicit "do not jump to auto-agents; make the system observable and replayable first" directive, the following slice adds durable traces for every important action.
 
@@ -1151,7 +1143,7 @@ Implemented:
 - New CLI commands: `ai memory candidates|accept|reject|list`, `ai models list|health`, `ai trace conversation <session-id>`, `ai skills candidates|accept|reject`, `ai eval add|list|run` (CLI opens the local store directly; network-bound commands continue to route through the API client).
 - New tests in `tests/observability.test.ts` (7 tests): ask populates retrieval/conversation/agent/context/memory/eval tables; retrieval-miss recording; handoff records context pack + agent run; indexProject records indexer run; memory candidate accept/reject lifecycle; agent-protocol registry; agent-protocol required events.
 
-## 23. Observability API Slice (slice 2)
+## 22. Observability API Slice (slice 2)
 
 Per the user's "do not jump to auto-agents; make the system observable and replayable first" directive, slice 2 exposes every observability table through the API so the web UI and external clients can read and review traces.
 
@@ -1184,17 +1176,17 @@ Not yet implemented (next slices):
 - Real embeddings, real reranker, real model router.
 - Worker reflection job that promotes `memory_candidates` / `skill_candidates` and records `facts` automatically.
 
-## 24. Observability Web UI Slice (slice 3)
+## 23. Observability Web UI Slice (slice 3)
 
 Replaces the placeholder observability pages in `apps/web/src/pages.tsx` with real implementations that consume the slice 2 API routes, adds two new top-level pages (Skills, Eval, Agents) plus two detail subpages (Retrieval query detail, Agent run detail), and wires everything into the React Router surface and nav.
 
-### 24.1 Pages replaced
+### 23.1 Pages replaced
 
 - `MemoryPage`: three panels — pending candidates (Accept / Reject buttons), accepted entries table, project rules dropdown selector. Reads from `api.listMemoryCandidates({ status: "pending" })`, `api.listMemoryEntries`, and a `useResource` that calls `api.listProjects` + `api.listProjectRules`.
 - `RetrievalPage`: kept the search box; added "Recent Retrieval Queries" panel listing `api.listRetrievalQueries()` and linking to `/retrieval/queries/:queryId`, plus a "Missed Paths" panel derived from each query's `misses`.
 - `ModelsPage`: five panels — Providers, Profiles, Health (last call per provider), Recent Calls, Daily Usage. Reads from `api.getModelProviders`, `api.getModelCalls`, `api.getModelHealth`.
 
-### 24.2 Pages added
+### 23.2 Pages added
 
 - `SkillsPage`: Active Skills, Pending Candidates (Accept / Reject), Rejected Candidates. Reads `api.listSkills`, `api.listSkillCandidates({ status: "pending" })`, `api.listSkillCandidates({ status: "rejected" })`.
 - `EvalPage`: form to add a new eval case (project + question + expected substring), Cases list, Answer Evaluations (groundedness + citation coverage + contradiction), Session Outcomes. Uses `api.listEvalCases`, `api.listAnswerEvaluations`, `api.listSessionOutcomes`, `api.addEvalCase`.
@@ -1202,18 +1194,18 @@ Replaces the placeholder observability pages in `apps/web/src/pages.tsx` with re
 - `RetrievalQueryDetailPage`: linked from retrieval page; shows the original query, rewrites, results, selected paths, misses, and any feedback. Uses `useParams` + `useResource` with `runId` dep.
 - `AgentRunDetailPage`: linked from agents page; shows run summary (agent, status, model role, session, task, started/finished), `input`/`output` JSON, and the agent's message history. Uses `useParams` + `useResource` with `runId` dep.
 
-### 24.3 Router & nav updates (`apps/web/src/App.tsx`)
+### 23.3 Router & nav updates (`apps/web/src/App.tsx`)
 
 - Imported the 5 new page components in alphabetical order.
 - New routes: `/agents`, `/agents/runs/:runId`, `/retrieval/queries/:queryId`, `/skills`, `/eval`.
 - Added `/agents`, `/skills`, `/eval` to both `navItems` and `commandItems` (subpages are not in the main nav).
 
-### 24.4 Test surface
+### 23.4 Test surface
 
 - Extended `tests/web.test.ts`'s "Vite React shell and router surface" test to assert every new route is registered in `App.tsx` and every new page is exported from `pages.tsx` (AgentRunDetailPage, AgentsPage, EvalPage, RetrievalQueryDetailPage, SkillsPage, plus the existing MemoryPage, ModelsPage, RetrievalPage).
 - All 28 tests pass; typecheck is clean.
 
-### 24.5 Acceptance criteria (met)
+### 23.5 Acceptance criteria (met)
 
 - Every observability API route from slice 2 is reachable from a web page.
 - A reviewer can accept/reject memory and skill candidates from the UI without touching the API.
@@ -1221,11 +1213,22 @@ Replaces the placeholder observability pages in `apps/web/src/pages.tsx` with re
 - A reviewer can drill from the agents page into a run's input/output/messages.
 - No new dependencies; all pages use the existing `Panel`, `Badge`, `EmptyState`, `KeyValueList`, `useResource` primitives.
 
-## 25. Intelligence Upgrade Slice (active)
+## 24. Intelligence Upgrade Slice (active)
 
-Correction after re-checking the repository: the observability foundation already exists. The next implementation target is not "add observability." It is to replace the heuristic brain with real modular intelligence while preserving all trace/replay records.
+Correction after re-checking the repository: the observability foundation already exists. The next implementation target is not "add observability." It is to turn the current scaffold into a reliable local-first orchestration brain while preserving all trace/replay records.
 
-### 25.1 Current state
+Implementation order:
+
+1. Model router.
+2. Prompt compiler.
+3. Retrieval pipeline.
+4. Context packer.
+5. Reflection and learning engine.
+6. Runnable agent executor.
+7. MCP and web orchestration surfaces.
+8. Evaluation loop.
+
+### 24.1 Current state
 
 Already present:
 
@@ -1259,15 +1262,15 @@ Completed in the current intelligence pass:
 Still not complete:
 
 - `packages/db/src/store.ts` is still a large orchestration file and still contains ask/index/handoff/reflection flow composition.
-- Query rewrite still uses deterministic rewrite output for retrieval until model rewrite JSON parsing/validation is implemented.
-- Retrieval judge still uses deterministic confidence output for final control flow until model-judged confidence parsing/validation is implemented.
-- Reflection candidate creation still uses deterministic extraction until validated model output parsing is implemented.
-- The context engine exists, but reflection must consistently use persisted context-pack items and compiled prompts as the replayable prompt source.
+- Query rewrite still needs validated JSON output and multiple rewrite variants instead of a single deterministic rewrite.
+- Retrieval still needs a formal evidence pipeline with explain output, reranking, confidence, and trace persistence.
+- Reflection candidate creation still needs structured outputs so memory, fact, skill, retrieval-feedback, stale-fact, and routing-note candidates are reviewable.
+- The context engine exists, but it must become the only input to answer, planner, review, and reflection prompts.
 - Embeddings still have heuristic hash fallback behavior; provider-based embeddings and Qdrant dimension validation must be the real path when configured.
-- Reflection exists, but must reliably create memory candidates, fact candidates, skill candidates, retrieval feedback/miss candidates, stale fact warnings, and routing notes from completed sessions.
 - Agent execution exists in `packages/agent-protocol`, but the ask flow must be refactored into runnable agent steps rather than only descriptor-backed trace rows.
+- Evaluation coverage is still too thin; the repo needs local eval cases for retrieval, routing, and answer quality before widening autonomy.
 
-### 25.2 Non-negotiable constraints
+### 24.2 Non-negotiable constraints
 
 - TypeScript owns the product boundary.
 - Keep local-first as the default.
@@ -1282,7 +1285,7 @@ Still not complete:
 - Every retrieval must create retrieval query/result/selected-context records.
 - Every generated prompt must be replayable from trace data.
 
-### 25.3 Slice 1: model runtime
+### 24.3 Slice 1: model runtime
 
 Goal: make `packages/model-runtime` the only path for model health, routing, invocation, embedding, reranking, latency, usage, fallback, and cloud blocking.
 
@@ -1295,6 +1298,7 @@ Required behavior:
 - Successful, failed, blocked, and fallback invocations are recorded in `model_calls`.
 - Provider health checks are recorded through existing model health tables.
 - Token usage is estimated when provider usage is absent.
+- Model routing must consider role, mode, local/cloud permission, profile scores, context need, expected output, latency target, JSON requirement, code reasoning requirement, tool-calling requirement, previous failures, and cloud allowance.
 
 CLI acceptance:
 
@@ -1313,7 +1317,7 @@ Tests required:
 - Every invocation records `model_calls`.
 - Usage rows are updated.
 
-### 25.4 Slice 2: prompt compiler
+### 24.4 Slice 2: prompt compiler
 
 Goal: remove ad hoc prompt construction from store/API/worker/MCP and make every model prompt replayable.
 
@@ -1324,6 +1328,7 @@ Required behavior:
 - Compiled prompts expose included context, omitted context with reasons, safety notes, token estimate, and optional context-pack id.
 - Ask, handoff, and reflection use compiled prompts.
 - Trace output can show the exact compiled prompt that produced each model call.
+- Model outputs used for query rewrite, retrieval judging, reflection, review, and planning must be parsed through Zod-backed schemas with repair-once retry behavior.
 
 Tests required:
 
@@ -1332,27 +1337,26 @@ Tests required:
 - Snapshot reflection prompt shape.
 - Prompt compiler omits stale facts and over-budget context with reasons.
 
-### 25.5 Slice 3: retrieval engine
+### 24.5 Slice 3: retrieval engine
 
 Goal: make `packages/retrieval-engine` the real retrieval pipeline, not a holder for functions copied out of `store.ts`.
 
 Pipeline:
 
 1. Classify intent.
-2. Analyze query.
-3. Generate 2-5 query rewrites.
-4. Extract path hints.
-5. Extract symbol hints.
-6. Search SQLite FTS.
-7. Search Qdrant when enabled and dimension-compatible.
-8. Apply memory/fact/rule boosts.
-9. Apply recent session/check/review boosts.
-10. Apply feedback and miss boosts.
-11. Rerank.
-12. Select context under token budget.
-13. Record trace.
-14. Compute confidence.
-15. Record retrieval misses and low-confidence evaluations.
+2. Rewrite query into 2-6 variants.
+3. Extract path hints.
+4. Extract symbol hints.
+5. Search SQLite FTS.
+6. Search Qdrant when enabled and dimension-compatible.
+7. Apply memory/fact/rule boosts.
+8. Apply recent session/check/review boosts.
+9. Apply feedback and miss boosts.
+10. Rerank.
+11. Select context under token budget.
+12. Record trace.
+13. Compute confidence.
+14. Record retrieval misses and low-confidence evaluations.
 
 CLI acceptance:
 
@@ -1369,7 +1373,7 @@ Tests required:
 - Positive and missed-path feedback changes ranking.
 - Low confidence creates retrieval misses and answer evaluation records.
 
-### 25.6 Slice 4: real embeddings
+### 24.6 Slice 4: real embeddings
 
 Goal: use provider-based embeddings when configured and keep hash embeddings only as fallback.
 
@@ -1398,7 +1402,7 @@ Tests required:
 - Changed chunks only are re-embedded.
 - Trace shows embedding metadata.
 
-### 25.7 Slice 5: context engine
+### 24.7 Slice 5: context engine
 
 Goal: make context packs real compressed context, not filenames or selected chunks only.
 
@@ -1424,6 +1428,7 @@ Required behavior:
 - Previous messages use recency and relevance budget.
 - Near-identical excerpts are deduped.
 - Ask, handoff, planner, and reflection use this package.
+- Small, normal, and deep context modes should exist so deep packs are reserved for low-confidence or higher-risk work.
 
 Tests required:
 
@@ -1432,7 +1437,7 @@ Tests required:
 - Priority ordering.
 - Stale fact omission.
 
-### 25.8 Slice 6: reflection engine
+### 24.8 Slice 6: reflection engine
 
 Goal: replace lesson-only reflection with reviewable candidates and evidence.
 
@@ -1452,6 +1457,7 @@ Rules:
 - Store evidence JSON.
 - Cite source session/query/context/result ids.
 - Redact secrets.
+- Reflection should produce candidate rows rather than silently mutating long-lived memory tables.
 
 Tests required:
 
@@ -1461,7 +1467,7 @@ Tests required:
 - Repeated retrieval misses create a retrieval-improvement memory candidate.
 - Repeated successful workflow creates a skill candidate.
 
-### 25.9 Slice 7: runnable agents
+### 24.9 Slice 7: runnable agents
 
 Goal: keep `packages/agent-protocol` as the contract layer and add real execution semantics for ask.
 
@@ -1475,6 +1481,7 @@ Required behavior:
 - Enforces timeout.
 - Emits required events.
 - Uses `prompt-compiler` when a model is needed.
+- Agent steps should stay narrow and deterministic so each step can be traced and replayed independently.
 
 Ask flow target:
 
@@ -1494,7 +1501,7 @@ Tests required:
 - Failed agent run is visible in trace.
 - Tool outside allowlist is blocked.
 
-### 25.10 Slice 8: MCP full trace
+### 24.10 Slice 8: MCP full trace
 
 Goal: MCP trace tools expose the same replayable data as CLI trace.
 
@@ -1514,13 +1521,14 @@ Rules:
 - Every MCP tool logs an `mcp_calls` row.
 - Write-like tools remain narrow and explicit.
 - Memory/skill accept tools are logged.
+- MCP write-like tools must stay narrow and explicit; no raw shell execution is introduced through trace tooling.
 
 Tests required:
 
 - Full session trace includes conversation, retrieval, context packs, model calls, agent runs/messages, memory/facts/rules, skills, evals, checks, reviews, outcomes, and events.
 - Accept tools update state and log MCP calls.
 
-### 25.11 Slice 9: split `store.ts`
+### 24.11 Slice 9: split `store.ts`
 
 Goal: make `store.ts` a composition layer, not a god file.
 
@@ -1552,7 +1560,7 @@ Acceptance:
 - `pnpm typecheck` passes.
 - `pnpm test` passes.
 
-### 25.12 End-to-end verification
+### 24.12 End-to-end verification
 
 Run:
 
@@ -1574,13 +1582,24 @@ node --experimental-strip-types cli/ai/src/main.ts eval run --project <project-i
 Definition of done:
 
 - Ask uses the real model-runtime abstraction.
+- Model routing is explicit and cloud stays blocked unless enabled.
 - Answer prompt is compiled and replayable.
 - Retrieval rewrites are better than a single heuristic rewrite.
 - Context packs include previous messages, accepted memories, facts, selected chunks, project rules, and relevant skills.
-- Reflection creates useful memory, skill, fact, retrieval feedback, and stale-fact candidates.
-- Model routing refuses cloud when cloud is disabled.
+- Reflection creates useful memory, skill, fact, retrieval feedback, stale-fact, and routing-note candidates.
 - Qdrant uses configured embedding dimensions or falls back safely.
 - MCP trace is complete.
 - Web pages continue working.
 - Tests pass.
 - No hidden unsafe execution path is introduced.
+
+## 25. Immediate Next Actions
+
+1. Add validated JSON output parsing for query rewrite, retrieval judging, reflection, and planner paths.
+2. Replace the remaining deterministic rewrite and confidence branches with schema-backed model output handling.
+3. Move the ask flow further toward explicit runnable agent steps for intent, retrieval, context, answer, and reflection.
+4. Add retrieval explain output that surfaces original query, rewrites, scored evidence, selected context, and omitted context.
+5. Add reviewable memory, fact, skill, retrieval-feedback, stale-fact, and routing-note candidate records to the reflection flow.
+6. Add local eval fixtures for retrieval quality, routing choices, and answer grounding.
+7. Keep `packages/db/src/store.ts` moving toward a composition-only layer by extracting the remaining orchestration helpers.
+8. Verify each slice with `pnpm typecheck` and `pnpm test` before widening the next step.
