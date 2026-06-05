@@ -66,7 +66,8 @@ function makeStore(input: {
   compiledPrompt?: CompiledPromptRecord | null;
   profiles?: ModelProfileRecord[];
   providers?: ModelProviderRecord[];
-}): PromptLabEngineStore {
+}): PromptLabEngineStore & { __test: { createRunCount: number } } {
+  const state = { createRunCount: 0 };
   return {
     getProject(id) {
       return id === "project-1" ? { id: "project-1", path: "/tmp/project", name: "project" } : null;
@@ -75,6 +76,7 @@ function makeStore(input: {
       return input.compiledPrompt ?? (id === "prompt-1" ? makeCompiledPrompt(JSON.stringify([{ role: "user", content: "hello" }])) : null);
     },
     createRun(run) {
+      state.createRunCount += 1;
       const ts = run.createdAt ?? new Date().toISOString();
       return {
         id: run.id,
@@ -114,6 +116,7 @@ function makeStore(input: {
     listProviders() {
       return input.providers ?? [makeProvider()];
     },
+    __test: state,
   };
 }
 
@@ -134,6 +137,39 @@ test("runPromptLab normalizes profile IDs and validates messages before creating
       projectId: "project-1",
       promptId: "prompt-1",
       selectedProfiles: ["a", " a ", "b", " "],
+      notes: null,
+      dryRun: false,
+    }, { cloudEnabled: true });
+    throw new Error("expected runPromptLab to reject");
+  } catch (error) {
+    assert.equal((error as { statusCode?: number }).statusCode, 400);
+  }
+  assert.equal(store.__test.createRunCount, 0);
+});
+
+test("runPromptLab rejects empty normalized profile lists before creating a run", async () => {
+  const store = makeStore({});
+  try {
+    await runPromptLab(store, {
+      projectId: "project-1",
+      promptId: "prompt-1",
+      selectedProfiles: [" ", ""],
+      notes: null,
+      dryRun: false,
+    }, { cloudEnabled: true });
+    throw new Error("expected runPromptLab to reject");
+  } catch (error) {
+    assert.equal((error as { statusCode?: number }).statusCode, 400);
+  }
+});
+
+test("runPromptLab rejects more than three unique profiles after normalization", async () => {
+  const store = makeStore({});
+  try {
+    await runPromptLab(store, {
+      projectId: "project-1",
+      promptId: "prompt-1",
+      selectedProfiles: ["a", " a ", "b", "c", "d"],
       notes: null,
       dryRun: false,
     }, { cloudEnabled: true });

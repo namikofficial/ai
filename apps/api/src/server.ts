@@ -215,16 +215,10 @@ function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: Conf
 
 function buildRuntimeForStore(store: ReturnType<typeof createStore>, cloudEnabled: boolean): ModelRuntime {
   return createModelRuntime({
-    providers: store.models.listProviders().map((provider) => ({
-      id: provider.id,
-      kind: provider.kind,
-      displayName: provider.displayName,
-      baseUrl: provider.baseUrl,
-      apiKeyEnv: provider.apiKeyEnv,
-      enabled: provider.enabled,
-    })),
+    providers: store.models.listProviders(),
     profiles: store.models.listProfiles(),
     cloudEnabled,
+    recordCall: store.models.recordCall,
   });
 }
 
