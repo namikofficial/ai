@@ -223,3 +223,55 @@ test("code-intelligence: retrieval uses symbol and graph signals", async () => {
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
 });
+
+test("code-intelligence: deleted file symbols removed on reindex", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-code-intel-del-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(
+    join(repo, ".ai-workbench.json"),
+    JSON.stringify({
+      include: ["src/**"],
+      codeIntelligence: { enabled: true },
+    }),
+  );
+  await writeFile(
+    join(repo, "src", "auth.ts"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n"),
+  );
+  await writeFile(
+    join(repo, "src", "router.ts"),
+    ["export function route() {", "  return { ok: true };", "}"].join("\n"),
+  );
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "repo" });
+  await store.indexProject(project.id);
+
+  const symbolsBefore = store.db
+    .prepare("SELECT path FROM code_symbols WHERE project_id = ?")
+    .all(project.id) as Array<{ path: string }>;
+  assert.ok(symbolsBefore.some((row) => row.path === "src/auth.ts"));
+  assert.ok(symbolsBefore.some((row) => row.path === "src/router.ts"));
+
+  await rm(join(repo, "src", "auth.ts"), { force: true });
+  await store.indexProject(project.id);
+
+  const symbolsAfter = store.db
+    .prepare("SELECT path FROM code_symbols WHERE project_id = ?")
+    .all(project.id) as Array<{ path: string }>;
+  assert.ok(!symbolsAfter.some((row) => row.path === "src/auth.ts"), "deleted file symbols should be removed");
+  assert.ok(symbolsAfter.some((row) => row.path === "src/router.ts"), "surviving file symbols remain");
+
+  const chunks = searchProjectChunks({
+    db: store.db,
+    projectId: project.id,
+    query: "handleLogin",
+    limit: 8,
+    qdrantSettings: null,
+  });
+  assert.ok(!chunks.some((chunk) => chunk.path === "src/auth.ts"), "deleted file should not appear in retrieval results");
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
