@@ -111,9 +111,6 @@ test("timeline, replay, and prompt lab endpoints are replayable and local-first"
       assert.ok(row);
       assert.equal(row!.parent_session_id, ask.data.sessionId);
       assert.equal(row!.child_session_id, replay.data.childSession.id);
-    } finally {
-      verifier.db.close();
-    }
 
     // 400: missing info
     const promptLabBadRes = await ctx.request("POST", "/prompt-lab/run", {
@@ -162,9 +159,57 @@ test("timeline, replay, and prompt lab endpoints are replayable and local-first"
     assert.equal(promptLab.data.run.projectId, project.data.id);
     assert.ok(promptLab.data.results.length >= 2);
     assert.ok(promptLab.data.results.some((result) => result.profileId === "ask-fast-local" && result.status === "ok"));
-    assert.ok(promptLab.data.results.length >= 1);
-    assert.ok(promptLab.data.results.some((result) => result.profileId === "ask-cloud-router"));
-;
+    assert.ok(promptLab.data.results.some((result) => result.profileId === "ask-cloud-router" && result.status === "blocked"));
+
+    // 400: invalid messages_json (insert a bad prompt directly)
+    const badPromptId = "bad-prompt-json";
+    verifier.db.prepare(
+      "INSERT INTO compiled_prompts (id, session_id, mode, role, messages_json, estimated_tokens, included_context_json, omitted_context_json, safety_notes_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(badPromptId, ask.data.sessionId, "answer", "answer", "not valid json", 0, "[]", "[]", "{}", "2026-01-01");
+    const badJsonRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: project.data.id,
+      promptId: badPromptId,
+      modelProfileIds: ["ask-fast-local"],
+    });
+    assert.equal(badJsonRes.statusCode, 400);
+
+    // 400: messages_json is not an array
+    verifier.db.prepare(
+      "UPDATE compiled_prompts SET messages_json = ? WHERE id = ?"
+    ).run('{"role":"user","content":"hi"}', badPromptId);
+    const notArrayRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: project.data.id,
+      promptId: badPromptId,
+      modelProfileIds: ["ask-fast-local"],
+    });
+    assert.equal(notArrayRes.statusCode, 400);
+
+    // 400: messages_json has invalid message
+    verifier.db.prepare(
+      "UPDATE compiled_prompts SET messages_json = ? WHERE id = ?"
+    ).run('[{"role":"invalid","content":"test"}]', badPromptId);
+    const badMsgRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: project.data.id,
+      promptId: badPromptId,
+      modelProfileIds: ["ask-fast-local"],
+    });
+    assert.equal(badMsgRes.statusCode, 400);
+
+    // Profile ID normalization: trimming and deduplication
+    const normRes = await ctx.request("POST", "/prompt-lab/run", {
+      projectId: project.data.id,
+      promptId: prompts.data[0].id,
+      modelProfileIds: ["  ask-fast-local  ", "ask-fast-local", "ask-cloud-router"],
+    });
+    assert.equal(normRes.statusCode, 200);
+    const normBody = JSON.parse(normRes.body) as { data: { results: Array<{ profileId: string }> } };
+    const normProfileIds = normBody.data.results.map((r) => r.profileId);
+    assert.equal(new Set(normProfileIds).size, normProfileIds.length, "deduped profile IDs");
+    assert.ok(normProfileIds.includes("ask-fast-local"), "trimmed and preserved");
+    assert.ok(normProfileIds.includes("ask-cloud-router"), "normal preserved");
+    } finally {
+      verifier.db.close();
+    }
   } finally {
     await ctx.close();
   }

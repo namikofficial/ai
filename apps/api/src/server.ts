@@ -28,6 +28,7 @@ import type { ProjectContextGraph } from "../../../packages/code-intelligence/sr
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import { runAskWorkflow } from "../../../packages/ask-engine/src/index.ts";
+import { runPromptLab } from "../../../packages/prompt-lab-engine/src/index.ts";
 import type { ModelProviderRecord, ModelProfileRecord } from "../../../packages/shared/src/index.ts";
 import { runExplainWithStore } from "./retrieval-explain.ts";
 import {
@@ -392,7 +393,7 @@ function renderProjectDetailPage(store: ReturnType<typeof createStore>, projectI
   const lessons = store.listProjectLessons(project.id, 8);
   const graph = readProjectGraph(store, project.id);
   const symbols = store.codeIntelligence.listSymbols(project.id, null, 10);
-  const symbolCount = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number };
+  const symbolCount = { count: store.codeIntelligence.countSymbols(project.id) };
 
   const contentHtml = [
     renderCard(
@@ -1443,8 +1444,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           const query = url.searchParams.get("query") || url.searchParams.get("q") || null;
           const limit = Number(url.searchParams.get("limit") || 50) || 50;
           const symbols = store.codeIntelligence.listSymbols(project.id, query, limit);
-          const totalRow = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number } | undefined;
-          const total = totalRow?.count ?? 0;
+          const total = store.codeIntelligence.countSymbols(project.id);
           sendJson(res, json("ok", { project, symbols, query, limit, total }));
           return;
         }
@@ -1459,12 +1459,9 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           const topSymbols = store.codeIntelligence.listSymbols(project.id, null, 20);
           const topEdges = store.codeIntelligence.listEdges(project.id, 20);
 
-          const totalSymbolsRow = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number } | undefined;
-          const totalEdgesRow = store.db.prepare("SELECT COUNT(*) as count FROM code_edges WHERE project_id = ?").get(project.id) as { count: number } | undefined;
-
           const counts = {
-            symbols: totalSymbolsRow?.count ?? 0,
-            edges: totalEdgesRow?.count ?? 0,
+            symbols: store.codeIntelligence.countSymbols(project.id),
+            edges: store.codeIntelligence.countEdges(project.id),
             routeFiles: graph?.routeFiles?.length ?? 0,
             middlewareFiles: graph?.middlewareFiles?.length ?? 0,
             dbFiles: graph?.dbFiles?.length ?? 0,
@@ -2035,267 +2032,30 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         const selectedProfiles = Array.from(
           new Set(
             (Array.isArray(body.modelProfileIds)
-              ? body.modelProfileIds.map(String).filter(Boolean)
+              ? body.modelProfileIds.map((s: unknown) => String(s).trim()).filter(Boolean)
               : Array.isArray(body.modelProfiles)
-                ? body.modelProfiles.map(String).filter(Boolean)
+                ? body.modelProfiles.map((s: unknown) => String(s).trim()).filter(Boolean)
                 : []
             )
           )
         );
         const notes = typeof body.notes === "string" ? body.notes : null;
         const dryRun = body.dryRun === true || body.dryRun === "true";
-        if (!projectId || !promptId || selectedProfiles.length === 0) {
-          sendJson(res, json("error", undefined, { message: "projectId, promptId, and modelProfileIds are required" }), 400);
-          return;
+        try {
+          const engineResult = await runPromptLab({
+            getProject(id: string) { return store.getProject(id); },
+            getCompiledPrompt(id: string) { return store.getCompiledPrompt(id); },
+            createRun(input) { return store.promptLab.createRun(input); },
+            createResult(input) { return store.promptLab.createResult(input); },
+            getProfile(id: string) { return store.models.getProfile(id); },
+            listProfiles() { return store.models.listProfiles(); },
+            listProviders() { return store.models.listProviders(); },
+          }, { projectId, promptId, selectedProfiles, notes, dryRun }, { cloudEnabled: config.cloudEnabled });
+          sendJson(res, json("ok", engineResult));
+        } catch (error) {
+          const statusCode = (error as Error & { statusCode?: number }).statusCode ?? 500;
+          sendJson(res, json("error", undefined, { message: (error as Error).message }), statusCode);
         }
-        if (selectedProfiles.length > 3) {
-          sendJson(res, json("error", undefined, { message: "a maximum of 3 model profiles can be selected" }), 400);
-          return;
-        }
-        const project = store.getProject(projectId);
-        if (!project) {
-          sendJson(res, json("error", undefined, { message: "project not found" }), 404);
-          return;
-        }
-        const prompt = store.getCompiledPrompt(promptId);
-        if (!prompt) {
-          sendJson(res, json("error", undefined, { message: "compiled prompt not found" }), 404);
-          return;
-        }
-
-        const parsedMessages = safeParseJson(prompt.messagesJson);
-        const messages = Array.isArray(parsedMessages) ? parsedMessages : null;
-        if (!messages) {
-          sendJson(res, json("error", undefined, { message: "compiled prompt messages_json is not a valid JSON array" }), 400);
-          return;
-        }
-        for (let i = 0; i < messages.length; i++) {
-          const msg = messages[i];
-          if (!msg || typeof msg !== "object" || !["system", "user", "assistant"].includes((msg as Record<string, unknown>).role as string) || typeof (msg as Record<string, unknown>).content !== "string") {
-            sendJson(res, json("error", undefined, { message: `compiled prompt message at index ${i} has invalid role or content` }), 400);
-            return;
-          }
-        }
-
-        const runId = createId("plr");
-        const ts = new Date().toISOString();
-        store.promptLab.createRun({
-          id: runId,
-          sessionId: prompt.sessionId ?? null,
-          projectId,
-          promptId,
-          mode: prompt.mode,
-          selectedProfiles,
-          notes,
-          createdAt: ts,
-          updatedAt: ts,
-        });
-
-        const runtime = buildRuntimeForStore(store, config.cloudEnabled);
-        const promptPayload = {
-          messages: messages as Array<{ role: "system" | "user" | "assistant"; content: string }>,
-          modelName: null as string | null,
-        };
-        const results: Array<Record<string, unknown>> = [];
-        for (const profileId of selectedProfiles) {
-          const profile = store.models.getProfile(profileId);
-          if (!profile) {
-            const result = {
-              id: createId("plres"),
-              runId,
-              profileId,
-              profileName: profileId,
-              modelName: profileId,
-              status: "failed",
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: "unknown profile",
-              approxCost: null,
-              createdAt: ts,
-            } as const;
-            store.promptLab.createResult({
-              id: result.id,
-              runId,
-              profileId: result.profileId,
-              profileName: result.profileName,
-              modelName: result.modelName,
-              status: result.status,
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: result.error,
-              approxCost: null,
-              createdAt: ts,
-            });
-            results.push(result);
-            continue;
-          }
-          if (dryRun) {
-            const result = {
-              id: createId("plres"),
-              runId,
-              profileId: profile.id,
-              profileName: profile.displayName ?? profile.modelName,
-              modelName: profile.modelName,
-              status: "blocked",
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: "dry run",
-              approxCost: null,
-              createdAt: ts,
-            } as const;
-            store.promptLab.createResult({
-              id: result.id,
-              runId,
-              profileId: result.profileId,
-              profileName: result.profileName,
-              modelName: result.modelName,
-              status: result.status,
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: result.error,
-              approxCost: null,
-              createdAt: ts,
-            });
-            results.push(result);
-            continue;
-          }
-          const provider = store.models.listProviders().find((item) => item.id === profile.providerId) ?? null;
-          if (provider && /cloud_openai_compat/i.test(provider.kind) && !config.cloudEnabled) {
-            const result = {
-              id: createId("plres"),
-              runId,
-              profileId: profile.id,
-              profileName: profile.displayName ?? profile.modelName,
-              modelName: profile.modelName,
-              status: "blocked",
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: "cloud disabled",
-              approxCost: null,
-              createdAt: ts,
-            } as const;
-            store.promptLab.createResult({
-              id: result.id,
-              runId,
-              profileId: result.profileId,
-              profileName: result.profileName,
-              modelName: result.modelName,
-              status: result.status,
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: result.error,
-              approxCost: null,
-              createdAt: ts,
-            });
-            results.push(result);
-            continue;
-          }
-          try {
-            const invocation = await runtime.invoke(profile.id, {
-              role: "answer",
-              messages: promptPayload.messages,
-              metadata: {
-                source: "prompt-lab",
-                promptId,
-                runId,
-              },
-            });
-            const result = {
-              id: createId("plres"),
-              runId,
-              profileId: profile.id,
-              profileName: profile.displayName ?? profile.modelName,
-              modelName: profile.modelName,
-              status: invocation.status ?? "ok",
-              promptTokens: invocation.promptTokens,
-              completionTokens: invocation.completionTokens,
-              latencyMs: invocation.latencyMs,
-              outputText: invocation.text,
-              error: null,
-              approxCost: null,
-              createdAt: ts,
-            } as const;
-            store.promptLab.createResult({
-              id: result.id,
-              runId,
-              profileId: result.profileId,
-              profileName: result.profileName,
-              modelName: result.modelName,
-              status: result.status,
-              promptTokens: result.promptTokens,
-              completionTokens: result.completionTokens,
-              latencyMs: result.latencyMs,
-              outputText: result.outputText,
-              error: result.error,
-              approxCost: result.approxCost,
-              createdAt: ts,
-            });
-            results.push(result);
-          } catch (error) {
-            const result = {
-              id: createId("plres"),
-              runId,
-              profileId: profile.id,
-              profileName: profile.displayName ?? profile.modelName,
-              modelName: profile.modelName,
-              status: "failed",
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: error instanceof Error ? error.message : String(error),
-              approxCost: null,
-              createdAt: ts,
-            } as const;
-            store.promptLab.createResult({
-              id: result.id,
-              runId,
-              profileId: result.profileId,
-              profileName: result.profileName,
-              modelName: result.modelName,
-              status: result.status,
-              promptTokens: 0,
-              completionTokens: 0,
-              latencyMs: 0,
-              outputText: null,
-              error: result.error,
-              approxCost: null,
-              createdAt: ts,
-            });
-            results.push(result);
-          }
-        }
-        const runResponse = {
-          id: runId,
-          sessionId: prompt.sessionId,
-          projectId,
-          promptId,
-          mode: prompt.mode,
-          selectedProfiles,
-          notes,
-          createdAt: ts,
-          updatedAt: ts,
-        };
-        sendJson(
-          res,
-          json("ok", {
-            run: runResponse,
-            prompt,
-            results,
-          }),
-        );
         return;
       }
 

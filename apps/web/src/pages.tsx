@@ -602,6 +602,7 @@ function PromptLabPage(): ReactNode {
   }>;
   const modelProviderData = resource.data?.[2].data ?? { providers: [], profiles: [] };
   const profiles = (modelProviderData.profiles ?? []) as Array<Record<string, unknown>>;
+  const providers = (modelProviderData.providers ?? []) as Array<Record<string, unknown>>;
   const runs = (resource.data?.[3].data ?? []) as PromptLabRunRecord[];
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
   const [promptId, setPromptId] = useState(prompts[0]?.id ?? "");
@@ -675,11 +676,16 @@ function PromptLabPage(): ReactNode {
                 {profiles.slice(0, 6).map((profile) => {
                   const id = String(profile.id);
                   const checked = selectedProfiles.includes(id);
+                  const provider = providers.find((p) => String(p.id) === String(profile.providerId));
+                  const isCloudProvider = provider && /cloud_openai_compat/i.test(String(provider.kind));
                   return (
                     <label className="list-item" key={id}>
                       <div className="row">
                         <strong>{String(profile.displayName ?? profile.modelName ?? id)}</strong>
-                        <input type="checkbox" checked={checked} onChange={() => toggleProfile(id)} />
+                        <div className="row">
+                          {isCloudProvider ? <Badge tone="warn">Cloud</Badge> : null}
+                          <input type="checkbox" checked={checked} onChange={() => toggleProfile(id)} />
+                        </div>
                       </div>
                       <div className="tiny">
                         {String(profile.role ?? "?")} · {String(profile.providerId ?? "provider")} · {String(profile.modelName ?? id)}

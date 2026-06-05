@@ -233,6 +233,14 @@ export function createCodeIntelligenceRepo(db: DatabaseSync) {
         .all(projectId, limit) as CodeEdgeRow[];
       return rows.map(rowToEdge);
     },
+    countSymbols(projectId: string): number {
+      const row = db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(projectId) as { count: number } | undefined;
+      return row?.count ?? 0;
+    },
+    countEdges(projectId: string): number {
+      const row = db.prepare("SELECT COUNT(*) as count FROM code_edges WHERE project_id = ?").get(projectId) as { count: number } | undefined;
+      return row?.count ?? 0;
+    },
   };
 }
 

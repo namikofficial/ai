@@ -100,6 +100,16 @@ test("api: code intelligence endpoints", async () => {
     assert.ok(Array.isArray(body5.data.topSymbols));
     assert.ok(Array.isArray(body5.data.topEdges));
 
+    // 7. Repo count helpers match graph counts
+    const symbolCount = store.codeIntelligence.countSymbols(project.id);
+    const edgeCount = store.codeIntelligence.countEdges(project.id);
+    assert.equal(symbolCount, body5.data.counts.symbols);
+    assert.equal(edgeCount, body5.data.counts.edges);
+
+    // 8. Count helpers return 0 for unknown project
+    assert.equal(store.codeIntelligence.countSymbols("nonexistent"), 0);
+    assert.equal(store.codeIntelligence.countEdges("nonexistent"), 0);
+
   } finally {
     await handle.close();
     store.db.close();
