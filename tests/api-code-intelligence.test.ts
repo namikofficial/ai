@@ -72,7 +72,9 @@ test("api: code intelligence endpoints", async () => {
     assert.equal(res3.statusCode, 200);
     assert.equal(body3.data.symbol.id, symbolId);
     assert.equal(body3.data.projectId, project.id);
-    assert.equal(body3.data.projectPath, "src/auth.ts");
+    assert.equal(body3.data.filePath, "src/auth.ts");
+    assert.equal(body3.data.projectPath, repo);
+    assert.equal(body3.data.symbolPath, "src/auth.ts");
     assert.ok(Array.isArray(body3.data.chunks));
     assert.ok(Array.isArray(body3.data.edges));
     assert.ok(Array.isArray(body3.data.relatedSymbols));
