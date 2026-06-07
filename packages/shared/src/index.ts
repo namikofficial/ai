@@ -38,7 +38,7 @@ export interface SessionRecord {
   projectId: string | null;
   title: string;
   userGoal: string;
-  mode: AskMode | "index" | "plan" | "handoff" | "check" | "reflect";
+  mode: AskMode | "index" | "plan" | "handoff" | "check" | "reflect" | "dev";
   status: SessionStatus;
   source: string;
   startedAt: string;
