@@ -49,6 +49,14 @@ The `pnpm cli` command provides the main entry point for managing the workbench.
 - `pnpm cli -- memory candidates`: View captured learning candidates.
 - `pnpm cli -- skills candidates`: View potential skill extractions.
 
+### Local Agentic Development
+- `pnpm cli -- dev "<goal>" --project <project> [--mode local|hybrid|cloud] [--approve-edits] [--checks typecheck,test] [--max-repairs 1]`: Run the local coding agent. Retrieves context, plans edits, creates an isolated workspace, runs allowlisted checks, and stops for approval before touching the original repo.
+- `pnpm cli -- dev runs`: List recent dev runs.
+- `pnpm cli -- dev show <run-id>`: Show a dev run summary, its edits, checks, and diff.
+- `pnpm cli -- dev diff <run-id>`: Print the diff of a dev run.
+- `pnpm cli -- dev approve <run-id>`: Approve a dev run and apply its patch to the original project.
+- `pnpm cli -- dev cancel <run-id>`: Cancel a dev run.
+
 ## Configuration
 
 Projects can be configured via an optional `.ai-workbench.json` file in the project root:
@@ -68,6 +76,16 @@ Projects can be configured via an optional `.ai-workbench.json` file in the proj
   "models": {
     "answer": "ask-fast-local",
     "embedding": "embedding-local"
+  },
+  "checks": {
+    "typecheck": "pnpm typecheck",
+    "test": "pnpm test",
+    "lint": "pnpm lint"
+  },
+  "dev": {
+    "defaultChecks": ["typecheck"],
+    "maxRepairLoops": 1,
+    "requireApprovalFor": ["env", "migrations", "auth", "db", "package"]
   }
 }
 ```

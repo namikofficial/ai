@@ -1603,3 +1603,144 @@ Definition of done:
 6. Add local eval fixtures for retrieval quality, routing choices, and answer grounding.
 7. Keep `packages/db/src/store.ts` moving toward a composition-only layer by extracting the remaining orchestration helpers.
 8. Verify each slice with `pnpm typecheck` and `pnpm test` before widening the next step.
+
+## 26. Local Agentic Development Slice (active)
+
+Per the user review of June 8 2026: the repo so far is a local RAG + planner + memory workbench, but it is not yet a usable local coding agent. The next implementation target is to turn the workbench itself into a safe local executor for small coding tasks.
+
+The shape of the missing loop is:
+
+```txt
+goal → context → plan → safe workspace → edit → check → repair → diff → approve
+```
+
+Until this loop exists the workbench still feels like a dashboard around external agents rather than an agentic local development tool. This slice adds the loop without widening the product into autonomous editing by default: every run produces a workspace, a diff, a check report, and a pending approval before any change reaches the original repo.
+
+### 26.1 Non-negotiable constraints for this slice
+
+- TypeScript owns the product boundary.
+- Local-first by default. `AI_CLOUD_ENABLED=true` is the only cloud opt-in.
+- No arbitrary shell execution from LLM output. Every check and command is resolved through an allowlist, never from a raw model string.
+- All file edits are validated and applied through the execution engine; the model never produces shell.
+- Destructive paths (`.env`, secrets, lockfiles, migrations, auth, db, package manifests) require explicit approval and a high-risk flag.
+- The original project is never mutated during planning or repair; only the workspace copy is.
+- Every dev run writes: `dev_runs`, `dev_edits`, `execution_workspaces`, `execution_commands`, `execution_approvals`, `patches`, plus `agent_runs`, `model_calls`, `events`, and trace rows.
+- Web UI and CLI both reach the same flow.
+- `pnpm typecheck` and `pnpm test` keep passing.
+
+### 26.2 New packages
+
+- `packages/execution-engine`
+  - `shell.ts` — allowlist-driven check runner, no raw shell.
+  - `files.ts` — path normalization, secret/path blocking, project file read/write, unified patch.
+  - `worktree.ts` — git worktree workspace with safe-copy fallback.
+  - `index.ts` — exports the engine plus event emission.
+- `packages/agent-protocol/src/dev.ts` — typed Zod schemas for the dev pipeline:
+  - `DevRequest`, `DevPlan`, `DevEdit`, `DevCheck`, `DevRun`, `DevResult`, `ApprovalPolicy`, `RiskLevel`, `ExecutionEvent`.
+- `packages/dev-agent/src/index.ts` — `runDevWorkflow` orchestrator.
+
+### 26.3 New persistence
+
+- Migration `0007_dev_runs.sql` adds:
+  - `dev_runs`
+  - `dev_edits`
+  - `execution_workspaces`
+  - `execution_commands`
+  - `execution_approvals`
+  - `patches`
+- Repositories:
+  - `packages/db/src/repositories/dev-runs.ts`
+  - `packages/db/src/repositories/execution.ts`
+- The dev stores are wired through `store.dev` and `store.execution` so the existing `store.ts` composition layer does not get larger.
+
+### 26.4 Local model catalog fix
+
+`packages/model-runtime/src/default-catalog.ts` is updated to seed a real local provider by default and rewire the most-used profiles to it:
+
+- `provider_llamacpp_local` (`kind: "local_openai_compat"`, `baseUrl: http://127.0.0.1:8080/v1`, enabled).
+- `ask-fast-local`, `ask-extended-local`, `ask-deep-local`, `planner-fast-local`, `planner-balanced-local`, `planner-deep-local`, `query-rewrite-local`, `retrieval-judge-local`, `handoff-local`, plus new `dev-editor-local` and `dev-repair-local` all point at this provider.
+- Heuristic is kept as an explicit fallback/mock only.
+- Env overrides: `AI_LOCAL_BASE_URL`, `AI_LOCAL_MODEL_FAST`, `AI_LOCAL_MODEL_DEEP`, `AI_LOCAL_MODEL_CODER`, `AI_LOCAL_EMBEDDING_MODEL`.
+- `AI_CLOUD_ENABLED` stays `false` by default in `.env.example`.
+
+### 26.5 API surface
+
+JSON endpoints (all returning the standard `{ status, data, error }` envelope):
+
+- `POST /dev/run`
+- `GET /dev/runs`
+- `GET /dev/runs/:id`
+- `POST /dev/runs/:id/approve`
+- `POST /dev/runs/:id/cancel`
+- `GET /dev/runs/:id/diff`
+
+SSE event stream is extended with `dev.run.*` events for plan, edit, check, repair, and approval transitions.
+
+### 26.6 CLI surface
+
+```bash
+ai dev "<goal>" --project <project> [--mode local|hybrid|cloud] [--approve-edits] [--checks typecheck,test] [--max-repairs 1]
+ai dev runs
+ai dev show <run-id>
+ai dev diff <run-id>
+ai dev approve <run-id>
+ai dev cancel <run-id>
+```
+
+CLI directly uses the local store when the API server is not running.
+
+### 26.7 Web surface
+
+A new `/dev` page in `apps/web` with:
+
+- Project selector
+- Goal input
+- Mode selector (`local | hybrid | cloud`)
+- Approval policy selector (`auto | manual | high-risk-only`)
+- Live event stream
+- Plan panel
+- Retrieved context panel
+- Proposed edits panel
+- Diff panel
+- Checks panel
+- Final result panel
+- Approve / reject buttons
+
+### 26.8 Project config
+
+`.ai-workbench.json` gains a `checks` and `dev` block:
+
+```json
+{
+  "checks": {
+    "typecheck": "pnpm typecheck",
+    "test": "pnpm test",
+    "lint": "pnpm lint"
+  },
+  "dev": {
+    "defaultChecks": ["typecheck"],
+    "maxRepairLoops": 1,
+    "requireApprovalFor": ["env", "migrations", "auth", "db", "package"]
+  }
+}
+```
+
+### 26.9 Acceptance criteria
+
+- `pnpm typecheck` passes.
+- `pnpm test` passes.
+- `pnpm cli -- models health` shows the llama.cpp local provider reachable or `unreachable` with a clear detail.
+- `pnpm cli -- dev "add a small README note" --project ai --approve-edits --checks typecheck` completes on this repo and creates one session, one dev run, one workspace, edit rows, check rows, model call rows, and trace events.
+- The original repo is not modified until `--approve-edits` is passed and the run is approved through `ai dev approve <run-id>`.
+- The final output shows the run id, session id, files edited, checks run, pass/fail, diff summary, and the next command to inspect or approve.
+
+## 27. Slice Verification Order
+
+1. Catalog fix: `pnpm typecheck` and `pnpm test`.
+2. Migration: apply on a fresh database and a reused database.
+3. Execution engine unit tests: allowlist, path blocking, secret blocking, workspace fallback, check capture.
+4. Dev agent unit tests: end-to-end run with a mock model, repair loop on failing check, no mutation of the original repo without approval.
+5. API: round-trip `/dev/run`, `/dev/runs`, `/dev/runs/:id`, `/dev/runs/:id/approve`, `/dev/runs/:id/cancel`, `/dev/runs/:id/diff`.
+6. CLI: every `ai dev` subcommand.
+7. Web: route registration, render of plan, diff, checks, approve button.
+8. Full smoke: `ai dev "add a small README note" --project ai --approve-edits --checks typecheck`.
