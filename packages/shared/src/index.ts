@@ -1072,6 +1072,153 @@ export interface SkillUsageRecord {
   createdAt: string;
 }
 
+// ─── Local agentic dev pipeline (Slice 26) ────────────────────────────────
+
+export type DevMode = AskMode;
+export type ApprovalPolicy = "auto" | "manual" | "high_risk_only";
+export type RiskLevel = "low" | "medium" | "high";
+export type EditChangeType = "replace" | "create" | "append";
+export type DevRunStatus =
+  | "queued"
+  | "planning"
+  | "editing"
+  | "checking"
+  | "repairing"
+  | "awaiting_approval"
+  | "approved"
+  | "applied"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "blocked";
+export type DevEditStatus = "proposed" | "applied" | "rejected" | "failed";
+export type WorkspaceStrategy = "git_worktree" | "safe_copy";
+export type ExecutionCommandStatus = "queued" | "running" | "completed" | "failed" | "blocked";
+export type ApprovalStatus = "pending" | "approved" | "rejected" | "expired";
+
+export interface DevRequest {
+  project: string;
+  goal: string;
+  mode?: DevMode;
+  approvalPolicy?: ApprovalPolicy;
+  approveEdits?: boolean;
+  checks?: string[];
+  maxRepairs?: number;
+  editorProfileId?: string;
+  repairProfileId?: string;
+  plannerProfileId?: string;
+}
+
+export interface DevEdit {
+  path: string;
+  reason: string;
+  oldText?: string;
+  newText: string;
+  changeType: EditChangeType;
+}
+
+export interface DevPlan {
+  summary: string;
+  edits: DevEdit[];
+  checks: string[];
+  risk: RiskLevel;
+  notes?: string;
+  missingContextReason?: string;
+}
+
+export interface DevCheckResult {
+  name: string;
+  status: ExecutionCommandStatus;
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  startedAt: string;
+  finishedAt: string;
+}
+
+export interface DevRun {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  goal: string;
+  mode: DevMode;
+  approvalPolicy: ApprovalPolicy;
+  approveEdits: boolean;
+  risk: RiskLevel;
+  status: DevRunStatus;
+  plan: DevPlan | null;
+  workspace: {
+    id: string;
+    strategy: WorkspaceStrategy;
+    path: string;
+    branch: string | null;
+  } | null;
+  checks: DevCheckResult[];
+  repairAttempts: number;
+  maxRepairs: number;
+  errorMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+}
+
+export interface DevResult {
+  runId: string;
+  sessionId: string;
+  projectId: string;
+  status: DevRunStatus;
+  risk: RiskLevel;
+  goal: string;
+  summary: string;
+  filesEdited: string[];
+  filesCreated: string[];
+  checks: DevCheckResult[];
+  diffSummary: string;
+  diff: string;
+  applied: boolean;
+  missingContextReason: string | null;
+  errorMessage: string | null;
+  workspacePath: string | null;
+  repairAttempts: number;
+  nextCommand: string;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export type ExecutionEventKind =
+  | "run.queued"
+  | "run.started"
+  | "plan.ready"
+  | "workspace.ready"
+  | "edit.proposed"
+  | "edit.applied"
+  | "edit.rejected"
+  | "check.started"
+  | "check.completed"
+  | "check.failed"
+  | "repair.attempted"
+  | "approval.required"
+  | "approval.granted"
+  | "approval.rejected"
+  | "patch.applied"
+  | "run.completed"
+  | "run.failed"
+  | "run.cancelled";
+
+export interface ExecutionEvent {
+  id: string;
+  runId: string;
+  sessionId: string;
+  projectId: string;
+  kind: ExecutionEventKind;
+  level: EventLevel;
+  ts: string;
+  message: string;
+  data: Record<string, unknown>;
+}
+
 export {
   extractJsonFragment,
   isLikelyJsonOutput,
