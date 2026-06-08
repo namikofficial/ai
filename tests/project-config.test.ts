@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { resolveProjectConfig } from "../packages/config/src/index.ts";
+import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
+import { resolveProjectConfig } from "../packages/config/src/index.ts";
 
 test("project config loader returns safe defaults when no config file exists", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-project-config-defaults-"));
@@ -54,8 +54,8 @@ test("project config loader supports local workbench config filenames", async ()
             },
           },
           null,
-          2,
-        ),
+          2
+        )
       );
 
       const config = resolveProjectConfig(project);
@@ -97,8 +97,8 @@ test("project config loader reads ignore/include/chunking/retrieval/models from 
           },
         },
         null,
-        2,
-      ),
+        2
+      )
     );
 
     const config = resolveProjectConfig(project);
@@ -152,16 +152,12 @@ test("project graph and context explain expose code-aware selection details", as
         },
       },
       null,
-      2,
-    ),
+      2
+    )
   );
   await writeFile(
     join(repo, "src", "auth.ts"),
-    [
-      "export function handleLogin() {",
-      "  return { ok: true };",
-      "}",
-    ].join("\n"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n")
   );
   await writeFile(
     join(repo, "src", "router.ts"),
@@ -171,7 +167,7 @@ test("project graph and context explain expose code-aware selection details", as
       "export function createRouter() {",
       "  return { login: () => handleLogin() };",
       "}",
-    ].join("\n"),
+    ].join("\n")
   );
 
   const handle = await startWorkbenchServer({

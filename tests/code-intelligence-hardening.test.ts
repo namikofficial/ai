@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import test from "node:test";
 import { extractCodeIntelligence } from "../packages/code-intelligence/src/index.ts";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("code-intelligence: TypeScript arrow functions and class methods", () => {
   const content = `
@@ -41,7 +41,7 @@ const logout = () => {
     content,
   });
 
-  const names = result.symbols.map(s => s.name);
+  const names = result.symbols.map((s) => s.name);
   assert.ok(names.includes("login"), "Should find exported arrow function");
   assert.ok(names.includes("AuthService"), "Should find class");
   assert.ok(names.includes("login"), "Should find class method");
@@ -106,7 +106,7 @@ def logout():
     content,
   });
 
-  const names = result.symbols.map(s => s.name);
+  const names = result.symbols.map((s) => s.name);
   assert.ok(names.includes("AuthService"));
   assert.ok(names.includes("login"));
   assert.ok(names.includes("create"));
@@ -143,7 +143,7 @@ fn logout() {
     content,
   });
 
-  const names = result.symbols.map(s => s.name);
+  const names = result.symbols.map((s) => s.name);
   assert.ok(names.includes("AuthService"));
   assert.ok(names.includes("new"));
   assert.ok(names.includes("login"));
@@ -179,7 +179,7 @@ func Logout() {
     content,
   });
 
-  const names = result.symbols.map(s => s.name);
+  const names = result.symbols.map((s) => s.name);
   assert.ok(names.includes("AuthService"));
   assert.ok(names.includes("NewAuthService"));
   assert.ok(names.includes("Login"));
@@ -207,9 +207,9 @@ SELECT * FROM users;
     content,
   });
 
-  const names = result.symbols.map(s => s.name);
+  const names = result.symbols.map((s) => s.name);
   assert.ok(names.includes("users"));
-  assert.ok(result.symbols.some(s => s.kind === "class" && s.name === "users"));
+  assert.ok(result.symbols.some((s) => s.kind === "class" && s.name === "users"));
 });
 
 test("code-intelligence: handles huge file without crashing", () => {
@@ -239,7 +239,7 @@ export function login() {} // duplicate in source (unlikely but possible)
     content,
   });
 
-  const logins = result.symbols.filter(s => s.name === "login");
+  const logins = result.symbols.filter((s) => s.name === "login");
   assert.equal(logins.length, 1);
 });
 
@@ -254,7 +254,7 @@ test("code-intelligence: indexing handles deleted files", async () => {
       codeIntelligence: {
         enabled: true,
       },
-    }),
+    })
   );
   await writeFile(join(repo, "src", "auth.ts"), "export function login() {}");
 
@@ -262,12 +262,16 @@ test("code-intelligence: indexing handles deleted files", async () => {
   const project = store.createProject({ path: repo, name: "repo" });
   await store.indexProject(project.id);
 
-  let count = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number };
+  let count = store.db
+    .prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?")
+    .get(project.id) as { count: number };
   assert.ok(count.count > 0);
 
   await rm(join(repo, "src", "auth.ts"));
   await store.indexProject(project.id);
-  count = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number };
+  count = store.db
+    .prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?")
+    .get(project.id) as { count: number };
   assert.equal(count.count, 0);
 
   store.db.close();

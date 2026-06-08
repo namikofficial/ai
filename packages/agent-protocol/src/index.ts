@@ -1,12 +1,3 @@
-export {
-  createEvent,
-  createId,
-  parseAskRequest,
-  parseEventEnvelope,
-  parseProjectCreateInput,
-  slugifyName,
-} from "../../shared/src/index.ts";
-
 export type {
   AgentHandoffRecord,
   AgentMessageRecord,
@@ -83,6 +74,14 @@ export type {
   TaskRecord,
   TaskStatus,
 } from "../../shared/src/index.ts";
+export {
+  createEvent,
+  createId,
+  parseAskRequest,
+  parseEventEnvelope,
+  parseProjectCreateInput,
+  slugifyName,
+} from "../../shared/src/index.ts";
 
 import type { EventType } from "../../shared/src/index.ts";
 
@@ -142,7 +141,8 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "orchestrator",
     role: "session-coordinator",
-    description: "Coordinates session lifecycle, intent classification, sub-agent dispatch, and reflection.",
+    description:
+      "Coordinates session lifecycle, intent classification, sub-agent dispatch, and reflection.",
     allowedTools: ["session.emit", "model.invoke", "task.update", "memory.read", "memory.write"],
     requiredEvents: ["session.created", "session.started", "session.completed", "session.failed"],
     modelRole: "planner",
@@ -166,7 +166,8 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "query_rewriter_agent",
     role: "query-rewriter",
-    description: "Generates typo-tolerant rewrites, path/symbol hints, and intent-conditioned variants.",
+    description:
+      "Generates typo-tolerant rewrites, path/symbol hints, and intent-conditioned variants.",
     allowedTools: ["session.emit", "model.invoke", "memory.read"],
     requiredEvents: ["agent.started", "agent.completed"],
     modelRole: "query_rewrite",
@@ -179,7 +180,13 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
     id: "retrieval_agent",
     role: "retrieval-pipeline",
     description: "Runs hybrid retrieval, rerank, compression, and confidence scoring.",
-    allowedTools: ["retrieval.search", "retrieval.rerank", "session.emit", "memory.read", "facts.read"],
+    allowedTools: [
+      "retrieval.search",
+      "retrieval.rerank",
+      "session.emit",
+      "memory.read",
+      "facts.read",
+    ],
     requiredEvents: ["retrieval.started", "retrieval.completed", "retrieval.low_confidence"],
     modelRole: "retrieval_judge",
     risk: "low",
@@ -190,7 +197,8 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "context_agent",
     role: "context-packer",
-    description: "Builds a context pack from previous messages, memory, facts, retrieval results, and budget.",
+    description:
+      "Builds a context pack from previous messages, memory, facts, retrieval results, and budget.",
     allowedTools: ["context.build", "session.emit", "memory.read", "facts.read"],
     requiredEvents: ["agent.started", "agent.completed"],
     modelRole: "summarizer",
@@ -226,7 +234,8 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "handoff_agent",
     role: "target-handoff",
-    description: "Generates a target-specific handoff prompt with context pack, files, and stop conditions.",
+    description:
+      "Generates a target-specific handoff prompt with context pack, files, and stop conditions.",
     allowedTools: ["context.build", "session.emit", "model.invoke", "task.update"],
     requiredEvents: ["handoff.created"],
     modelRole: "coder_handoff",
@@ -262,8 +271,16 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "learning_agent",
     role: "learning-loop",
-    description: "Creates memory candidates, accepts/rejects memory, and proposes skill candidates.",
-    allowedTools: ["memory.read", "memory.write", "facts.read", "facts.write", "skill.suggest", "session.emit"],
+    description:
+      "Creates memory candidates, accepts/rejects memory, and proposes skill candidates.",
+    allowedTools: [
+      "memory.read",
+      "memory.write",
+      "facts.read",
+      "facts.write",
+      "skill.suggest",
+      "session.emit",
+    ],
     requiredEvents: ["lesson.created"],
     modelRole: "reflection",
     risk: "low",
@@ -334,7 +351,7 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
 ];
 
 export const AGENT_REGISTRY: ReadonlyMap<AgentId, AgentDescriptor> = new Map(
-  BASE_DESCRIPTORS.map((descriptor) => [descriptor.id, descriptor]),
+  BASE_DESCRIPTORS.map((descriptor) => [descriptor.id, descriptor])
 );
 
 export function listAgents(): AgentDescriptor[] {
@@ -364,6 +381,12 @@ export function isAgentId(value: string): value is AgentId {
 }
 
 import type {
+  ModelInvokeOptions,
+  ModelInvokeRequest,
+  ModelInvokeResult,
+  ModelRuntime,
+} from "../../model-runtime/src/index.ts";
+import type {
   AgentMessageRecord,
   AgentRunRecord,
   AgentStatus,
@@ -371,18 +394,16 @@ import type {
   ModelRole,
 } from "../../shared/src/index.ts";
 import { createEvent, createId } from "../../shared/src/index.ts";
-import type {
-  ModelInvokeOptions,
-  ModelInvokeRequest,
-  ModelInvokeResult,
-  ModelRuntime,
-} from "../../model-runtime/src/index.ts";
 
 export interface AgentExecutorHooks {
   recordRun(run: AgentRunRecord): void;
   recordMessage(message: AgentMessageRecord): void;
   emitEvent(event: EventEnvelope): void;
-  invokeModel: (profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions) => Promise<ModelInvokeResult>;
+  invokeModel: (
+    profileId: string,
+    request: ModelInvokeRequest,
+    options?: ModelInvokeOptions
+  ) => Promise<ModelInvokeResult>;
   now: () => Date;
 }
 
@@ -424,7 +445,15 @@ export class AgentExecutor {
     return isToolAllowed(this.id, tool);
   }
 
-  private createRun(input: AgentRunInput, status: AgentStatus, startedAt: string, finishedAt: string | null, output: Record<string, unknown>, error: string | null, modelRole: ModelRole | null): AgentRunRecord {
+  private createRun(
+    input: AgentRunInput,
+    status: AgentStatus,
+    startedAt: string,
+    finishedAt: string | null,
+    output: Record<string, unknown>,
+    error: string | null,
+    modelRole: ModelRole | null
+  ): AgentRunRecord {
     const descriptor = this.descriptor();
     return {
       id: input.id ?? createId("arun"),
@@ -440,7 +469,9 @@ export class AgentExecutor {
       risk: descriptor.risk,
       startedAt,
       finishedAt,
-      durationMs: finishedAt ? new Date(finishedAt).getTime() - new Date(startedAt).getTime() : null,
+      durationMs: finishedAt
+        ? new Date(finishedAt).getTime() - new Date(startedAt).getTime()
+        : null,
       error,
       createdAt: startedAt,
       updatedAt: finishedAt ?? startedAt,
@@ -456,34 +487,72 @@ export class AgentExecutor {
       createEvent(
         "agent.started",
         { agent: descriptor.id, role: descriptor.role, risk: descriptor.risk, input: input.input },
-        { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, id: `${runId}_started` },
-      ),
+        {
+          sessionId: input.sessionId ?? null,
+          taskId: input.taskId ?? null,
+          projectId: input.projectId ?? null,
+          agent: descriptor.id,
+          id: `${runId}_started`,
+        }
+      )
     );
     if (input.input && typeof input.input === "object" && "tool" in input.input) {
       const toolName = String((input.input as Record<string, unknown>).tool);
       if (!descriptor.allowedTools.includes(toolName as AgentToolName)) {
-        const run = this.createRun({ ...input, id: runId }, "failed", startedAt, this.hooks.now().toISOString(), { error: "tool not allowed", tool: toolName }, `tool ${toolName} not in allowlist`, descriptor.modelRole);
+        const run = this.createRun(
+          { ...input, id: runId },
+          "failed",
+          startedAt,
+          this.hooks.now().toISOString(),
+          { error: "tool not allowed", tool: toolName },
+          `tool ${toolName} not in allowlist`,
+          descriptor.modelRole
+        );
         this.hooks.recordRun(run);
         this.hooks.emitEvent(
           createEvent(
             "agent.failed",
             { agent: descriptor.id, runId: run.id, reason: "tool-not-allowed", tool: toolName },
-            { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, level: "warn", id: `${runId}_failed_tool` },
-          ),
+            {
+              sessionId: input.sessionId ?? null,
+              taskId: input.taskId ?? null,
+              projectId: input.projectId ?? null,
+              agent: descriptor.id,
+              level: "warn",
+              id: `${runId}_failed_tool`,
+            }
+          )
         );
         return { run, messages, error: run.error ?? "tool not allowed" };
       }
     }
-    const profileId = input.profileId ?? (descriptor.modelRole ? this.findProfileIdForRole(descriptor.modelRole) : null);
+    const profileId =
+      input.profileId ??
+      (descriptor.modelRole ? this.findProfileIdForRole(descriptor.modelRole) : null);
     if (!profileId) {
-      const run = this.createRun({ ...input, id: runId }, "failed", startedAt, this.hooks.now().toISOString(), { error: "no profile for role" }, `no profile for role ${descriptor.modelRole ?? "none"}`, descriptor.modelRole);
+      const run = this.createRun(
+        { ...input, id: runId },
+        "failed",
+        startedAt,
+        this.hooks.now().toISOString(),
+        { error: "no profile for role" },
+        `no profile for role ${descriptor.modelRole ?? "none"}`,
+        descriptor.modelRole
+      );
       this.hooks.recordRun(run);
       this.hooks.emitEvent(
         createEvent(
           "agent.failed",
           { agent: descriptor.id, runId: run.id, reason: "no-profile" },
-          { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, level: "warn", id: `${runId}_failed_profile` },
-        ),
+          {
+            sessionId: input.sessionId ?? null,
+            taskId: input.taskId ?? null,
+            projectId: input.projectId ?? null,
+            agent: descriptor.id,
+            level: "warn",
+            id: `${runId}_failed_profile`,
+          }
+        )
       );
       return { run, messages, error: run.error ?? "no profile" };
     }
@@ -504,7 +573,10 @@ export class AgentExecutor {
       role: descriptor.modelRole ?? "answer",
       modelName: profileId,
       messages: [
-        { role: "system", content: `You are the ${descriptor.id} agent. ${descriptor.description}` },
+        {
+          role: "system",
+          content: `You are the ${descriptor.id} agent. ${descriptor.description}`,
+        },
         { role: "user", content: JSON.stringify(input.input) },
       ],
     };
@@ -526,7 +598,7 @@ export class AgentExecutor {
       finishedAt,
       result ? { text: result.text, modelRole: descriptor.modelRole, profileId } : { error },
       error,
-      descriptor.modelRole,
+      descriptor.modelRole
     );
     this.hooks.recordRun(run);
     const outMessage: AgentMessageRecord = {
@@ -552,14 +624,23 @@ export class AgentExecutor {
       createEvent(
         status === "completed" ? "agent.completed" : "agent.failed",
         { agent: descriptor.id, runId: run.id, profileId, durationMs, status, error },
-        { sessionId: input.sessionId ?? null, taskId: input.taskId ?? null, projectId: input.projectId ?? null, agent: descriptor.id, level: status === "completed" ? "info" : "warn", id: `${runId}_done` },
-      ),
+        {
+          sessionId: input.sessionId ?? null,
+          taskId: input.taskId ?? null,
+          projectId: input.projectId ?? null,
+          agent: descriptor.id,
+          level: status === "completed" ? "info" : "warn",
+          id: `${runId}_done`,
+        }
+      )
     );
     return { run, messages, result: result ?? undefined, error: error ?? undefined };
   }
 
   private findProfileIdForRole(role: ModelRole): string | null {
-    const profiles = this.runtime.listProfiles().filter((profile) => profile.role === role && profile.enabled);
+    const profiles = this.runtime
+      .listProfiles()
+      .filter((profile) => profile.role === role && profile.enabled);
     if (profiles.length === 0) return null;
     return profiles[0].id;
   }
@@ -569,7 +650,7 @@ export class AgentExecutor {
     request: ModelInvokeRequest,
     timeoutMs: number,
     input: AgentRunInput,
-    runId: string,
+    runId: string
   ): Promise<ModelInvokeResult> {
     const descriptor = this.descriptor();
     const maxAttempts = descriptor.retry === "exponential" ? 3 : 1;
@@ -581,13 +662,21 @@ export class AgentExecutor {
         lastError = error instanceof Error ? error : new Error(String(error));
         if (descriptor.retry === "none") throw lastError;
         if (descriptor.retry === "fallback_only") {
-          const fallbackId = this.runtime.listProfiles().find((profile) => profile.role === descriptor.modelRole && profile.localOnly && profile.enabled && profile.id !== profileId)?.id;
+          const fallbackId = this.runtime
+            .listProfiles()
+            .find(
+              (profile) =>
+                profile.role === descriptor.modelRole &&
+                profile.localOnly &&
+                profile.enabled &&
+                profile.id !== profileId
+            )?.id;
           if (fallbackId) {
             return await this.runWithTimeout(fallbackId, request, timeoutMs, input, runId);
           }
           throw lastError;
         }
-        await new Promise((resolve) => setTimeout(resolve, 100 * Math.pow(2, attempt)));
+        await new Promise((resolve) => setTimeout(resolve, 100 * 2 ** attempt));
       }
     }
     throw lastError ?? new Error("agent retries exhausted");
@@ -598,11 +687,14 @@ export class AgentExecutor {
     request: ModelInvokeRequest,
     timeoutMs: number,
     input: AgentRunInput,
-    runId: string,
+    runId: string
   ): Promise<ModelInvokeResult> {
     const agentId = this.id;
     return await new Promise<ModelInvokeResult>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`agent timeout after ${timeoutMs}ms`)), timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error(`agent timeout after ${timeoutMs}ms`)),
+        timeoutMs
+      );
       this.hooks
         .invokeModel(profileId, request, {
           sessionId: input.sessionId ?? null,
@@ -610,16 +702,26 @@ export class AgentExecutor {
           recordCall: (payload) => {
             this.hooks.emitEvent(
               createEvent(
-                payload.status === "ok" ? "model.completed" : payload.status === "blocked" ? "tool.blocked" : "model.failed",
-                { profileId: payload.profileId, role: payload.role, latencyMs: payload.latencyMs, status: payload.status, error: payload.error },
+                payload.status === "ok"
+                  ? "model.completed"
+                  : payload.status === "blocked"
+                    ? "tool.blocked"
+                    : "model.failed",
+                {
+                  profileId: payload.profileId,
+                  role: payload.role,
+                  latencyMs: payload.latencyMs,
+                  status: payload.status,
+                  error: payload.error,
+                },
                 {
                   sessionId: payload.sessionId ?? null,
                   taskId: payload.taskId ?? null,
                   agent: agentId,
                   level: payload.status === "ok" ? "info" : "warn",
                   id: `${runId}_model_${payload.profileId}`,
-                },
-              ),
+                }
+              )
             );
           },
         })

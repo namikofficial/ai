@@ -15,7 +15,7 @@
 // is mixed sync/async and we keep this contract stable).
 
 import { createHash } from "node:crypto";
-// @ts-ignore - this workspace's node type surface does not expose node:module, but the runtime does.
+// @ts-expect-error - this workspace's node type surface does not expose node:module, but the runtime does.
 import { createRequire } from "node:module";
 
 import type { RetrievalChunk } from "../../shared/src/index.ts";
@@ -49,7 +49,9 @@ export interface QdrantIndexChunkInput {
   tokenCount: number;
 }
 
-export function readQdrantRuntimeSettings(env: Record<string, string | undefined> = process.env): QdrantRuntimeSettings {
+export function readQdrantRuntimeSettings(
+  env: Record<string, string | undefined> = process.env
+): QdrantRuntimeSettings {
   const enabled = /^(1|true|yes)$/i.test(env.AI_QDRANT_ENABLED ?? "");
   const collection = env.AI_QDRANT_COLLECTION ?? "ai_chunks";
   const url = env.AI_QDRANT_URL ?? (enabled ? "http://127.0.0.1:6333" : null);
@@ -59,7 +61,7 @@ export function readQdrantRuntimeSettings(env: Record<string, string | undefined
 function qdrantRequestSync(
   baseUrl: string,
   path: string,
-  init?: { method: string; body?: unknown },
+  init?: { method: string; body?: unknown }
 ): { ok: boolean; status: number; body: string } | null {
   const method = init?.method ?? "GET";
   const encodedBody = init?.body === undefined ? "" : encodeURIComponent(JSON.stringify(init.body));
@@ -78,16 +80,20 @@ function qdrantRequestSync(
     spawnSync: (
       command: string,
       args: string[],
-      options: { encoding: "utf8"; timeout: number; maxBuffer: number },
+      options: { encoding: "utf8"; timeout: number; maxBuffer: number }
     ) => { status: number | null; stdout: string };
   };
   let stdout = "";
   try {
-    stdout = spawnSync(process.argv[0], ["--input-type=module", "-e", script, new URL(path, baseUrl).toString(), method, encodedBody], {
-      encoding: "utf8",
-      timeout: 2500,
-      maxBuffer: 10_000_000,
-    }).stdout;
+    stdout = spawnSync(
+      process.argv[0],
+      ["--input-type=module", "-e", script, new URL(path, baseUrl).toString(), method, encodedBody],
+      {
+        encoding: "utf8",
+        timeout: 2500,
+        maxBuffer: 10_000_000,
+      }
+    ).stdout;
   } catch {
     return null;
   }
@@ -104,7 +110,9 @@ function readCollectionVectorSize(body: string): number | null {
       result?: {
         config?: {
           params?: {
-            vectors?: { size?: number; default?: { size?: number } } | Record<string, { size?: number }>;
+            vectors?:
+              | { size?: number; default?: { size?: number } }
+              | Record<string, { size?: number }>;
           };
         };
       };
@@ -112,7 +120,8 @@ function readCollectionVectorSize(body: string): number | null {
     const vectors = parsed.result?.config?.params?.vectors;
     if (!vectors || typeof vectors !== "object") return null;
     if ("size" in vectors && typeof vectors.size === "number") return vectors.size;
-    if ("default" in vectors && typeof vectors.default?.size === "number") return vectors.default.size;
+    if ("default" in vectors && typeof vectors.default?.size === "number")
+      return vectors.default.size;
     for (const value of Object.values(vectors)) {
       if (value && typeof value === "object" && typeof value.size === "number") return value.size;
     }
@@ -124,22 +133,46 @@ function readCollectionVectorSize(body: string): number | null {
 
 export function checkQdrantCollectionDimension(
   settings: QdrantRuntimeSettings,
-  expectedDimension: number,
+  expectedDimension: number
 ): QdrantDimensionState {
   if (!settings.enabled || !settings.url) {
-    return { status: "unreachable", expected: expectedDimension, actual: null, detail: "qdrant disabled" };
+    return {
+      status: "unreachable",
+      expected: expectedDimension,
+      actual: null,
+      detail: "qdrant disabled",
+    };
   }
   if (expectedDimension <= 0) {
-    return { status: "unreachable", expected: expectedDimension, actual: null, detail: "no embedding dimension available" };
+    return {
+      status: "unreachable",
+      expected: expectedDimension,
+      actual: null,
+      detail: "no embedding dimension available",
+    };
   }
-  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, { method: "GET" });
+  const response = qdrantRequestSync(
+    settings.url,
+    `/collections/${encodeURIComponent(settings.collection)}`,
+    { method: "GET" }
+  );
   if (response?.ok) {
     const existingSize = readCollectionVectorSize(response.body);
     if (existingSize == null) {
-      return { status: "ok", expected: expectedDimension, actual: expectedDimension, detail: "collection size not declared; assuming compatible" };
+      return {
+        status: "ok",
+        expected: expectedDimension,
+        actual: expectedDimension,
+        detail: "collection size not declared; assuming compatible",
+      };
     }
     if (existingSize === expectedDimension) {
-      return { status: "ok", expected: expectedDimension, actual: existingSize, detail: "collection size matches" };
+      return {
+        status: "ok",
+        expected: expectedDimension,
+        actual: existingSize,
+        detail: "collection size matches",
+      };
     }
     return {
       status: "mismatch",
@@ -148,27 +181,43 @@ export function checkQdrantCollectionDimension(
       detail: `collection vector size ${existingSize} does not match embedding dimension ${expectedDimension}`,
     };
   }
-  return { status: "missing", expected: expectedDimension, actual: null, detail: "collection does not exist yet" };
+  return {
+    status: "missing",
+    expected: expectedDimension,
+    actual: null,
+    detail: "collection does not exist yet",
+  };
 }
 
-export function ensureQdrantCollectionSync(settings: QdrantRuntimeSettings, dimension: number): boolean {
+export function ensureQdrantCollectionSync(
+  settings: QdrantRuntimeSettings,
+  dimension: number
+): boolean {
   if (!settings.enabled || !settings.url) {
     return false;
   }
-  const existing = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, { method: "GET" });
+  const existing = qdrantRequestSync(
+    settings.url,
+    `/collections/${encodeURIComponent(settings.collection)}`,
+    { method: "GET" }
+  );
   if (existing?.ok) {
     const existingSize = readCollectionVectorSize(existing.body);
     return existingSize == null || existingSize === dimension;
   }
-  const created = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, {
-    method: "PUT",
-    body: {
-      vectors: {
-        size: dimension,
-        distance: "Cosine",
+  const created = qdrantRequestSync(
+    settings.url,
+    `/collections/${encodeURIComponent(settings.collection)}`,
+    {
+      method: "PUT",
+      body: {
+        vectors: {
+          size: dimension,
+          distance: "Cosine",
+        },
       },
-    },
-  });
+    }
+  );
   return Boolean(created?.ok);
 }
 
@@ -178,7 +227,7 @@ export function qdrantPointForChunk(
   path: string,
   chunk: QdrantIndexChunkInput,
   language: string | null,
-  vector: number[],
+  vector: number[]
 ): QdrantPoint {
   return {
     id: chunk.id,
@@ -200,7 +249,10 @@ export function qdrantPointForChunk(
   };
 }
 
-export function upsertQdrantChunksSync(settings: QdrantRuntimeSettings, points: QdrantPoint[]): boolean {
+export function upsertQdrantChunksSync(
+  settings: QdrantRuntimeSettings,
+  points: QdrantPoint[]
+): boolean {
   if (!settings.enabled || !settings.url || points.length === 0) {
     return false;
   }
@@ -211,10 +263,14 @@ export function upsertQdrantChunksSync(settings: QdrantRuntimeSettings, points: 
   if (!ensureQdrantCollectionSync(settings, dimension)) {
     return false;
   }
-  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points?wait=true`, {
-    method: "PUT",
-    body: { points },
-  });
+  const response = qdrantRequestSync(
+    settings.url,
+    `/collections/${encodeURIComponent(settings.collection)}/points?wait=true`,
+    {
+      method: "PUT",
+      body: { points },
+    }
+  );
   return Boolean(response?.ok);
 }
 
@@ -222,7 +278,7 @@ export function searchQdrantChunksSync(
   settings: QdrantRuntimeSettings,
   projectId: string,
   queryVector: number[],
-  limit: number,
+  limit: number
 ): RetrievalChunk[] | null {
   if (!settings.enabled || !settings.url || queryVector.length === 0) {
     return null;
@@ -236,24 +292,28 @@ export function searchQdrantChunksSync(
       return null;
     }
   }
-  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}/points/search`, {
-    method: "POST",
-    body: {
-      vector: queryVector,
-      limit: limit * 3,
-      with_payload: true,
-      filter: {
-        must: [
-          {
-            key: "projectId",
-            match: {
-              value: projectId,
+  const response = qdrantRequestSync(
+    settings.url,
+    `/collections/${encodeURIComponent(settings.collection)}/points/search`,
+    {
+      method: "POST",
+      body: {
+        vector: queryVector,
+        limit: limit * 3,
+        with_payload: true,
+        filter: {
+          must: [
+            {
+              key: "projectId",
+              match: {
+                value: projectId,
+              },
             },
-          },
-        ],
+          ],
+        },
       },
-    },
-  });
+    }
+  );
   if (!response?.ok) {
     return null;
   }
@@ -268,7 +328,10 @@ export function searchQdrantChunksSync(
     return (parsed.result ?? [])
       .map((result) => {
         const payload = result.payload ?? {};
-        const metadata = payload.metadata && typeof payload.metadata === "object" ? (payload.metadata as Record<string, unknown>) : {};
+        const metadata =
+          payload.metadata && typeof payload.metadata === "object"
+            ? (payload.metadata as Record<string, unknown>)
+            : {};
         return {
           id: asString(payload.chunkId ?? result.id),
           projectId: asString(payload.projectId),
@@ -295,7 +358,10 @@ export function searchQdrantChunksSync(
 // remains the source of truth for content embeddings produced during indexing.
 function hashEmbedText(text: string, dim: number): number[] {
   const vector = Array.from({ length: dim }, () => 0);
-  const terms = text.toLowerCase().split(/[^a-z0-9]+/g).filter((term) => term.length >= 2);
+  const terms = text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((term) => term.length >= 2);
   for (const term of terms) {
     let hash = 2166136261;
     for (let index = 0; index < term.length; index += 1) {
@@ -398,11 +464,21 @@ export class QdrantClient {
 
   probe(): QdrantDimensionState {
     if (!this.settings.enabled || !this.settings.url) {
-      this.lastState = { status: "unreachable", expected: this.dimension, actual: null, detail: "qdrant disabled" };
+      this.lastState = {
+        status: "unreachable",
+        expected: this.dimension,
+        actual: null,
+        detail: "qdrant disabled",
+      };
       return this.lastState;
     }
     if (this.dimension <= 0) {
-      this.lastState = { status: "unreachable", expected: 0, actual: null, detail: "no embedding dimension available" };
+      this.lastState = {
+        status: "unreachable",
+        expected: 0,
+        actual: null,
+        detail: "no embedding dimension available",
+      };
       return this.lastState;
     }
     const probed = checkQdrantCollectionDimension(this.settings, this.dimension);

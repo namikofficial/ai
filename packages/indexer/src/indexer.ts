@@ -4,20 +4,31 @@
 // retrieval-engine QdrantClient so dimension validation and safe
 // fallback both live next to the rest of the retrieval logic.
 
-import type { DatabaseSync } from "node:sqlite";
 import { normalize, relative, resolve } from "node:path";
-import { qdrantPointForChunk, syncSearchIndexForFile, type QdrantClient, type QdrantPoint } from "../../retrieval-engine/src/index.ts";
-import { createId } from "../../shared/src/index.ts";
-import { chunkContent, hashContent, isFileSizeIndexable } from "./chunk.ts";
-import { inferLanguage, isProbablyTextFile, isReadableFile, safeReadText, walkFiles } from "./walk.ts";
+import type { DatabaseSync } from "node:sqlite";
 import {
   buildProjectContextGraph,
+  type CodeChunkSpan,
+  type CodeIntelligenceResult,
   extractCodeIntelligence,
   linkSymbolsToChunks,
   resolveLocalReference,
-  type CodeChunkSpan,
-  type CodeIntelligenceResult,
 } from "../../code-intelligence/src/index.ts";
+import {
+  type QdrantClient,
+  type QdrantPoint,
+  qdrantPointForChunk,
+  syncSearchIndexForFile,
+} from "../../retrieval-engine/src/index.ts";
+import { createId } from "../../shared/src/index.ts";
+import { chunkContent, hashContent, isFileSizeIndexable } from "./chunk.ts";
+import {
+  inferLanguage,
+  isProbablyTextFile,
+  isReadableFile,
+  safeReadText,
+  walkFiles,
+} from "./walk.ts";
 
 export interface IndexFileResult {
   path: string;
@@ -62,7 +73,9 @@ export interface IndexProjectOptions {
   language?: string | null;
   onWarning?: (warning: { kind: string; path: string; detail: string }) => void;
   onProgress?: (progress: { filesIndexed: number; chunksIndexed: number }) => void;
-  codeIntelligenceExtractor?: (input: Parameters<typeof extractCodeIntelligence>[0]) => CodeIntelligenceResult;
+  codeIntelligenceExtractor?: (
+    input: Parameters<typeof extractCodeIntelligence>[0]
+  ) => CodeIntelligenceResult;
 }
 
 interface ExistingFileRow {
@@ -81,10 +94,16 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function readExistingFile(db: DatabaseSync, projectId: string, path: string): ExistingFileRow | null {
+function readExistingFile(
+  db: DatabaseSync,
+  projectId: string,
+  path: string
+): ExistingFileRow | null {
   try {
     const row = db
-      .prepare("SELECT id, path, content_hash, is_indexed FROM files WHERE project_id = ? AND path = ? LIMIT 1")
+      .prepare(
+        "SELECT id, path, content_hash, is_indexed FROM files WHERE project_id = ? AND path = ? LIMIT 1"
+      )
       .get(projectId, path) as ExistingFileRow | undefined;
     return row ?? null;
   } catch {
@@ -92,7 +111,11 @@ function readExistingFile(db: DatabaseSync, projectId: string, path: string): Ex
   }
 }
 
-function readExistingDocument(db: DatabaseSync, projectId: string, path: string): ExistingDocumentRow | null {
+function readExistingDocument(
+  db: DatabaseSync,
+  projectId: string,
+  path: string
+): ExistingDocumentRow | null {
   try {
     const row = db
       .prepare("SELECT id, file_id FROM rag_documents WHERE project_id = ? AND path = ? LIMIT 1")
@@ -111,7 +134,19 @@ function globMatch(value: string, pattern: string): boolean {
 }
 
 export async function indexProject(options: IndexProjectOptions): Promise<IndexProjectResult> {
-  const { db, projectId, projectPath, projectConfig, qdrant, embedBatch, embeddingModel, embeddingProvider, embeddingDimension, onWarning, onProgress } = options;
+  const {
+    db,
+    projectId,
+    projectPath,
+    projectConfig,
+    qdrant,
+    embedBatch,
+    embeddingModel,
+    embeddingProvider,
+    embeddingDimension,
+    onWarning,
+    onProgress,
+  } = options;
   const codeIntelligenceEnabled = projectConfig?.codeIntelligence?.enabled ?? false;
   const extractIntelligence = options.codeIntelligenceExtractor ?? extractCodeIntelligence;
   const files = (await walkFiles(projectPath)).filter((path) => {
@@ -119,7 +154,8 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     const ignore = projectConfig?.ignore ?? [];
     const include = projectConfig?.include ?? [];
     const ignored = ignore.some((pattern) => globMatch(normalized, pattern));
-    const included = include.length === 0 || include.some((pattern) => globMatch(normalized, pattern));
+    const included =
+      include.length === 0 || include.some((pattern) => globMatch(normalized, pattern));
     return !ignored && included;
   });
   const ts = nowIso();
@@ -134,7 +170,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       is_indexed = excluded.is_indexed,
       is_generated = excluded.is_generated,
       last_seen_at = excluded.last_seen_at,
-      updated_at = excluded.updated_at`,
+      updated_at = excluded.updated_at`
   );
   const upsertDocument = db.prepare(
     `INSERT INTO rag_documents (
@@ -145,37 +181,39 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       content_hash = excluded.content_hash,
       chunk_count = excluded.chunk_count,
       indexed_at = excluded.indexed_at,
-      updated_at = excluded.updated_at`,
+      updated_at = excluded.updated_at`
   );
   const deleteChunks = db.prepare("DELETE FROM rag_chunks WHERE document_id = ?");
-  const deleteSymbolLinks = db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?");
+  const deleteSymbolLinks = db.prepare(
+    "DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?"
+  );
   const deleteSymbols = db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?");
   const insertSymbol = db.prepare(
     `INSERT INTO code_symbols (
       id, project_id, file_id, path, language, kind, name, qualified_name,
       start_line, end_line, signature, doc, metadata_json, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const insertEdge = db.prepare(
     `INSERT OR REPLACE INTO code_edges (
       id, project_id, from_symbol_id, to_symbol_id, kind, confidence, metadata_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const insertSymbolChunk = db.prepare(
     `INSERT INTO code_symbol_chunks (
       id, project_id, file_id, symbol_id, chunk_id, start_line, end_line, overlap_lines, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const upsertProjectGraph = db.prepare(
     `INSERT INTO project_context_graphs (project_id, summary_json, updated_at)
      VALUES (?, ?, ?)
-     ON CONFLICT(project_id) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at`,
+     ON CONFLICT(project_id) DO UPDATE SET summary_json = excluded.summary_json, updated_at = excluded.updated_at`
   );
   const insertChunk = db.prepare(
     `INSERT INTO rag_chunks (
       id, project_id, document_id, chunk_index, content, content_hash, start_line, end_line, token_count,
       embedding_id, metadata_json, created_at, embedding_model, embedding_dim, embedding_provider
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   );
   const qdrantPoints: QdrantPoint[] = [];
   const seenPaths = new Set<string>();
@@ -217,23 +255,30 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       ? Math.max(20, Math.floor(maxChunkTokens / 10))
       : Math.max(24, Math.floor(maxChunkTokens / 12));
     const chunks = chunkContent(content, linesPerChunk);
-    const chunkRows: Array<CodeChunkSpan & { id: string; content: string }> = chunks.map((chunk) => ({
-      id: createId("chunk"),
-      startLine: chunk.startLine,
-      endLine: chunk.endLine,
-      tokenCount: chunk.tokenCount,
-      content: chunk.content,
-    }));
-    const existingSymbolRows = codeIntelligenceEnabled && previous
-      ? (db.prepare("SELECT id FROM code_symbols WHERE project_id = ? AND file_id = ?").all(projectId, fileId) as Array<{ id: string }>)
-      : [];
+    const chunkRows: Array<CodeChunkSpan & { id: string; content: string }> = chunks.map(
+      (chunk) => ({
+        id: createId("chunk"),
+        startLine: chunk.startLine,
+        endLine: chunk.endLine,
+        tokenCount: chunk.tokenCount,
+        content: chunk.content,
+      })
+    );
+    const existingSymbolRows =
+      codeIntelligenceEnabled && previous
+        ? (db
+            .prepare("SELECT id FROM code_symbols WHERE project_id = ? AND file_id = ?")
+            .all(projectId, fileId) as Array<{ id: string }>)
+        : [];
     if (existingSymbolRows.length > 0) {
       const oldIds = existingSymbolRows.map((row) => row.id);
       const placeholders = oldIds.map(() => "?").join(", ");
       deleteSymbolLinks.run(projectId, fileId);
       deleteSymbols.run(projectId, fileId);
       if (placeholders.length > 0) {
-        db.prepare(`DELETE FROM code_edges WHERE project_id = ? AND (from_symbol_id IN (${placeholders}) OR to_symbol_id IN (${placeholders}))`).run(projectId, ...oldIds, ...oldIds);
+        db.prepare(
+          `DELETE FROM code_edges WHERE project_id = ? AND (from_symbol_id IN (${placeholders}) OR to_symbol_id IN (${placeholders}))`
+        ).run(projectId, ...oldIds, ...oldIds);
       }
     }
     let code: CodeIntelligenceResult | null = null;
@@ -259,12 +304,44 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       ? linkSymbolsToChunks(code.symbols, chunkRows)
       : {
           links: [],
-          metadataByChunkId: new Map<string, Array<{ id: string; kind: string; name: string; qualifiedName: string; signature: string | null; confidence: number }>>(),
+          metadataByChunkId: new Map<
+            string,
+            Array<{
+              id: string;
+              kind: string;
+              name: string;
+              qualifiedName: string;
+              signature: string | null;
+              confidence: number;
+            }>
+          >(),
         };
     deleteChunks.run(documentId);
 
-    upsertFile.run(fileId, projectId, relativePath, language, byteLength, contentHash, 1, 0, ts, ts, ts);
-    upsertDocument.run(documentId, projectId, fileId, relativePath, contentHash, chunks.length, ts, ts, ts);
+    upsertFile.run(
+      fileId,
+      projectId,
+      relativePath,
+      language,
+      byteLength,
+      contentHash,
+      1,
+      0,
+      ts,
+      ts,
+      ts
+    );
+    upsertDocument.run(
+      documentId,
+      projectId,
+      fileId,
+      relativePath,
+      contentHash,
+      chunks.length,
+      ts,
+      ts,
+      ts
+    );
 
     if (code) {
       for (const symbol of code.symbols) {
@@ -283,7 +360,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
           symbol.doc,
           JSON.stringify(symbol.metadata),
           ts,
-          ts,
+          ts
         );
       }
       for (const edge of code.edges) {
@@ -295,15 +372,16 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
           edge.kind,
           edge.confidence,
           JSON.stringify(edge.metadata),
-          ts,
+          ts
         );
       }
     }
 
     const embeddingInput = chunks.map((chunk) => `${relativePath}\n${chunk.content}`);
-    const embeddingResult = embeddingInput.length > 0
-      ? await embedBatch(embeddingInput)
-      : { embeddings: [], dimensions: 0, modelName: "none", providerId: "none" };
+    const embeddingResult =
+      embeddingInput.length > 0
+        ? await embedBatch(embeddingInput)
+        : { embeddings: [], dimensions: 0, modelName: "none", providerId: "none" };
     if (embeddingResult.dimensions > 0 && embeddingResult.dimensions !== embeddingDimension) {
       onWarning?.({
         kind: "embedding-dimension-mismatch",
@@ -313,7 +391,9 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     }
 
     chunkRows.forEach((chunk, index) => {
-      const chunkHash = hashContent(`${relativePath}\n${chunk.content}\n${chunk.startLine}\n${chunk.endLine}`);
+      const chunkHash = hashContent(
+        `${relativePath}\n${chunk.content}\n${chunk.startLine}\n${chunk.endLine}`
+      );
       const vector = embeddingResult.embeddings[index] ?? [];
       const symbolMetadata = chunkLinks.metadataByChunkId.get(chunk.id) ?? [];
       insertChunk.run(
@@ -341,12 +421,18 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
         ts,
         embeddingResult.modelName,
         embeddingResult.dimensions || null,
-        embeddingResult.providerId,
+        embeddingResult.providerId
       );
       if (code) {
         for (const symbol of code.symbols) {
-          if (chunkLinks.links.some((link) => link.symbolId === symbol.id && link.chunkId === chunk.id)) {
-            const overlaps = chunkLinks.links.filter((link) => link.symbolId === symbol.id && link.chunkId === chunk.id);
+          if (
+            chunkLinks.links.some(
+              (link) => link.symbolId === symbol.id && link.chunkId === chunk.id
+            )
+          ) {
+            const overlaps = chunkLinks.links.filter(
+              (link) => link.symbolId === symbol.id && link.chunkId === chunk.id
+            );
             insertSymbolChunk.run(
               createId("cs"),
               projectId,
@@ -356,7 +442,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
               chunk.startLine,
               chunk.endLine,
               overlaps[0]?.overlapLines ?? 0,
-              ts,
+              ts
             );
           }
         }
@@ -375,8 +461,8 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
               tokenCount: chunk.tokenCount,
             },
             language,
-            vector,
-          ),
+            vector
+          )
         );
       }
       chunksIndexed += 1;
@@ -394,7 +480,10 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
   if (staleFiles.length > 0) {
     const deleteSearchRows = (path: string) => {
       try {
-        db.prepare("DELETE FROM rag_chunks_fts WHERE project_id = ? AND path = ?").run(projectId, path);
+        db.prepare("DELETE FROM rag_chunks_fts WHERE project_id = ? AND path = ?").run(
+          projectId,
+          path
+        );
       } catch {
         // FTS is optional.
       }
@@ -409,18 +498,27 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       const symbolIds = symbolRows.map((row) => row.id);
       if (symbolIds.length > 0) {
         const placeholders = symbolIds.map(() => "?").join(", ");
-        db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
-        db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
+        db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?").run(
+          projectId,
+          staleFile.id
+        );
+        db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?").run(
+          projectId,
+          staleFile.id
+        );
         db.prepare(
           `DELETE FROM code_edges
            WHERE project_id = ?
-             AND (from_symbol_id IN (${placeholders}) OR to_symbol_id IN (${placeholders}))`,
+             AND (from_symbol_id IN (${placeholders}) OR to_symbol_id IN (${placeholders}))`
         ).run(projectId, ...symbolIds, ...symbolIds);
       }
       for (const documentRow of documentRows) {
         db.prepare("DELETE FROM rag_chunks WHERE document_id = ?").run(documentRow.id);
       }
-      db.prepare("DELETE FROM rag_documents WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
+      db.prepare("DELETE FROM rag_documents WHERE project_id = ? AND file_id = ?").run(
+        projectId,
+        staleFile.id
+      );
       db.prepare("DELETE FROM files WHERE project_id = ? AND id = ?").run(projectId, staleFile.id);
       deleteSearchRows(staleFile.path);
     }
@@ -429,14 +527,21 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
   try {
     if (codeIntelligenceEnabled) {
       const importRows = db
-        .prepare("SELECT id, path, metadata_json FROM code_symbols WHERE project_id = ? AND kind = 'import'")
+        .prepare(
+          "SELECT id, path, metadata_json FROM code_symbols WHERE project_id = ? AND kind = 'import'"
+        )
         .all(projectId) as Array<Record<string, unknown>>;
       const targetRows = db
-        .prepare("SELECT id, path, name, qualified_name, kind FROM code_symbols WHERE project_id = ? AND kind != 'import'")
+        .prepare(
+          "SELECT id, path, name, qualified_name, kind FROM code_symbols WHERE project_id = ? AND kind != 'import'"
+        )
         .all(projectId) as Array<Record<string, unknown>>;
       for (const importRow of importRows) {
         const sourcePath = String(importRow.path);
-        const metadata = JSON.parse(String(importRow.metadata_json || "{}")) as Record<string, unknown>;
+        const metadata = JSON.parse(String(importRow.metadata_json || "{}")) as Record<
+          string,
+          unknown
+        >;
         const modulePath = String(metadata.modulePath ?? metadata.imported ?? "");
         const resolvedPath = resolveLocalReference(sourcePath, modulePath);
         if (!resolvedPath) continue;
@@ -445,11 +550,14 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
           .filter((token) => token.length > 0);
         const targetForPath = targetRows.filter((row) => String(row.path) === resolvedPath);
         if (targetForPath.length === 0) continue;
-        const bestTarget = importedNames.length > 0
-          ? targetForPath.find((row) => importedNames.includes(String(row.name)))
-            ?? targetForPath.find((row) => importedNames.some((name) => String(row.qualified_name).includes(name)))
-            ?? targetForPath[0]
-          : targetForPath[0];
+        const bestTarget =
+          importedNames.length > 0
+            ? (targetForPath.find((row) => importedNames.includes(String(row.name))) ??
+              targetForPath.find((row) =>
+                importedNames.some((name) => String(row.qualified_name).includes(name))
+              ) ??
+              targetForPath[0])
+            : targetForPath[0];
         if (!bestTarget) continue;
         insertEdge.run(
           createId("edge"),
@@ -459,7 +567,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
           "imports",
           0.8,
           JSON.stringify({ modulePath, resolvedPath, sourcePath }),
-          ts,
+          ts
         );
       }
     }
@@ -469,7 +577,9 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
 
   try {
     const symbolRows = db
-      .prepare("SELECT id, project_id, file_id, path, language, kind, name, qualified_name, start_line, end_line, signature, doc, metadata_json FROM code_symbols WHERE project_id = ?")
+      .prepare(
+        "SELECT id, project_id, file_id, path, language, kind, name, qualified_name, start_line, end_line, signature, doc, metadata_json FROM code_symbols WHERE project_id = ?"
+      )
       .all(projectId) as Array<Record<string, unknown>>;
     const symbols = symbolRows.map((row) => ({
       id: String(row.id),
@@ -477,7 +587,17 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       fileId: String(row.file_id),
       path: String(row.path),
       language: row.language == null ? null : String(row.language),
-      kind: String(row.kind) as "function" | "class" | "method" | "interface" | "type" | "import" | "route" | "middleware" | "constant" | "unknown",
+      kind: String(row.kind) as
+        | "function"
+        | "class"
+        | "method"
+        | "interface"
+        | "type"
+        | "import"
+        | "route"
+        | "middleware"
+        | "constant"
+        | "unknown",
       name: String(row.name),
       qualifiedName: String(row.qualified_name),
       startLine: Number(row.start_line),
@@ -512,6 +632,8 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     }
   }
 
-  db.prepare("UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?").run("ready", ts, ts, projectId);
+  db.prepare(
+    "UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?"
+  ).run("ready", ts, ts, projectId);
   return { filesIndexed, chunksIndexed, qdrantFailed, reusedFiles, changedFiles };
 }

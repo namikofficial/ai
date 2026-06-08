@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
 import { resolveConfig } from "../packages/config/src/index.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("serves MCP tools and logs calls", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-mcp-"));

@@ -1,17 +1,17 @@
 import { readFileSync } from "node:fs";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { createApiClient } from "../../../packages/api-client/src/index.ts";
-import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { startWorkbenchServer } from "../../../apps/api/src/server.ts";
 import { startWorkbenchWeb } from "../../../apps/web/src/server.ts";
 import { startWorkbenchWorker } from "../../../apps/worker/src/worker.ts";
 import { startMcpServer } from "../../../mcp/server/src/stdio.ts";
-import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
-import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import { createApiClient } from "../../../packages/api-client/src/index.ts";
+import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { runRetrievalExplain } from "../../../packages/db/src/retrieval-explain.ts";
-import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
+import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
+import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
+import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 
 function printUsage(): void {
   console.log(`ai commands:
@@ -122,22 +122,48 @@ function parseJson<T>(value: string | null): T | null {
 }
 
 function projectConfigCandidates(projectPath: string): string[] {
-  return [".ai-workbench.json", ".ai-workbench", ".aiconfig"].map((name) => join(projectPath, name));
+  return [".ai-workbench.json", ".ai-workbench", ".aiconfig"].map((name) =>
+    join(projectPath, name)
+  );
 }
 
-function validateProjectConfigFile(projectPath: string): { path: string | null; valid: boolean; error: string | null; value: Record<string, unknown> | null } {
+function validateProjectConfigFile(projectPath: string): {
+  path: string | null;
+  valid: boolean;
+  error: string | null;
+  value: Record<string, unknown> | null;
+} {
   for (const candidate of projectConfigCandidates(projectPath)) {
     try {
-      const parsed = JSON.parse(readFileSync(candidate, { encoding: "utf8" })) as unknown;
+      const parsed = JSON.parse(readFileSync(candidate, { encoding: "utf8" }));
       if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-        return { path: candidate, valid: false, error: "project config must be a JSON object", value: null };
+        return {
+          path: candidate,
+          valid: false,
+          error: "project config must be a JSON object",
+          value: null,
+        };
       }
-      return { path: candidate, valid: true, error: null, value: parsed as Record<string, unknown> };
+      return {
+        path: candidate,
+        valid: true,
+        error: null,
+        value: parsed as Record<string, unknown>,
+      };
     } catch (error) {
-      if (error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT") {
+      if (
+        error instanceof Error &&
+        "code" in error &&
+        (error as { code?: string }).code === "ENOENT"
+      ) {
         continue;
       }
-      return { path: candidate, valid: false, error: error instanceof Error ? error.message : String(error), value: null };
+      return {
+        path: candidate,
+        valid: false,
+        error: error instanceof Error ? error.message : String(error),
+        value: null,
+      };
     }
   }
   return { path: null, valid: true, error: null, value: null };
@@ -250,7 +276,8 @@ async function run(): Promise<void> {
 
   if (command === "api") {
     const apiOnlyPort = Number(options.port ?? options["api-port"] ?? apiPort);
-    const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
+    const apiOnlyUrl =
+      options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
     const handle = await startWorkbenchServer({
       config: { apiUrl: apiOnlyUrl, webPort: apiOnlyPort, apiPort: apiOnlyPort },
     });
@@ -265,7 +292,8 @@ async function run(): Promise<void> {
   if (command === "web") {
     const webPort = Number(options.port ?? 3000);
     const apiOnlyPort = Number(options["api-port"] ?? 4242);
-    const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
+    const apiOnlyUrl =
+      options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
     const apiHandle = await startWorkbenchServer({
       config: { apiUrl: apiOnlyUrl, webPort: apiOnlyPort, apiPort: apiOnlyPort },
     });
@@ -336,7 +364,11 @@ async function run(): Promise<void> {
         if (!project) {
           throw new Error(`Unknown project: ${projectIdentifier}`);
         }
-        const symbols = store.codeIntelligence.listSymbols(project.id, options.query ?? null, Number(options.limit ?? 50) || 50);
+        const symbols = store.codeIntelligence.listSymbols(
+          project.id,
+          options.query ?? null,
+          Number(options.limit ?? 50) || 50
+        );
         printJson({
           project,
           query: options.query ?? null,
@@ -512,7 +544,13 @@ async function run(): Promise<void> {
   if (command === "handoff") {
     const sessionId = options.session;
     const project = options.project;
-    const target = options.target === "opencode" || options.target === "codex" || options.target === "clipboard" || options.target === "file" ? options.target : "manual";
+    const target =
+      options.target === "opencode" ||
+      options.target === "codex" ||
+      options.target === "clipboard" ||
+      options.target === "file"
+        ? options.target
+        : "manual";
     const subtask = positionals.join(" ");
     if (!sessionId || !project) {
       throw new Error("handoff requires --session <id> and --project <name>");
@@ -534,8 +572,12 @@ async function run(): Promise<void> {
   }
 
   if (command === "trace") {
-    const subcommand = positionals[0] === "timeline" || positionals[0] === "conversation" ? positionals.shift()! : "conversation";
-    const sessionId = positionals[0] ?? (subcommand === "conversation" ? positionals.shift() : null);
+    const subcommand =
+      positionals[0] === "timeline" || positionals[0] === "conversation"
+        ? positionals.shift()!
+        : "conversation";
+    const sessionId =
+      positionals[0] ?? (subcommand === "conversation" ? positionals.shift() : null);
     if (!sessionId) {
       throw new Error("trace requires a session id");
     }
@@ -572,7 +614,10 @@ async function run(): Promise<void> {
     const result = await client.replaySession(sessionId, {
       selectedPromptId: promptId,
       modelProfileId,
-      mode: options.mode === "local" || options.mode === "cloud" || options.mode === "hybrid" ? options.mode : undefined,
+      mode:
+        options.mode === "local" || options.mode === "cloud" || options.mode === "hybrid"
+          ? options.mode
+          : undefined,
       dryRun: options["dry-run"] === "true" || options.dryRun === "true",
     });
     printJson(result);
@@ -620,9 +665,18 @@ async function run(): Promise<void> {
         project,
         sessionId: options.session ?? null,
         title: options.title,
-        plannedFiles: (options.planned ?? "").split(",").map((item) => item.trim()).filter(Boolean),
-        editedFiles: (options.edited ?? "").split(",").map((item) => item.trim()).filter(Boolean),
-        checks: (options.checks ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+        plannedFiles: (options.planned ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        editedFiles: (options.edited ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+        checks: (options.checks ?? "")
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
         notes: options.notes,
       });
       printJson(result);
@@ -633,14 +687,17 @@ async function run(): Promise<void> {
   if (command === "retrieval") {
     const subcommand = positionals.shift();
     const project = options.project;
-    const query = subcommand ? `${subcommand} ${positionals.join(" ")}`.trim() : positionals.join(" ");
+    const query = subcommand
+      ? `${subcommand} ${positionals.join(" ")}`.trim()
+      : positionals.join(" ");
     if (!project) {
       throw new Error("retrieval requires --project <name>");
     }
-    printJson(await client.searchRetrieval({ project, query, limit: Number(options.limit ?? 8) || 8 }));
+    printJson(
+      await client.searchRetrieval({ project, query, limit: Number(options.limit ?? 8) || 8 })
+    );
     return;
   }
-
 
   if (command === "models") {
     printJson(await client.getModels());
@@ -680,7 +737,10 @@ function withDirectStore<T>(fn: (store: DirectStore) => T | Promise<T>): Promise
     });
 }
 
-async function dispatchRetrievalExplain(input: { positionals: string[]; options: Record<string, string> }): Promise<void> {
+async function dispatchRetrievalExplain(input: {
+  positionals: string[];
+  options: Record<string, string>;
+}): Promise<void> {
   const project = input.options.project;
   if (!project) {
     throw new Error("retrieval explain requires --project <name>");
@@ -689,8 +749,14 @@ async function dispatchRetrievalExplain(input: { positionals: string[]; options:
   if (!query) {
     throw new Error("retrieval explain requires a query string");
   }
-  const mode: RetrievalMode = input.options.mode === "cloud" || input.options.mode === "hybrid" ? input.options.mode : "local";
-  const depth: RetrievalDepth = input.options.depth === "shallow" || input.options.depth === "deep" ? input.options.depth : "standard";
+  const mode: RetrievalMode =
+    input.options.mode === "cloud" || input.options.mode === "hybrid"
+      ? input.options.mode
+      : "local";
+  const depth: RetrievalDepth =
+    input.options.depth === "shallow" || input.options.depth === "deep"
+      ? input.options.depth
+      : "standard";
   const limit = Number(input.options.limit ?? 8) || 8;
   await withDirectStore((store) => {
     const projectRecord = store.getProject(project);
@@ -760,23 +826,27 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
         printJson(entry);
         return;
       }
-      const reasonArg = process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
+      const reasonArg =
+        process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
       store.memory.reviewCandidate(id, "rejected", reasonArg);
       printJson({ id, status: "rejected" });
       return;
     }
     if (sub === "list") {
       const scopeArg = process.argv.find((arg) => arg.startsWith("--scope="))?.split("=")[1] as
-        | "global" | "project" | "repo" | "path" | undefined;
+        | "global"
+        | "project"
+        | "repo"
+        | "path"
+        | undefined;
       printJson(store.memory.listEntries(undefined, scopeArg));
       return;
     }
     throw new Error(`unknown memory subcommand: ${sub}`);
-  })
-    .catch((error) => {
-      console.error(error instanceof Error ? error.message : String(error));
-      process.exit(1);
-    });
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
 } else if (process.argv[2] === "models") {
   withDirectStore(async (store) => {
     const sub = process.argv[3] ?? "list";
@@ -794,13 +864,25 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       cloudEnabled: config.cloudEnabled,
     });
     if (sub === "list") {
-      printJson({ providers: store.models.listProviders(), profiles: store.models.listProfiles(), routes: store.listModelRoutes(50) });
+      printJson({
+        providers: store.models.listProviders(),
+        profiles: store.models.listProfiles(),
+        routes: store.listModelRoutes(50),
+      });
       return;
     }
     if (sub === "health") {
-      const health = await Promise.all(store.models.listProviders().map((provider) => runtime.health(provider.id)));
+      const health = await Promise.all(
+        store.models.listProviders().map((provider) => runtime.health(provider.id))
+      );
       const calls = store.models.listAllCalls(50);
-      printJson({ providers: store.models.listProviders(), health, recentCalls: calls, routes: store.listModelRoutes(50), usageDaily: store.models.listUsageDaily(50) });
+      printJson({
+        providers: store.models.listProviders(),
+        health,
+        recentCalls: calls,
+        routes: store.listModelRoutes(50),
+        usageDaily: store.models.listUsageDaily(50),
+      });
       return;
     }
     if (sub === "route") {
@@ -809,8 +891,16 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       const mode = process.argv.find((arg) => arg.startsWith("--mode="))?.split("=")[1];
       const risk = process.argv.find((arg) => arg.startsWith("--risk="))?.split("=")[1];
       const depth = process.argv.find((arg) => arg.startsWith("--depth="))?.split("=")[1];
-      const question = process.argv.find((arg) => arg.startsWith("--question="))?.split("=").slice(1).join("=");
-      const goal = process.argv.find((arg) => arg.startsWith("--goal="))?.split("=").slice(1).join("=");
+      const question = process.argv
+        .find((arg) => arg.startsWith("--question="))
+        ?.split("=")
+        .slice(1)
+        .join("=");
+      const goal = process.argv
+        .find((arg) => arg.startsWith("--goal="))
+        ?.split("=")
+        .slice(1)
+        .join("=");
       const routeDecision = await runtime.route({
         role: taskPattern.includes("plan")
           ? "planner"
@@ -823,7 +913,8 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
         cloudEnabled: config.cloudEnabled,
         details: {
           risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
-          depth: depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
+          depth:
+            depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
           question,
           goal,
         },
@@ -831,25 +922,53 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       const route = store.recordModelRoute({
         taskPattern,
         mode: mode === "local" || mode === "cloud" || mode === "hybrid" ? mode : "any",
-        selectedProfileId: routeDecision.profileId ?? store.recommendModelProfile(
-          taskPattern.includes("plan") ? "plan" : taskPattern.includes("handoff") ? "handoff" : taskPattern.includes("check") ? "check" : "ask",
-          {
-            risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
-            depth: depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
-            question,
-            goal,
-          },
-        ),
+        selectedProfileId:
+          routeDecision.profileId ??
+          store.recommendModelProfile(
+            taskPattern.includes("plan")
+              ? "plan"
+              : taskPattern.includes("handoff")
+                ? "handoff"
+                : taskPattern.includes("check")
+                  ? "check"
+                  : "ask",
+            {
+              risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
+              depth:
+                depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
+              question,
+              goal,
+            }
+          ),
         fallbackProfileId: routeDecision.fallbackProfileId,
         reason: routeDecision.reason,
       });
-      printJson({ route, profile: store.models.getProfile(route.selectedProfileId), decision: routeDecision });
+      printJson({
+        route,
+        profile: store.models.getProfile(route.selectedProfileId),
+        decision: routeDecision,
+      });
       return;
     }
     if (sub === "call") {
-      const role = process.argv.find((arg) => arg.startsWith("--role="))?.split("=").slice(1).join("=") ?? "summarizer";
-      const prompt = process.argv.find((arg) => arg.startsWith("--prompt="))?.split("=").slice(1).join("=") ?? "";
-      const profileId = process.argv.find((arg) => arg.startsWith("--profile-id="))?.split("=").slice(1).join("=") ?? null;
+      const role =
+        process.argv
+          .find((arg) => arg.startsWith("--role="))
+          ?.split("=")
+          .slice(1)
+          .join("=") ?? "summarizer";
+      const prompt =
+        process.argv
+          .find((arg) => arg.startsWith("--prompt="))
+          ?.split("=")
+          .slice(1)
+          .join("=") ?? "";
+      const profileId =
+        process.argv
+          .find((arg) => arg.startsWith("--profile-id="))
+          ?.split("=")
+          .slice(1)
+          .join("=") ?? null;
       const roleForRouting =
         role === "planner"
           ? "planner"
@@ -864,19 +983,43 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
                   : "summarizer";
       const chosenProfileId =
         profileId ??
-        (await runtime.route({
-          role: roleForRouting as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
-          mode: "local",
-          cloudEnabled: config.cloudEnabled,
-          details: { question: prompt },
-        })).profileId ??
+        (
+          await runtime.route({
+            role: roleForRouting as
+              | "intent"
+              | "query_rewrite"
+              | "retrieval_judge"
+              | "answer"
+              | "planner"
+              | "coder_handoff"
+              | "reviewer"
+              | "reflection"
+              | "summarizer"
+              | "embedding"
+              | "reranker",
+            mode: "local",
+            cloudEnabled: config.cloudEnabled,
+            details: { question: prompt },
+          })
+        ).profileId ??
         store.recommendModelProfile("ask", { question: prompt });
       const callProfile = chosenProfileId ? store.models.getProfile(chosenProfileId) : null;
       if (!callProfile) {
         throw new Error("No model profile available for the requested role");
       }
       const result = await runtime.invoke(callProfile.id, {
-        role: roleForRouting as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
+        role: roleForRouting as
+          | "intent"
+          | "query_rewrite"
+          | "retrieval_judge"
+          | "answer"
+          | "planner"
+          | "coder_handoff"
+          | "reviewer"
+          | "reflection"
+          | "summarizer"
+          | "embedding"
+          | "reranker",
         messages: [
           { role: "system", content: "You are a local model runtime." },
           { role: "user", content: prompt },
@@ -885,7 +1028,18 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       });
       const call = store.models.recordCall({
         profileId: callProfile.id,
-        role: roleForRouting as "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker",
+        role: roleForRouting as
+          | "intent"
+          | "query_rewrite"
+          | "retrieval_judge"
+          | "answer"
+          | "planner"
+          | "coder_handoff"
+          | "reviewer"
+          | "reflection"
+          | "summarizer"
+          | "embedding"
+          | "reranker",
         promptTokens: result.promptTokens,
         completionTokens: result.completionTokens,
         latencyMs: result.latencyMs,
@@ -909,15 +1063,25 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
   }
   withDirectStore((store) => {
     const messages = store.conversation.listMessages(sessionId);
-  const runs = store.agents.listRuns(sessionId);
-  const handoffs = store.agents.listHandoffs(sessionId);
-  const queries = store.retrieval.listQueriesForSession(sessionId);
-  const packs = store.context.listPacksForSession(sessionId);
-  const compiledPrompts = store.listCompiledPrompts(sessionId, 100);
-  const modelCalls = store.models.listCalls(sessionId);
-  const events = store.listEvents(sessionId);
-  const outcomes = store.evals.listOutcomes(sessionId);
-  printJson({ messages, runs, handoffs, retrievalQueries: queries, contextPacks: packs, compiledPrompts, modelCalls, events, outcomes });
+    const runs = store.agents.listRuns(sessionId);
+    const handoffs = store.agents.listHandoffs(sessionId);
+    const queries = store.retrieval.listQueriesForSession(sessionId);
+    const packs = store.context.listPacksForSession(sessionId);
+    const compiledPrompts = store.listCompiledPrompts(sessionId, 100);
+    const modelCalls = store.models.listCalls(sessionId);
+    const events = store.listEvents(sessionId);
+    const outcomes = store.evals.listOutcomes(sessionId);
+    printJson({
+      messages,
+      runs,
+      handoffs,
+      retrievalQueries: queries,
+      contextPacks: packs,
+      compiledPrompts,
+      modelCalls,
+      events,
+      outcomes,
+    });
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
@@ -963,7 +1127,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       printJson(
         status
           ? store.skills.listCandidates(status as "pending" | "active" | "deprecated" | "rejected")
-          : store.skills.listCandidates(),
+          : store.skills.listCandidates()
       );
       return;
     }
@@ -977,7 +1141,8 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
         printJson(skill);
         return;
       }
-      const reasonArg = process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
+      const reasonArg =
+        process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
       store.skills.reviewCandidate(id, "rejected");
       printJson({ id, status: "rejected", reason: reasonArg });
       return;
@@ -992,8 +1157,16 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
     const sub = process.argv[3] ?? "list";
     if (sub === "add") {
       const project = process.argv.find((arg) => arg.startsWith("--project="))?.split("=")[1];
-      const query = process.argv.find((arg) => arg.startsWith("--query="))?.split("=").slice(1).join("=");
-      const expected = process.argv.find((arg) => arg.startsWith("--expected="))?.split("=").slice(1).join("=");
+      const query = process.argv
+        .find((arg) => arg.startsWith("--query="))
+        ?.split("=")
+        .slice(1)
+        .join("=");
+      const expected = process.argv
+        .find((arg) => arg.startsWith("--expected="))
+        ?.split("=")
+        .slice(1)
+        .join("=");
       if (!project || !query || !expected) {
         throw new Error("eval add requires --project, --query, --expected");
       }
@@ -1017,7 +1190,12 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       const cases = store.evals.listCases().filter((c) => c.projectId === project);
       const evaluations: Array<Record<string, unknown>> = [];
       for (const c of cases) {
-        const answer = await store.ask({ project, question: c.question, mode: "local", depth: "standard" });
+        const answer = await store.ask({
+          project,
+          question: c.question,
+          mode: "local",
+          depth: "standard",
+        });
         const groundedness = answer.confidence;
         const citationCoverage = answer.citations.length > 0 ? 1 : 0;
         const evalRecord = store.evals.recordAnswerEvaluation({

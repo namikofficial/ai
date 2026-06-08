@@ -10,11 +10,11 @@
 // original project path is stored so the patch can later be applied back
 // at the user's explicit request.
 
+import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, rm, cp, readdir, readFile, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFile } from "node:child_process";
 import { IGNORED_DIRECTORIES, isIgnoredDirectory, normalizeSlashes } from "./files.ts";
 
 const execFileAsync = execFile;
@@ -56,7 +56,9 @@ export async function isGitRepository(projectPath: string): Promise<boolean> {
 
 export async function listGitBranches(projectPath: string): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync("git", ["branch", "--format=%(refname:short)"], { cwd: projectPath });
+    const { stdout } = await execFileAsync("git", ["branch", "--format=%(refname:short)"], {
+      cwd: projectPath,
+    });
     return stdout
       .split("\n")
       .map((line) => line.trim())
@@ -68,7 +70,9 @@ export async function listGitBranches(projectPath: string): Promise<string[]> {
 
 export async function getCurrentBranch(projectPath: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { cwd: projectPath });
+    const { stdout } = await execFileAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
+      cwd: projectPath,
+    });
     const branch = stdout.trim();
     return branch.length > 0 ? branch : null;
   } catch {
@@ -94,7 +98,9 @@ function workspaceRootFor(runtimeDir: string): string {
   return path.join(runtimeDir, "workspaces");
 }
 
-export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
+export async function createTaskWorkspace(
+  input: CreateWorkspaceInput
+): Promise<CreateWorkspaceResult> {
   const root = path.resolve(input.projectPath);
   if (!existsSync(root)) {
     throw new Error(`project path does not exist: ${root}`);
@@ -121,15 +127,21 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
           originalRoot: root,
         },
         cleanup: async () => {
-          await execFileAsync("git", ["worktree", "remove", "--force", sessionDir], { cwd: root }).catch(() => undefined);
-          await execFileAsync("git", ["branch", "-D", branchName], { cwd: root }).catch(() => undefined);
+          await execFileAsync("git", ["worktree", "remove", "--force", sessionDir], {
+            cwd: root,
+          }).catch(() => undefined);
+          await execFileAsync("git", ["branch", "-D", branchName], { cwd: root }).catch(
+            () => undefined
+          );
           await rm(sessionDir, { recursive: true, force: true }).catch(() => undefined);
         },
       };
     } catch (error) {
       // Fall through to safe copy.
       // eslint-disable-next-line no-console
-      console.warn(`[execution-engine] git worktree failed, falling back to safe copy: ${(error as Error).message} (branch=${currentBranch ?? "n/a"})`);
+      console.warn(
+        `[execution-engine] git worktree failed, falling back to safe copy: ${(error as Error).message} (branch=${currentBranch ?? "n/a"})`
+      );
     }
   }
 
@@ -155,7 +167,12 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
 
 async function copyDirectory(source: string, target: string): Promise<void> {
   const entries = await readdir(source, { withFileTypes: true });
-  for (const entry of entries as { name: string; isDirectory(): boolean; isFile(): boolean; isSymbolicLink(): boolean }[]) {
+  for (const entry of entries as {
+    name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+    isSymbolicLink(): boolean;
+  }[]) {
     const relative = entry.name;
     if (isIgnoredDirectory(normalizeSlashes(relative))) {
       continue;
@@ -172,7 +189,9 @@ async function copyDirectory(source: string, target: string): Promise<void> {
       await cp(from, to, { recursive: false });
     } else if (entry.isSymbolicLink()) {
       try {
-        const target = await readFile(from).then(() => undefined).catch(() => undefined);
+        const target = await readFile(from)
+          .then(() => undefined)
+          .catch(() => undefined);
         if (target !== undefined) {
           await cp(from, to, { recursive: false });
         }
@@ -215,7 +234,9 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
       added.push(relativePath);
       const content = await safeReadText(workspacePath, maxBytes);
       if (content.truncated) truncated = true;
-      diffs.push(`--- /dev/null\n+++ b/${relativePath}\n@@ -0,0 +1,${content.value.split("\n").length} @@\n+${content.value.split("\n").join("\n+")}\n`);
+      diffs.push(
+        `--- /dev/null\n+++ b/${relativePath}\n@@ -0,0 +1,${content.value.split("\n").length} @@\n+${content.value.split("\n").join("\n+")}\n`
+      );
       continue;
     }
     if (!workspaceExists && originalExists) {
@@ -245,7 +266,7 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
       if (afterLine !== undefined) hunks.push(`+${afterLine}`);
     }
     diffs.push(
-      `--- a/${relativePath}\n+++ b/${relativePath}\n@@ -1,${beforeLines.length} +1,${afterLines.length} @@\n${hunks.join("\n")}\n`,
+      `--- a/${relativePath}\n+++ b/${relativePath}\n@@ -1,${beforeLines.length} +1,${afterLines.length} @@\n${hunks.join("\n")}\n`
     );
   }
   return {
@@ -257,7 +278,10 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
   };
 }
 
-async function safeReadText(filePath: string, maxBytes: number): Promise<{ value: string; truncated: boolean }> {
+async function safeReadText(
+  filePath: string,
+  maxBytes: number
+): Promise<{ value: string; truncated: boolean }> {
   try {
     const info = await stat(filePath);
     if (info.size > maxBytes) {
@@ -277,7 +301,9 @@ export interface ApplyPatchInput {
   allowedRoots: ReadonlyArray<string>;
 }
 
-export async function applyWorkspaceToOriginal(input: ApplyPatchInput): Promise<{ applied: string[]; skipped: string[] }> {
+export async function applyWorkspaceToOriginal(
+  input: ApplyPatchInput
+): Promise<{ applied: string[]; skipped: string[] }> {
   const originalRoot = path.resolve(input.originalRoot);
   const allowed = new Set(input.allowedRoots.map((value) => path.resolve(value)));
   if (!allowed.has(originalRoot)) {

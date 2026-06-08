@@ -335,7 +335,7 @@ export interface SessionTimelineResponse {
   timeline: TimelineItem[];
   items: TimelineItem[];
   counts: SessionTimelineCounts;
-  trace: Record<string, unknown>;
+  trace?: Record<string, unknown>;
 }
 
 export interface SessionReplayRequest {
@@ -443,7 +443,13 @@ export interface DashboardSnapshot {
   projects: number;
   activeSessions: number;
   recentSessions: SessionRecord[];
-  recentLessons: Array<{ id: string; projectId: string | null; title: string; body: string; createdAt: string }>;
+  recentLessons: Array<{
+    id: string;
+    projectId: string | null;
+    title: string;
+    body: string;
+    createdAt: string;
+  }>;
   recentChecks: Array<{ id: string; name: string; status: string; createdAt: string }>;
 }
 
@@ -473,11 +479,13 @@ function optionalString(value: unknown): string | null {
 }
 
 export function slugifyName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "project";
+  return (
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 48) || "project"
+  );
 }
 
 export function createId(prefix: string): string {
@@ -495,7 +503,7 @@ export function createEvent<TPayload extends Record<string, unknown>>(
     level?: EventLevel;
     id?: string;
     ts?: string;
-  } = {},
+  } = {}
 ): EventEnvelope<TPayload> {
   return {
     id: details.id ?? createId("evt"),
@@ -546,7 +554,10 @@ export function parseEventEnvelope(value: unknown): EventEnvelope {
     projectId: typeof input.projectId === "string" ? input.projectId : null,
     agent: typeof input.agent === "string" ? input.agent : null,
     level:
-      input.level === "debug" || input.level === "info" || input.level === "warn" || input.level === "error"
+      input.level === "debug" ||
+      input.level === "info" ||
+      input.level === "warn" ||
+      input.level === "error"
         ? input.level
         : "info",
     ts: requireString(input.ts, "ts"),
@@ -684,7 +695,11 @@ export interface ChunkPathBoostRecord {
   updatedAt: string;
 }
 
-export type ModelProviderKind = "local_openai_compat" | "cloud_openai_compat" | "heuristic" | "fastembed";
+export type ModelProviderKind =
+  | "local_openai_compat"
+  | "cloud_openai_compat"
+  | "heuristic"
+  | "fastembed";
 
 export interface ModelProviderRecord {
   id: string;
@@ -697,7 +712,18 @@ export interface ModelProviderRecord {
   updatedAt: string;
 }
 
-export type ModelRole = "intent" | "query_rewrite" | "retrieval_judge" | "answer" | "planner" | "coder_handoff" | "reviewer" | "reflection" | "summarizer" | "embedding" | "reranker";
+export type ModelRole =
+  | "intent"
+  | "query_rewrite"
+  | "retrieval_judge"
+  | "answer"
+  | "planner"
+  | "coder_handoff"
+  | "reviewer"
+  | "reflection"
+  | "summarizer"
+  | "embedding"
+  | "reranker";
 
 export interface ModelProfileRecord {
   id: string;
@@ -805,7 +831,17 @@ export interface CodeSymbolRecord {
   fileId: string;
   path: string;
   language: string | null;
-  kind: "function" | "class" | "method" | "interface" | "type" | "import" | "route" | "middleware" | "constant" | "unknown";
+  kind:
+    | "function"
+    | "class"
+    | "method"
+    | "interface"
+    | "type"
+    | "import"
+    | "route"
+    | "middleware"
+    | "constant"
+    | "unknown";
   name: string;
   qualifiedName: string;
   startLine: number;
@@ -820,7 +856,15 @@ export interface CodeEdgeRecord {
   projectId: string;
   fromSymbolId: string;
   toSymbolId: string;
-  kind: "imports" | "calls" | "defines" | "uses" | "routes_to" | "middleware_for" | "tests" | "unknown";
+  kind:
+    | "imports"
+    | "calls"
+    | "defines"
+    | "uses"
+    | "routes_to"
+    | "middleware_for"
+    | "tests"
+    | "unknown";
   confidence: number;
   metadata: Record<string, unknown>;
 }

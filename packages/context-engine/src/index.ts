@@ -1,3 +1,5 @@
+import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
+import { redactSecrets } from "../../safety/src/index.ts";
 import type {
   ContextBudgetEventRecord,
   ContextPackItemKind,
@@ -9,8 +11,6 @@ import type {
   ProjectRuleRecord,
   SkillRecord,
 } from "../../shared/src/index.ts";
-import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
-import { redactSecrets } from "../../safety/src/index.ts";
 
 export const APPROX_TOKENS_PER_CHAR = 0.25;
 
@@ -57,8 +57,18 @@ export interface BuildContextPackOutput {
 
 function jaccard(left: string, right: string): number {
   if (left === right) return 1;
-  const a = new Set(left.toLowerCase().split(/[^a-z0-9]+/g).filter((token) => token.length >= 3));
-  const b = new Set(right.toLowerCase().split(/[^a-z0-9]+/g).filter((token) => token.length >= 3));
+  const a = new Set(
+    left
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .filter((token) => token.length >= 3)
+  );
+  const b = new Set(
+    right
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .filter((token) => token.length >= 3)
+  );
   if (a.size === 0 || b.size === 0) return 0;
   let intersection = 0;
   for (const token of a) {
@@ -68,7 +78,10 @@ function jaccard(left: string, right: string): number {
   return union === 0 ? 0 : intersection / union;
 }
 
-function dedupeCandidates(candidates: ContextCandidate[]): { kept: ContextCandidate[]; omitted: Array<{ candidate: ContextCandidate; reason: string; jaccardWith: string }> } {
+function dedupeCandidates(candidates: ContextCandidate[]): {
+  kept: ContextCandidate[];
+  omitted: Array<{ candidate: ContextCandidate; reason: string; jaccardWith: string }>;
+} {
   const kept: ContextCandidate[] = [];
   const omitted: Array<{ candidate: ContextCandidate; reason: string; jaccardWith: string }> = [];
   for (const candidate of candidates) {
@@ -91,7 +104,8 @@ function dedupeCandidates(candidates: ContextCandidate[]): { kept: ContextCandid
 }
 
 function isFactFresh(fact: FactRecord, ttlDays: number): boolean {
-  if (fact.status === "stale" || fact.status === "disputed" || fact.status === "archived") return false;
+  if (fact.status === "stale" || fact.status === "disputed" || fact.status === "archived")
+    return false;
   if (fact.expiresAt && new Date(fact.expiresAt).getTime() < Date.now()) return false;
   if (fact.lastVerifiedAt) {
     const ageDays = (Date.now() - new Date(fact.lastVerifiedAt).getTime()) / (1000 * 60 * 60 * 24);
@@ -125,7 +139,12 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
   const redactionNotes: string[] = [];
   const freshTtl = input.freshFactTtlDays ?? 30;
   const queryTerms = new Set(
-    input.ranked.flatMap((entry) => entry.chunk.content.toLowerCase().split(/[^a-z0-9]+/g).filter((token) => token.length >= 4)),
+    input.ranked.flatMap((entry) =>
+      entry.chunk.content
+        .toLowerCase()
+        .split(/[^a-z0-9]+/g)
+        .filter((token) => token.length >= 4)
+    )
   );
 
   for (const system of input.systemInstructions ?? []) {
@@ -154,7 +173,9 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
   for (const entry of input.ranked) {
     const redacted = redactSecrets(entry.chunk.content);
     if (redacted.redactions.length > 0) {
-      redactionNotes.push(`chunk:${entry.chunk.id} redacted ${redacted.redactions.length} secret(s)`);
+      redactionNotes.push(
+        `chunk:${entry.chunk.id} redacted ${redacted.redactions.length} secret(s)`
+      );
     }
     candidates.push({
       kind: "retrieval_chunk",
@@ -174,7 +195,12 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
       ? (entry.chunk.metadata.codeSymbols as Array<Record<string, unknown>>)
       : [];
     for (const symbol of codeSymbols) {
-      const qualifiedName = typeof symbol.qualifiedName === "string" ? symbol.qualifiedName : typeof symbol.name === "string" ? symbol.name : "symbol";
+      const qualifiedName =
+        typeof symbol.qualifiedName === "string"
+          ? symbol.qualifiedName
+          : typeof symbol.name === "string"
+            ? symbol.name
+            : "symbol";
       const signature = typeof symbol.signature === "string" ? symbol.signature : null;
       candidates.push({
         kind: "code_symbol",
@@ -248,7 +274,7 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
       kind: "git_state",
       sourceId: null,
       excerpt: excerptFromContent(
-        `branch=${input.gitState.branch} dirty=${input.gitState.dirty ? "true" : "false"} recent=${input.gitState.recentFiles.join(",")}`,
+        `branch=${input.gitState.branch} dirty=${input.gitState.dirty ? "true" : "false"} recent=${input.gitState.recentFiles.join(",")}`
       ),
       priority: 7,
       reason: "git-state",
@@ -308,9 +334,21 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
     });
     if (fits) {
       usedTokens += tokenCount;
-      budgetEvents.push({ id: `cbe_inc_${rank}`, contextPackId: "", deltaTokens: tokenCount, reason: candidate.reason ?? "included", createdAt: new Date().toISOString() });
+      budgetEvents.push({
+        id: `cbe_inc_${rank}`,
+        contextPackId: "",
+        deltaTokens: tokenCount,
+        reason: candidate.reason ?? "included",
+        createdAt: new Date().toISOString(),
+      });
     } else {
-      budgetEvents.push({ id: `cbe_omit_${rank}`, contextPackId: "", deltaTokens: 0, reason: "budget-exceeded", createdAt: new Date().toISOString() });
+      budgetEvents.push({
+        id: `cbe_omit_${rank}`,
+        contextPackId: "",
+        deltaTokens: 0,
+        reason: "budget-exceeded",
+        createdAt: new Date().toISOString(),
+      });
     }
     rank += 1;
   }
@@ -331,7 +369,13 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
   }
 
   if (usedTokens < budgetTokens * 0.5 && input.ranked.length > 0) {
-    budgetEvents.push({ id: "cbe_under", contextPackId: "", deltaTokens: budgetTokens - usedTokens, reason: "headroom", createdAt: new Date().toISOString() });
+    budgetEvents.push({
+      id: "cbe_under",
+      contextPackId: "",
+      deltaTokens: budgetTokens - usedTokens,
+      reason: "headroom",
+      createdAt: new Date().toISOString(),
+    });
   }
 
   const pack: ContextPackRecord = {

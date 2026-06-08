@@ -2,17 +2,22 @@ import type {
   MemoryEntryRecord,
   MemoryScope,
   ProjectRuleRecord,
+  RetrievalChunk,
   RetrievalDepth,
   RetrievalFeedbackRecord,
   RetrievalIntentKind,
   RetrievalMissRecord,
   RetrievalMode,
 } from "../../shared/src/index.ts";
-import type { RetrievalChunk } from "../../shared/src/index.ts";
 
 export interface RetrievalPipelineSource {
   searchChunks(projectId: string, query: string, options: { limit: number }): RetrievalChunk[];
-  searchChunksWithVector?: (projectId: string, query: string, queryVector: number[], options: { limit: number }) => RetrievalChunk[];
+  searchChunksWithVector?: (
+    projectId: string,
+    query: string,
+    queryVector: number[],
+    options: { limit: number }
+  ) => RetrievalChunk[];
   retrieval: {
     listQueriesForProject(projectId: string, limit: number): Array<{ id: string }>;
     listFeedback(retrievalQueryId: string, limit: number): RetrievalFeedbackRecord[];
@@ -20,8 +25,15 @@ export interface RetrievalPipelineSource {
     listPathBoosts(projectId: string, limit: number): Array<{ path: string; weight: number }>;
   };
   memory: {
-    listEntries(projectId?: string | null, scope?: MemoryScope, limit?: number): MemoryEntryRecord[];
-    listFacts(projectId?: string | null, limit?: number): Array<{ key: string; value: string; confidence: number; status?: string }>;
+    listEntries(
+      projectId?: string | null,
+      scope?: MemoryScope,
+      limit?: number
+    ): MemoryEntryRecord[];
+    listFacts(
+      projectId?: string | null,
+      limit?: number
+    ): Array<{ key: string; value: string; confidence: number; status?: string }>;
     listProjectRules(projectId?: string | null, limit?: number): ProjectRuleRecord[];
   };
   listProjectFiles(projectId: string, limit: number): Array<{ path: string }>;
@@ -39,7 +51,7 @@ export interface BuildRetrievalPipelineInputArgs {
 
 export function buildRetrievalPipelineInput(
   source: RetrievalPipelineSource,
-  args: BuildRetrievalPipelineInputArgs,
+  args: BuildRetrievalPipelineInputArgs
 ): {
   query: string;
   intent: RetrievalIntentKind;
@@ -60,9 +72,12 @@ export function buildRetrievalPipelineInput(
   secretTerms: string[];
 } {
   const ftsChunks = source.searchChunks(args.projectId, args.query, { limit: args.ftsLimit });
-  const vectorChunks = args.queryVector && source.searchChunksWithVector
-    ? source.searchChunksWithVector(args.projectId, args.query, args.queryVector, { limit: args.ftsLimit })
-    : [];
+  const vectorChunks =
+    args.queryVector && source.searchChunksWithVector
+      ? source.searchChunksWithVector(args.projectId, args.query, args.queryVector, {
+          limit: args.ftsLimit,
+        })
+      : [];
   const heuristicChunks = source.searchChunks(args.projectId, "", { limit: 4 });
   const queries = source.retrieval.listQueriesForProject(args.projectId, 200);
   const feedback: RetrievalFeedbackRecord[] = [];

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { runAskWorkflow, type AskWorkflowStore } from "../packages/ask-engine/src/index.ts";
+import { type AskWorkflowStore, runAskWorkflow } from "../packages/ask-engine/src/index.ts";
 import { createId, type EventEnvelope, type RetrievalChunk } from "../packages/shared/src/index.ts";
 
 function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
@@ -16,26 +16,61 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
   return {
     events,
     getProject: (id) => ({
-      id, name: id, path: `/projects/${id}`, status: "ready", fileCount: 10, chunkCount: 100,
-      indexedFileCount: 10, dirty: false, health: "healthy", repoUrl: null, lastIndexedAt: null,
-      createdAt: "", updatedAt: "", branch: "main", language: "typescript", framework: "node"
+      id,
+      name: id,
+      path: `/projects/${id}`,
+      status: "ready",
+      fileCount: 10,
+      chunkCount: 100,
+      indexedFileCount: 10,
+      dirty: false,
+      health: "healthy",
+      repoUrl: null,
+      lastIndexedAt: null,
+      createdAt: "",
+      updatedAt: "",
+      branch: "main",
+      language: "typescript",
+      framework: "node",
     }),
     getSession: (id) => sessions.get(id) ?? null,
     searchChunks: (projectId: string, query: string) => {
-      if (query.includes("missing?") || (query === "" && messages[messages.length - 1]?.content === "missing?")) {
+      if (
+        query.includes("missing?") ||
+        (query === "" && messages[messages.length - 1]?.content === "missing?")
+      ) {
         return [];
       }
       return [
-        { id: "c1", path: "f1.ts", content: "stuff", startLine: 1, endLine: 1, tokenCount: 1, projectId: "p1", documentId: "d1", score: 1, metadata: {} }
+        {
+          id: "c1",
+          path: "f1.ts",
+          content: "stuff",
+          startLine: 1,
+          endLine: 1,
+          tokenCount: 1,
+          projectId: "p1",
+          documentId: "d1",
+          score: 1,
+          metadata: {},
+        },
       ];
     },
     searchChunksWithVector: () => [],
     listProjectFiles: () => [],
     createSession: (input) => {
       const s = {
-        id: createId("s"), ...input, status: "active", startedAt: new Date().toISOString(),
-        finishedAt: null, durationMs: null, activeTaskId: null, finalSummary: null, outcome: null,
-        createdAt: "", updatedAt: ""
+        id: createId("s"),
+        ...input,
+        status: "active",
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        durationMs: null,
+        activeTaskId: null,
+        finalSummary: null,
+        outcome: null,
+        createdAt: "",
+        updatedAt: "",
       };
       sessions.set(s.id, s);
       return s as any;
@@ -45,7 +80,7 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
       sessions.set(id, s);
       return s as any;
     },
-    createLesson: () => ({ id: "l1" } as any),
+    createLesson: () => ({ id: "l1" }) as any,
     appendEvent: (e) => {
       events.push(e as any);
       return e as any;
@@ -58,8 +93,11 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
     conversation: {
       appendMessage: (input) => {
         const m = {
-          id: createId("m"), ...input,
-          contentHash: "", metaJson: null, createdAt: new Date().toISOString()
+          id: createId("m"),
+          ...input,
+          contentHash: "",
+          metaJson: null,
+          createdAt: new Date().toISOString(),
         };
         messages.push(m);
         return m as any;
@@ -72,11 +110,11 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
         retrievalQueries.set(q.id, q);
         return q as any;
       },
-      updateRewrittenQuery: () => { },
-      createRewrite: () => { },
-      recordResults: () => { },
-      recordSelectedContext: () => { },
-      recordMiss: () => { },
+      updateRewrittenQuery: () => {},
+      createRewrite: () => {},
+      recordResults: () => {},
+      recordSelectedContext: () => {},
+      recordMiss: () => {},
       listQueriesForSession: () => Array.from(retrievalQueries.values()) as any,
       listQueriesForProject: () => [],
       listPathBoosts: () => [],
@@ -104,19 +142,29 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
       listSkills: () => [],
     },
     models: {
-      getProfile: (id) => ({
-        id, modelName: id, maxOutputTokens: 1024,
-        providerId: "p1", role: "answer", displayName: id, contextWindow: 4096,
-        inputTokenCost: 0, outputTokenCost: 0, latencyMs: 0, status: "ok",
-        createdAt: "", updatedAt: ""
-      } as any),
+      getProfile: (id) =>
+        ({
+          id,
+          modelName: id,
+          maxOutputTokens: 1024,
+          providerId: "p1",
+          role: "answer",
+          displayName: id,
+          contextWindow: 4096,
+          inputTokenCost: 0,
+          outputTokenCost: 0,
+          latencyMs: 0,
+          status: "ok",
+          createdAt: "",
+          updatedAt: "",
+        }) as any,
       listCalls: () => calls,
       recordCall: (input) => {
         const c = { id: createId("call"), ...input, ts: "", createdAt: "" };
         calls.push(c);
         return c as any;
       },
-      recordRoute: (input) => ({ id: "r1", ...input, createdAt: "" } as any),
+      recordRoute: (input) => ({ id: "r1", ...input, createdAt: "" }) as any,
     },
     agents: {
       createRun: (input) => {
@@ -124,12 +172,12 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
         agentRuns.set(r.id, r);
         return r as any;
       },
-      appendMessage: () => { },
-      updateRun: () => { },
+      appendMessage: () => {},
+      updateRun: () => {},
     },
     evals: {
-      recordAnswerEvaluation: () => { },
-      recordSessionOutcome: () => { },
+      recordAnswerEvaluation: () => {},
+      recordSessionOutcome: () => {},
     },
     invokeModel: async (profileId, request) => {
       const call = {
@@ -146,10 +194,10 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
         usage: { promptTokens: 10, completionTokens: 10, totalTokens: 20 },
         promptTokens: 10,
         completionTokens: 10,
-        latencyMs: 100
+        latencyMs: 100,
       };
     },
-    enqueueJob: () => ({ id: "j1" } as any),
+    enqueueJob: () => ({ id: "j1" }) as any,
     listEvents: () => events,
   };
 }
@@ -157,8 +205,13 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
 test("runAskWorkflow: successful ask creates all expected records", async () => {
   const store = createMockStore();
   const runtime: any = {
-    route: async () => ({ profileId: "gpt-4", reason: "test", blocked: false, fallbackProfileId: null }),
-    invoke: async () => ({} as any),
+    route: async () => ({
+      profileId: "gpt-4",
+      reason: "test",
+      blocked: false,
+      fallbackProfileId: null,
+    }),
+    invoke: async () => ({}) as any,
     embed: async () => ({ embeddings: [[0.1, 0.2]], usage: { promptTokens: 1, totalTokens: 1 } }),
   };
 
@@ -194,7 +247,7 @@ test("runAskWorkflow: successful ask creates all expected records", async () => 
   assert.equal(packs.length, 1);
 
   // Verify events
-  const eventTypes = store.events.map(e => e.type);
+  const eventTypes = store.events.map((e) => e.type);
   assert.ok(eventTypes.includes("model.called"));
   assert.ok(eventTypes.includes("model.completed"));
   assert.ok(eventTypes.includes("retrieval.started"));
@@ -205,8 +258,13 @@ test("runAskWorkflow: successful ask creates all expected records", async () => 
 test("runAskWorkflow: handles retrieval miss (no chunks)", async () => {
   const store = createMockStore();
   const runtime: any = {
-    route: async () => ({ profileId: "gpt-4", reason: "test", blocked: false, fallbackProfileId: null }),
-    invoke: async () => ({} as any),
+    route: async () => ({
+      profileId: "gpt-4",
+      reason: "test",
+      blocked: false,
+      fallbackProfileId: null,
+    }),
+    invoke: async () => ({}) as any,
     embed: async () => ({ embeddings: [[0.1, 0.2]], usage: { promptTokens: 1, totalTokens: 1 } }),
   };
 
@@ -220,21 +278,41 @@ test("runAskWorkflow: handles retrieval miss (no chunks)", async () => {
   assert.ok(response.answer.includes("I could not find enough local context"));
   assert.equal(response.retrievedChunks.length, 0);
 
-  const eventTypes = store.events.map(e => e.type);
+  const eventTypes = store.events.map((e) => e.type);
   assert.ok(eventTypes.includes("answer.fallback"));
   // Should NOT emit model.completed for answer if it skipped it
-  const answerCalls = store.events.filter(e => e.type === "model.completed" && (e.payload as any).role === "answer");
+  const answerCalls = store.events.filter(
+    (e) => e.type === "model.completed" && e.payload.role === "answer"
+  );
   assert.equal(answerCalls.length, 0);
 });
 
 test("runAskWorkflow: handles answer model failure", async () => {
   const store = createMockStore();
   // Override searchChunks to return something so we don't hit fallback
-  store.searchChunks = (projectId: string, query: string) => [{ id: "c1", path: "f1.ts", content: "stuff", startLine: 1, endLine: 1, tokenCount: 1, projectId: "p1", documentId: "d1", score: 1, metadata: {} }];
+  store.searchChunks = (projectId: string, query: string) => [
+    {
+      id: "c1",
+      path: "f1.ts",
+      content: "stuff",
+      startLine: 1,
+      endLine: 1,
+      tokenCount: 1,
+      projectId: "p1",
+      documentId: "d1",
+      score: 1,
+      metadata: {},
+    },
+  ];
 
   const runtime: any = {
-    route: async () => ({ profileId: "gpt-4", reason: "test", blocked: false, fallbackProfileId: null }),
-    invoke: async () => ({} as any),
+    route: async () => ({
+      profileId: "gpt-4",
+      reason: "test",
+      blocked: false,
+      fallbackProfileId: null,
+    }),
+    invoke: async () => ({}) as any,
     embed: async () => ({ embeddings: [[0.1, 0.2]], usage: { promptTokens: 1, totalTokens: 1 } }),
   };
 
@@ -248,7 +326,7 @@ test("runAskWorkflow: handles answer model failure", async () => {
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       promptTokens: 1,
       completionTokens: 1,
-      latencyMs: 10
+      latencyMs: 10,
     };
   };
 
@@ -261,17 +339,24 @@ test("runAskWorkflow: handles answer model failure", async () => {
 
   assert.ok(response.answer.includes("I could not synthesize a model answer"));
 
-  const eventTypes = store.events.map(e => e.type);
+  const eventTypes = store.events.map((e) => e.type);
   assert.ok(eventTypes.includes("model.failed"));
-  const answerCompleted = store.events.filter(e => e.type === "model.completed" && (e.payload as any).role === "answer");
+  const answerCompleted = store.events.filter(
+    (e) => e.type === "model.completed" && e.payload.role === "answer"
+  );
   assert.equal(answerCompleted.length, 0);
 });
 
 test("runAskWorkflow: handles query rewrite failure", async () => {
   const store = createMockStore();
   const runtime: any = {
-    route: async () => ({ profileId: "gpt-4", reason: "test", blocked: false, fallbackProfileId: null }),
-    invoke: async () => ({} as any),
+    route: async () => ({
+      profileId: "gpt-4",
+      reason: "test",
+      blocked: false,
+      fallbackProfileId: null,
+    }),
+    invoke: async () => ({}) as any,
     embed: async () => ({ embeddings: [[0.1, 0.2]], usage: { promptTokens: 1, totalTokens: 1 } }),
   };
 
@@ -284,7 +369,7 @@ test("runAskWorkflow: handles query rewrite failure", async () => {
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       promptTokens: 1,
       completionTokens: 1,
-      latencyMs: 10
+      latencyMs: 10,
     };
   };
 
@@ -296,7 +381,7 @@ test("runAskWorkflow: handles query rewrite failure", async () => {
   });
 
   assert.ok(response.sessionId);
-  const eventTypes = store.events.map(e => e.type);
+  const eventTypes = store.events.map((e) => e.type);
   assert.ok(eventTypes.includes("model.failed"));
   // Ask still completes
   assert.equal(store.getSession(response.sessionId)?.status, "completed");
@@ -305,8 +390,13 @@ test("runAskWorkflow: handles query rewrite failure", async () => {
 test("runAskWorkflow: handles retrieval judge failure", async () => {
   const store = createMockStore();
   const runtime: any = {
-    route: async () => ({ profileId: "gpt-4", reason: "test", blocked: false, fallbackProfileId: null }),
-    invoke: async () => ({} as any),
+    route: async () => ({
+      profileId: "gpt-4",
+      reason: "test",
+      blocked: false,
+      fallbackProfileId: null,
+    }),
+    invoke: async () => ({}) as any,
     embed: async () => ({ embeddings: [[0.1, 0.2]], usage: { promptTokens: 1, totalTokens: 1 } }),
   };
 
@@ -319,7 +409,7 @@ test("runAskWorkflow: handles retrieval judge failure", async () => {
       usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
       promptTokens: 1,
       completionTokens: 1,
-      latencyMs: 10
+      latencyMs: 10,
     };
   };
 
@@ -331,7 +421,7 @@ test("runAskWorkflow: handles retrieval judge failure", async () => {
   });
 
   assert.ok(response.sessionId);
-  const eventTypes = store.events.map(e => e.type);
+  const eventTypes = store.events.map((e) => e.type);
   assert.ok(eventTypes.includes("model.failed"));
   // Ask still completes
   assert.equal(store.getSession(response.sessionId)?.status, "completed");

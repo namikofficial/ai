@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compilePrompt, buildAnswerFromCompiledPrompt, estimatePromptTokens } from "../packages/prompt-compiler/src/index.ts";
+import {
+  buildAnswerFromCompiledPrompt,
+  compilePrompt,
+  estimatePromptTokens,
+} from "../packages/prompt-compiler/src/index.ts";
 
 test("prompt-compiler: answer mode includes system rules and retrieval context", () => {
   const compiled = compilePrompt({
@@ -22,7 +26,15 @@ test("prompt-compiler: answer mode includes system rules and retrieval context",
       },
     ],
     projectRules: [
-      { id: "rule_1", projectId: "p1", title: "TypeScript only", body: "Prefer TypeScript.", pinned: true, createdAt: "2024-01-01", updatedAt: "2024-01-01" },
+      {
+        id: "rule_1",
+        projectId: "p1",
+        title: "TypeScript only",
+        body: "Prefer TypeScript.",
+        pinned: true,
+        createdAt: "2024-01-01",
+        updatedAt: "2024-01-01",
+      },
     ],
     tokenBudget: 2048,
   });
@@ -62,7 +74,10 @@ test("prompt-compiler: handoff mode includes task constraints and outputs schema
   const combined = compiled.messages.map((m) => m.content).join("\n");
   assert.match(combined, /do not modify package.json/);
   assert.match(combined, /must include tests/);
-  assert.deepEqual(compiled.outputSchema, { type: "object", properties: { prompt: { type: "string" } } });
+  assert.deepEqual(compiled.outputSchema, {
+    type: "object",
+    properties: { prompt: { type: "string" } },
+  });
 });
 
 test("prompt-compiler: reflection mode cites session id and surfaces safety notes for secrets", () => {
@@ -72,7 +87,20 @@ test("prompt-compiler: reflection mode cites session id and surfaces safety note
     userRequest: "reflect on session sess_1",
     metadata: { sessionId: "sess_1" },
     previousMessages: [
-      { id: "m1", sessionId: "sess_1", projectId: null, role: "user", agent: null, content: "use AKIAABCDEFGHIJKLMNOP here", contentHash: "h1", metaJson: "{}", tokenCount: 8, parentMessageId: null, ts: "2024-01-01T00:00:00Z", createdAt: "2024-01-01T00:00:00Z" },
+      {
+        id: "m1",
+        sessionId: "sess_1",
+        projectId: null,
+        role: "user",
+        agent: null,
+        content: "use AKIAABCDEFGHIJKLMNOP here",
+        contentHash: "h1",
+        metaJson: "{}",
+        tokenCount: 8,
+        parentMessageId: null,
+        ts: "2024-01-01T00:00:00Z",
+        createdAt: "2024-01-01T00:00:00Z",
+      },
     ],
   });
   const combined = compiled.messages.map((m) => m.content).join("\n");
@@ -104,7 +132,7 @@ test("prompt-compiler: buildAnswerFromCompiledPrompt returns deterministic text"
     compiled,
     "Auth is in src/auth.ts.",
     [{ path: "src/auth.ts", startLine: 1, endLine: 1, score: 0.9 }],
-    0.9,
+    0.9
   );
   assert.match(text, /Confidence: 90%/);
   assert.match(text, /src\/auth\.ts/);
@@ -112,6 +140,8 @@ test("prompt-compiler: buildAnswerFromCompiledPrompt returns deterministic text"
 });
 
 test("prompt-compiler: estimatePromptTokens is non-zero for content", () => {
-  const tokens = estimatePromptTokens([{ role: "user", content: "Hello, this is a longer prompt with several words inside." }]);
+  const tokens = estimatePromptTokens([
+    { role: "user", content: "Hello, this is a longer prompt with several words inside." },
+  ]);
   assert.ok(tokens > 0);
 });

@@ -5,7 +5,7 @@ import type {
   ContextPackItemRecord,
   ContextPackRecord,
 } from "../../../shared/src/index.ts";
-import { asBool, asNumber, asString, asStringOrNull, now, newId } from "./_shared.ts";
+import { asBool, asNumber, asString, asStringOrNull, newId, now } from "./_shared.ts";
 
 interface ContextPackRow {
   id: string;
@@ -109,7 +109,7 @@ export function createContextRepo(db: DatabaseSync) {
         `INSERT INTO context_packs (
           id, session_id, task_id, project_id, retrieval_query_id,
           budget_tokens, used_tokens, reason, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId ?? null,
@@ -119,13 +119,13 @@ export function createContextRepo(db: DatabaseSync) {
         input.budgetTokens,
         input.usedTokens,
         input.reason ?? null,
-        ts,
+        ts
       );
       const itemInsert = db.prepare(
         `INSERT INTO context_pack_items (
           id, context_pack_id, kind, source_id, rank, token_count, excerpt,
           included, omission_reason, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const item of input.items) {
         itemInsert.run(
@@ -138,12 +138,12 @@ export function createContextRepo(db: DatabaseSync) {
           item.excerpt,
           item.included === false ? 0 : 1,
           item.omissionReason ?? null,
-          ts,
+          ts
         );
       }
       const budgetInsert = db.prepare(
         `INSERT INTO context_budget_events (id, context_pack_id, delta_tokens, reason, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?)`
       );
       for (const ev of input.budgetEvents ?? []) {
         budgetInsert.run(newId("cbe"), id, ev.deltaTokens, ev.reason, ts);
@@ -161,12 +161,16 @@ export function createContextRepo(db: DatabaseSync) {
       };
     },
     getPack(id: string): ContextPackRecord | null {
-      const row = db.prepare("SELECT * FROM context_packs WHERE id = ? LIMIT 1").get(id) as ContextPackRow | undefined;
+      const row = db.prepare("SELECT * FROM context_packs WHERE id = ? LIMIT 1").get(id) as
+        | ContextPackRow
+        | undefined;
       return row ? rowToPack(row) : null;
     },
     listPacksForSession(sessionId: string, limit = 50): ContextPackRecord[] {
       const rows = db
-        .prepare("SELECT * FROM context_packs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
+        .prepare(
+          "SELECT * FROM context_packs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?"
+        )
         .all(sessionId, limit) as ContextPackRow[];
       return rows.map(rowToPack);
     },
@@ -178,7 +182,9 @@ export function createContextRepo(db: DatabaseSync) {
     },
     listBudgetEvents(packId: string): ContextBudgetEventRecord[] {
       const rows = db
-        .prepare("SELECT * FROM context_budget_events WHERE context_pack_id = ? ORDER BY created_at ASC")
+        .prepare(
+          "SELECT * FROM context_budget_events WHERE context_pack_id = ? ORDER BY created_at ASC"
+        )
         .all(packId) as ContextBudgetRow[];
       return rows.map(rowToBudget);
     },

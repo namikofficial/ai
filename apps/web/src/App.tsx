@@ -1,6 +1,14 @@
-import { useEffect, useMemo, type ReactNode } from "react";
-import { BrowserRouter, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
-import { useWorkbenchStore } from "./store.ts";
+import { type ReactNode, useEffect, useMemo } from "react";
+import {
+  BrowserRouter,
+  Navigate,
+  NavLink,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+} from "react-router-dom";
+import type { EventEnvelope } from "../../../packages/shared/src/index.ts";
 import {
   AgentRunDetailPage,
   AgentsPage,
@@ -9,16 +17,16 @@ import {
   DashboardPage,
   EvalPage,
   HandoffPage,
-  MemoryPage,
   McpCallDetailPage,
   McpPage,
+  MemoryPage,
   ModelsPage,
-  PromptLabPage,
-  PromptDetailPage,
-  PromptsPage,
   PlannerPage,
   ProjectDetailPage,
   ProjectsPage,
+  PromptDetailPage,
+  PromptLabPage,
+  PromptsPage,
   RetrievalPage,
   RetrievalQueryDetailPage,
   ReviewDetailPage,
@@ -30,7 +38,7 @@ import {
   TaskDetailPage,
   TasksPage,
 } from "./pages.tsx";
-import type { EventEnvelope } from "../../../packages/shared/src/index.ts";
+import { useWorkbenchStore } from "./store.ts";
 
 const navItems = [
   ["/dashboard", "Dashboard"],
@@ -227,7 +235,9 @@ function Shell({ children }: { children: ReactNode }) {
               <span className="status-dot" />
               <span>{liveStatus}</span>
             </div>
-            <div className="tiny">{selectedProjectId ? `Selected project ${selectedProjectId}` : "No project selected"}</div>
+            <div className="tiny">
+              {selectedProjectId ? `Selected project ${selectedProjectId}` : "No project selected"}
+            </div>
             <div className="tiny">`Cmd/Ctrl + K` opens the command palette. `Esc` closes it.</div>
             <button type="button" onClick={() => navigate("/dashboard")}>
               {title}

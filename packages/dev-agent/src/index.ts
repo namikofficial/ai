@@ -12,20 +12,15 @@
 // final patch is applied only when the user explicitly approves the run.
 
 import { existsSync } from "node:fs";
-import { createId } from "../../shared/src/index.ts";
-import { extractJsonFragment } from "../../shared/src/model-output.ts";
+import { type ExecutionEvent, parseDevRequest } from "../../agent-protocol/src/dev.ts";
+import type { ConversationRepo } from "../../db/src/repositories/conversation.ts";
+import type { DevRunsRepo, DevRunUpdateInput } from "../../db/src/repositories/dev-runs.ts";
 import type {
-  DevEdit,
-  DevPlan,
-  DevRequest,
-  DevResult,
-  DevRun,
-  DevRunStatus,
-  RiskLevel,
-  RetrievalQueryRecord,
-  RetrievalResultRecord,
-  RetrievalSelectedContextRecord,
-} from "../../shared/src/index.ts";
+  ExecutionRepo,
+  ExecutionWorkspaceRecord,
+} from "../../db/src/repositories/execution.ts";
+import type { ModelsRepo } from "../../db/src/repositories/models.ts";
+import type { RetrievalRepo } from "../../db/src/repositories/retrieval.ts";
 import {
   applyEdit as applyEditToFs,
   applyWorkspaceToOriginal,
@@ -35,22 +30,27 @@ import {
   guardPath,
   isHighRiskPath,
   isSecretFile,
+  type ProjectChecksConfig,
   readProjectChecksConfig,
   readProjectFile,
   riskForPath,
   runAllowedChecks,
-  type ProjectChecksConfig,
 } from "../../execution-engine/src/index.ts";
-import {
-  parseDevRequest,
-  type ExecutionEvent,
-} from "../../agent-protocol/src/dev.ts";
 import type { ModelRuntime } from "../../model-runtime/src/index.ts";
-import type { DevRunsRepo, DevRunUpdateInput } from "../../db/src/repositories/dev-runs.ts";
-import type { ExecutionRepo, ExecutionWorkspaceRecord } from "../../db/src/repositories/execution.ts";
-import type { RetrievalRepo } from "../../db/src/repositories/retrieval.ts";
-import type { ModelsRepo } from "../../db/src/repositories/models.ts";
-import type { ConversationRepo } from "../../db/src/repositories/conversation.ts";
+import type {
+  DevEdit,
+  DevPlan,
+  DevRequest,
+  DevResult,
+  DevRun,
+  DevRunStatus,
+  RetrievalQueryRecord,
+  RetrievalResultRecord,
+  RetrievalSelectedContextRecord,
+  RiskLevel,
+} from "../../shared/src/index.ts";
+import { createId } from "../../shared/src/index.ts";
+import { extractJsonFragment } from "../../shared/src/model-output.ts";
 
 export interface RunDevWorkflowInput {
   request: DevRequest;
@@ -77,9 +77,10 @@ export interface RunDevWorkflowResult {
 const DEFAULT_CHECKS = ["typecheck"] as const;
 
 function resolveChecks(input: RunDevWorkflowInput, projectConfig: ProjectChecksConfig): string[] {
-  const requested = input.request.checks && input.request.checks.length > 0
-    ? input.request.checks
-    : projectConfig.dev.defaultChecks;
+  const requested =
+    input.request.checks && input.request.checks.length > 0
+      ? input.request.checks
+      : projectConfig.dev.defaultChecks;
   if (requested.length === 0) return [...DEFAULT_CHECKS];
   return Array.from(new Set(requested));
 }
@@ -92,8 +93,10 @@ function highestRisk(levels: RiskLevel[]): RiskLevel {
 
 function nextCommandFor(runId: string, status: DevRunStatus, applied: boolean): string {
   if (applied) return `ai dev show ${runId}`;
-  if (status === "awaiting_approval") return `ai dev diff ${runId}  # then: ai dev approve ${runId}`;
-  if (status === "completed" || status === "failed" || status === "cancelled") return `ai dev show ${runId}`;
+  if (status === "awaiting_approval")
+    return `ai dev diff ${runId}  # then: ai dev approve ${runId}`;
+  if (status === "completed" || status === "failed" || status === "cancelled")
+    return `ai dev show ${runId}`;
   return `ai dev show ${runId}`;
 }
 
@@ -158,23 +161,30 @@ function parseModelPlan(text: string): DevPlan | null {
   const fragment = extractJsonFragment(text);
   if (!fragment) return null;
   try {
-    const parsed = JSON.parse(fragment) as unknown;
+    const parsed = JSON.parse(fragment) as Record<string, unknown>;
     if (typeof parsed !== "object" || parsed === null) return null;
-    const obj = parsed as Record<string, unknown>;
+    const obj = parsed;
     const summary = typeof obj.summary === "string" ? obj.summary : "";
     const edits = Array.isArray(obj.edits) ? (obj.edits as DevEdit[]) : [];
-    const checks = Array.isArray(obj.checks) ? (obj.checks as string[]).filter((c) => typeof c === "string") : [];
-    const risk = obj.risk === "high" || obj.risk === "medium" || obj.risk === "low" ? obj.risk : "low";
+    const checks = Array.isArray(obj.checks)
+      ? (obj.checks as string[]).filter((c) => typeof c === "string")
+      : [];
+    const risk =
+      obj.risk === "high" || obj.risk === "medium" || obj.risk === "low" ? obj.risk : "low";
     const plan: DevPlan = { summary, edits, checks, risk };
     if (typeof obj.notes === "string") plan.notes = obj.notes;
-    if (typeof obj.missingContextReason === "string") plan.missingContextReason = obj.missingContextReason;
+    if (typeof obj.missingContextReason === "string")
+      plan.missingContextReason = obj.missingContextReason;
     return plan;
   } catch {
     return null;
   }
 }
 
-async function readProjectSources(input: RunDevWorkflowInput, paths: string[]): Promise<Array<{ path: string; content: string }>> {
+async function readProjectSources(
+  input: RunDevWorkflowInput,
+  paths: string[]
+): Promise<Array<{ path: string; content: string }>> {
   const sources: Array<{ path: string; content: string }> = [];
   for (const candidate of paths.slice(0, 6)) {
     try {
@@ -187,13 +197,19 @@ async function readProjectSources(input: RunDevWorkflowInput, paths: string[]): 
   return sources;
 }
 
-function pickFileHints(queries: RetrievalQueryRecord[], projectPath: string, repo: RetrievalRepo): string[] {
+function pickFileHints(
+  queries: RetrievalQueryRecord[],
+  projectPath: string,
+  repo: RetrievalRepo
+): string[] {
   const hints = new Set<string>();
   for (const query of queries) {
     const results = repo.listResults(query.id, 8) as Array<{ path: string }>;
     for (const result of results) {
       if (typeof result.path === "string") {
-        const relative = result.path.startsWith(projectPath + "/") ? result.path.slice(projectPath.length + 1) : result.path;
+        const relative = result.path.startsWith(projectPath + "/")
+          ? result.path.slice(projectPath.length + 1)
+          : result.path;
         hints.add(relative);
       }
     }
@@ -201,8 +217,17 @@ function pickFileHints(queries: RetrievalQueryRecord[], projectPath: string, rep
   return Array.from(hints).slice(0, 8);
 }
 
-function retrievalContextForQueries(queries: RetrievalQueryRecord[], repo: RetrievalRepo): Array<{ path: string; startLine: number; endLine: number; excerpt: string; score: number }> {
-  const chunks: Array<{ path: string; startLine: number; endLine: number; excerpt: string; score: number }> = [];
+function retrievalContextForQueries(
+  queries: RetrievalQueryRecord[],
+  repo: RetrievalRepo
+): Array<{ path: string; startLine: number; endLine: number; excerpt: string; score: number }> {
+  const chunks: Array<{
+    path: string;
+    startLine: number;
+    endLine: number;
+    excerpt: string;
+    score: number;
+  }> = [];
   for (const query of queries) {
     const selected: RetrievalSelectedContextRecord[] = repo.listSelectedContext(query.id);
     for (const entry of selected) {
@@ -217,7 +242,14 @@ function retrievalContextForQueries(queries: RetrievalQueryRecord[], repo: Retri
     }
     const results: RetrievalResultRecord[] = repo.listResults(query.id, 5);
     for (const entry of results) {
-      if (!chunks.find((existing) => existing.path === entry.path && existing.startLine === entry.startLine && existing.endLine === entry.endLine)) {
+      if (
+        !chunks.find(
+          (existing) =>
+            existing.path === entry.path &&
+            existing.startLine === entry.startLine &&
+            existing.endLine === entry.endLine
+        )
+      ) {
         chunks.push({
           path: entry.path,
           startLine: entry.startLine,
@@ -231,7 +263,11 @@ function retrievalContextForQueries(queries: RetrievalQueryRecord[], repo: Retri
   return chunks;
 }
 
-function shouldRequireApproval(input: { policy: "auto" | "manual" | "high_risk_only"; risk: RiskLevel; approveEdits: boolean }): { required: boolean; reason: string } {
+function shouldRequireApproval(input: {
+  policy: "auto" | "manual" | "high_risk_only";
+  risk: RiskLevel;
+  approveEdits: boolean;
+}): { required: boolean; reason: string } {
   if (input.policy === "auto" && input.approveEdits) {
     return { required: false, reason: "auto policy and approve-edits set" };
   }
@@ -261,7 +297,6 @@ async function applyEditsToWorkspace(input: {
     }
     if (isSecretFile(guard.relative)) {
       failed.push({ edit, reason: "refuses to touch secret files" });
-      continue;
     }
   }
   for (const edit of input.edits) {
@@ -303,7 +338,13 @@ async function collectDiffForRun(input: {
   workspace: ExecutionWorkspaceRecord;
   originalRoot: string;
   paths: string[];
-}): Promise<{ diff: string; filesChanged: string[]; filesAdded: string[]; filesRemoved: string[]; truncated: boolean }> {
+}): Promise<{
+  diff: string;
+  filesChanged: string[];
+  filesAdded: string[];
+  filesRemoved: string[];
+  truncated: boolean;
+}> {
   return collectWorkspaceDiff({
     workspace: {
       id: input.workspace.id,
@@ -319,7 +360,13 @@ async function collectDiffForRun(input: {
   });
 }
 
-function summarizeDiff(input: { diff: string; filesChanged: string[]; filesAdded: string[]; filesRemoved: string[]; truncated: boolean }): string {
+function summarizeDiff(input: {
+  diff: string;
+  filesChanged: string[];
+  filesAdded: string[];
+  filesRemoved: string[];
+  truncated: boolean;
+}): string {
   const parts: string[] = [];
   if (input.filesChanged.length > 0) parts.push(`modified: ${input.filesChanged.join(", ")}`);
   if (input.filesAdded.length > 0) parts.push(`added: ${input.filesAdded.join(", ")}`);
@@ -341,8 +388,14 @@ function extractPerFileDiff(diff: string, path: string): string {
 
 function buildResult(
   run: DevRun,
-  diff: { diff: string; filesChanged: string[]; filesAdded: string[]; filesRemoved: string[]; truncated: boolean },
-  applied: boolean,
+  diff: {
+    diff: string;
+    filesChanged: string[];
+    filesAdded: string[];
+    filesRemoved: string[];
+    truncated: boolean;
+  },
+  applied: boolean
 ): DevResult {
   return {
     runId: run.id,
@@ -368,7 +421,15 @@ function buildResult(
   };
 }
 
-function makeEmitter(meta: { runId: string; sessionId: string; projectId: string }, emit?: (event: ExecutionEvent) => void): (input: { kind: ExecutionEvent["kind"]; level?: ExecutionEvent["level"]; message: string; data?: Record<string, unknown> }) => void {
+function makeEmitter(
+  meta: { runId: string; sessionId: string; projectId: string },
+  emit?: (event: ExecutionEvent) => void
+): (input: {
+  kind: ExecutionEvent["kind"];
+  level?: ExecutionEvent["level"];
+  message: string;
+  data?: Record<string, unknown>;
+}) => void {
   if (emit) {
     return (input) => {
       emit({
@@ -394,7 +455,10 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
   const parsedRequest = parseDevRequest(input.request);
   const projectConfig = readProjectChecksConfig(input.project.config ?? null);
   const requestedChecks = resolveChecks(input, projectConfig);
-  const maxRepairs = Math.max(0, Math.min(input.request.maxRepairs ?? projectConfig.dev.maxRepairLoops, 5));
+  const maxRepairs = Math.max(
+    0,
+    Math.min(input.request.maxRepairs ?? projectConfig.dev.maxRepairLoops, 5)
+  );
 
   const run = input.runtime.devRuns.createRun({
     sessionId: input.sessionId,
@@ -406,7 +470,10 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     maxRepairs,
   });
 
-  const emit = makeEmitter({ runId: run.id, sessionId: input.sessionId, projectId: input.project.id }, input.emit);
+  const emit = makeEmitter(
+    { runId: run.id, sessionId: input.sessionId, projectId: input.project.id },
+    input.emit
+  );
   emit({ kind: "run.queued", message: "queued dev run" });
   emit({ kind: "run.started", message: "starting dev pipeline" });
 
@@ -450,7 +517,10 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     const queries = existingQueries.length > 0 ? existingQueries : [chosenQuery];
     const contextChunks = retrievalContextForQueries(queries, input.runtime.retrieval);
     const hints = pickFileHints(queries, input.project.path, input.runtime.retrieval);
-    const sources = await readProjectSources(input, hints.length > 0 ? hints : ["README.md", "package.json"]);
+    const sources = await readProjectSources(
+      input,
+      hints.length > 0 ? hints : ["README.md", "package.json"]
+    );
 
     // Stage 1: plan
     input.runtime.devRuns.updateRun(run.id, { status: "planning" });
@@ -469,18 +539,26 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       modelName: "planner-balanced-local",
       messages: [
         { role: "system", content: "You are the workbench dev planner. Output JSON only." },
-        { role: "user", content: buildDevPrompt({
-          goal: parsedRequest.goal,
-          projectName: input.project.name,
-          retrieved: sources,
-          hints,
-          riskHints: projectConfig.dev.requireApprovalFor,
-          rules,
-        }) },
+        {
+          role: "user",
+          content: buildDevPrompt({
+            goal: parsedRequest.goal,
+            projectName: input.project.name,
+            retrieved: sources,
+            hints,
+            riskHints: projectConfig.dev.requireApprovalFor,
+            rules,
+          }),
+        },
       ],
       temperature: 0,
       maxOutputTokens: 1024,
-      metadata: { kind: "dev-plan", runId: run.id, sessionId: input.sessionId, projectId: input.project.id },
+      metadata: {
+        kind: "dev-plan",
+        runId: run.id,
+        sessionId: input.sessionId,
+        projectId: input.project.id,
+      },
     });
     input.runtime.models.recordCall({
       sessionId: input.sessionId,
@@ -509,8 +587,19 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       });
       const updated = input.runtime.devRuns.getRun(run.id);
       if (!updated) throw new Error("dev run vanished");
-      emit({ kind: "run.failed", message: "missing context", data: { reason: updated.errorMessage } });
-      return { run: updated, result: buildResult(updated, { diff: "", filesChanged: [], filesAdded: [], filesRemoved: [], truncated: false }, false) };
+      emit({
+        kind: "run.failed",
+        message: "missing context",
+        data: { reason: updated.errorMessage },
+      });
+      return {
+        run: updated,
+        result: buildResult(
+          updated,
+          { diff: "", filesChanged: [], filesAdded: [], filesRemoved: [], truncated: false },
+          false
+        ),
+      };
     }
 
     // Stage 2: workspace
@@ -563,13 +652,22 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         blockedReason: failure.reason,
         errorMessage: failure.reason,
       });
-      emit({ kind: "edit.rejected", message: `${failure.edit.path}: ${failure.reason}`, data: { editId } });
+      emit({
+        kind: "edit.rejected",
+        message: `${failure.edit.path}: ${failure.reason}`,
+        data: { editId },
+      });
     }
 
     if (editOutcomes.applied.length === 0) {
       input.runtime.devRuns.updateRun(run.id, {
         status: "failed",
-        workspace: { id: workspace.id, strategy: workspace.strategy, path: workspace.path, branch: workspace.branch },
+        workspace: {
+          id: workspace.id,
+          strategy: workspace.strategy,
+          path: workspace.path,
+          branch: workspace.branch,
+        },
         errorMessage: "all edits were rejected by the safety guard",
         finishedAt: new Date().toISOString(),
         durationMs: Date.now() - new Date(startedAt).getTime(),
@@ -577,32 +675,61 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       const updated = input.runtime.devRuns.getRun(run.id);
       if (!updated) throw new Error("dev run vanished");
       emit({ kind: "run.failed", message: "all edits rejected" });
-      return { run: updated, result: buildResult(updated, { diff: "", filesChanged: [], filesAdded: [], filesRemoved: [], truncated: false }, false) };
+      return {
+        run: updated,
+        result: buildResult(
+          updated,
+          { diff: "", filesChanged: [], filesAdded: [], filesRemoved: [], truncated: false },
+          false
+        ),
+      };
     }
 
     // Stage 4: checks
     input.runtime.devRuns.updateRun(run.id, { status: "checking" });
-    let checks = await runCheckStage({ workspace, projectChecks: projectConfig, checks: requestedChecks });
+    let checks = await runCheckStage({
+      workspace,
+      projectChecks: projectConfig,
+      checks: requestedChecks,
+    });
     let repairAttempts = 0;
     let failedCheck = checks.find((check) => check.status !== "completed" || check.exitCode !== 0);
     while (failedCheck && repairAttempts < maxRepairs) {
-      input.runtime.devRuns.updateRun(run.id, { status: "repairing", repairAttempts: repairAttempts + 1 });
-      emit({ kind: "repair.attempted", message: failedCheck.name, data: { stderr: failedCheck.stderr.slice(0, 500) } });
+      input.runtime.devRuns.updateRun(run.id, {
+        status: "repairing",
+        repairAttempts: repairAttempts + 1,
+      });
+      emit({
+        kind: "repair.attempted",
+        message: failedCheck.name,
+        data: { stderr: failedCheck.stderr.slice(0, 500) },
+      });
       try {
         const repairResult = await input.runtime.modelRuntime.invoke("dev-repair-local", {
           role: "coder_handoff",
           modelName: "dev-repair-local",
           messages: [
-            { role: "system", content: "You are the workbench dev repair agent. Output JSON only." },
-            { role: "user", content: buildRepairPrompt({
-              goal: parsedRequest.goal,
-              failedCheck,
-              rules,
-            }) },
+            {
+              role: "system",
+              content: "You are the workbench dev repair agent. Output JSON only.",
+            },
+            {
+              role: "user",
+              content: buildRepairPrompt({
+                goal: parsedRequest.goal,
+                failedCheck,
+                rules,
+              }),
+            },
           ],
           temperature: 0,
           maxOutputTokens: 1024,
-          metadata: { kind: "dev-repair", runId: run.id, sessionId: input.sessionId, projectId: input.project.id },
+          metadata: {
+            kind: "dev-repair",
+            runId: run.id,
+            sessionId: input.sessionId,
+            projectId: input.project.id,
+          },
         });
         input.runtime.models.recordCall({
           sessionId: input.sessionId,
@@ -639,20 +766,32 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
           });
         }
         repairAttempts += 1;
-        checks = await runCheckStage({ workspace, projectChecks: projectConfig, checks: requestedChecks });
+        checks = await runCheckStage({
+          workspace,
+          projectChecks: projectConfig,
+          checks: requestedChecks,
+        });
         failedCheck = checks.find((check) => check.status !== "completed" || check.exitCode !== 0);
         if (!failedCheck) break;
       } catch (error) {
-        emit({ kind: "repair.attempted", level: "error", message: error instanceof Error ? error.message : String(error) });
+        emit({
+          kind: "repair.attempted",
+          level: "error",
+          message: error instanceof Error ? error.message : String(error),
+        });
         break;
       }
     }
 
     // Stage 5: diff
-    const allEditPaths = Array.from(new Set([
-      ...editOutcomes.applied.map((edit) => edit.path),
-      ...editOutcomes.applied.filter((edit) => edit.changeType === "create").map((edit) => edit.path),
-    ]));
+    const allEditPaths = Array.from(
+      new Set([
+        ...editOutcomes.applied.map((edit) => edit.path),
+        ...editOutcomes.applied
+          .filter((edit) => edit.changeType === "create")
+          .map((edit) => edit.path),
+      ])
+    );
     const diff = await collectDiffForRun({
       workspace,
       originalRoot: input.project.path,
@@ -662,7 +801,12 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       checks,
       repairAttempts,
       plan,
-      workspace: { id: workspace.id, strategy: workspace.strategy, path: workspace.path, branch: workspace.branch },
+      workspace: {
+        id: workspace.id,
+        strategy: workspace.strategy,
+        path: workspace.path,
+        branch: workspace.branch,
+      },
       risk: riskLevel,
     });
 
@@ -676,7 +820,9 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         filesCreated: diff.filesAdded,
         finishedAt: new Date().toISOString(),
         durationMs: Date.now() - new Date(startedAt).getTime(),
-        errorMessage: failedCheck.stderr.slice(0, 1000) || `${failedCheck.name} exited with ${failedCheck.exitCode ?? "n/a"}`,
+        errorMessage:
+          failedCheck.stderr.slice(0, 1000) ||
+          `${failedCheck.name} exited with ${failedCheck.exitCode ?? "n/a"}`,
       });
       emit({ kind: "run.failed", level: "warn", message: failedCheck.name });
       return { run: updated, result: buildResult(updated, diff, false) };
@@ -700,13 +846,25 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         filesEdited: diff.filesChanged,
         filesCreated: diff.filesAdded,
       });
-      emit({ kind: "approval.required", message: approval.reason ?? "approval required", data: { approvalId: approval.id } });
+      emit({
+        kind: "approval.required",
+        message: approval.reason ?? "approval required",
+        data: { approvalId: approval.id },
+      });
       return { run: updated, result: buildResult(updated, diff, false) };
     }
 
     if (parsedRequest.approveEdits) {
       const applyOutcome = await applyWorkspaceToOriginal({
-        workspace: { id: workspace.id, path: workspace.path, strategy: workspace.strategy, branch: workspace.branch, baseCommit: workspace.baseCommit, isGitWorktree: workspace.isGitWorktree, originalRoot: input.project.path },
+        workspace: {
+          id: workspace.id,
+          path: workspace.path,
+          strategy: workspace.strategy,
+          branch: workspace.branch,
+          baseCommit: workspace.baseCommit,
+          isGitWorktree: workspace.isGitWorktree,
+          originalRoot: input.project.path,
+        },
         originalRoot: input.project.path,
         paths: Array.from(new Set([...diff.filesChanged, ...diff.filesAdded])),
         allowedRoots: [input.project.path],
@@ -745,7 +903,11 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         sessionId: input.sessionId,
         projectId: input.project.id,
         role: "assistant",
-        content: JSON.stringify({ kind: "dev-result", runId: updated.id, appliedFiles: applyOutcome.applied }),
+        content: JSON.stringify({
+          kind: "dev-result",
+          runId: updated.id,
+          appliedFiles: applyOutcome.applied,
+        }),
         meta: { kind: "dev", runId: updated.id },
       });
       return { run: updated, result: buildResult(updated, diff, true) };
@@ -770,7 +932,14 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       finishedAt: new Date().toISOString(),
       durationMs: Date.now() - new Date(startedAt).getTime(),
     });
-    return { run: updated, result: buildResult(updated, { diff: "", filesChanged: [], filesAdded: [], filesRemoved: [], truncated: false }, false) };
+    return {
+      run: updated,
+      result: buildResult(
+        updated,
+        { diff: "", filesChanged: [], filesAdded: [], filesRemoved: [], truncated: false },
+        false
+      ),
+    };
   }
 }
 

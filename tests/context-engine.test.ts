@@ -51,7 +51,15 @@ test("context-engine: buildContextPack respects token budget and pins rules firs
     budgetTokens: 100,
     ranked,
     rules: [
-      { id: "rule_1", projectId: "p1", title: "TypeScript only", body: "Prefer TypeScript.", pinned: true, createdAt: "2024-01-01", updatedAt: "2024-01-01" },
+      {
+        id: "rule_1",
+        projectId: "p1",
+        title: "TypeScript only",
+        body: "Prefer TypeScript.",
+        pinned: true,
+        createdAt: "2024-01-01",
+        updatedAt: "2024-01-01",
+      },
     ],
   });
   assert.equal(result.pack.budgetTokens, 100);
@@ -63,7 +71,9 @@ test("context-engine: buildContextPack respects token budget and pins rules firs
 
 test("context-engine: dedupes near-identical retrieval excerpts", () => {
   const result = buildContextPack({ sessionId: "s1", projectId: "p1", budgetTokens: 2000, ranked });
-  const duplicates = result.items.filter((i) => i.omissionReason && i.omissionReason.startsWith("dedupe"));
+  const duplicates = result.items.filter(
+    (i) => i.omissionReason && i.omissionReason.startsWith("dedupe")
+  );
   assert.equal(duplicates.length, 1);
 });
 
@@ -75,7 +85,20 @@ test("context-engine: omits stale facts based on ttlDays", () => {
     budgetTokens: 2048,
     ranked: [],
     facts: [
-      { id: "f1", projectId: "p1", key: "node-version", value: "22.x", kind: "version", confidence: 0.9, sourceKind: "extraction", status: "fresh", lastVerifiedAt: longAgo, expiresAt: null, createdAt: longAgo, updatedAt: longAgo },
+      {
+        id: "f1",
+        projectId: "p1",
+        key: "node-version",
+        value: "22.x",
+        kind: "version",
+        confidence: 0.9,
+        sourceKind: "extraction",
+        status: "fresh",
+        lastVerifiedAt: longAgo,
+        expiresAt: null,
+        createdAt: longAgo,
+        updatedAt: longAgo,
+      },
     ],
     freshFactTtlDays: 30,
   });
@@ -89,7 +112,15 @@ test("context-engine: renderContextForPrompt groups items by kind", () => {
     budgetTokens: 2048,
     ranked,
     rules: [
-      { id: "rule_1", projectId: "p1", title: "TypeScript only", body: "Prefer TypeScript.", pinned: true, createdAt: "2024-01-01", updatedAt: "2024-01-01" },
+      {
+        id: "rule_1",
+        projectId: "p1",
+        title: "TypeScript only",
+        body: "Prefer TypeScript.",
+        pinned: true,
+        createdAt: "2024-01-01",
+        updatedAt: "2024-01-01",
+      },
     ],
   });
   const text = renderContextForPrompt(result);

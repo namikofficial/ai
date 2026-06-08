@@ -4,7 +4,7 @@
 // outside the project root or its workspace. This module provides path
 // normalization, secret/path blocking, and safe file read/write.
 
-import { mkdir, readFile, writeFile, stat, unlink } from "node:fs/promises";
+import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 export const IGNORED_DIRECTORIES: ReadonlyArray<string> = [
@@ -92,15 +92,31 @@ export function isIgnoredDirectory(relativePath: string): boolean {
 
 export function guardPath(input: PathGuardInput): PathGuardResult {
   const root = path.resolve(input.root);
-  const candidateRaw = path.isAbsolute(input.candidate) ? input.candidate : path.join(root, input.candidate);
+  const candidateRaw = path.isAbsolute(input.candidate)
+    ? input.candidate
+    : path.join(root, input.candidate);
   const normalized = path.resolve(candidateRaw);
   const relative = path.relative(root, normalized);
   const relativeSlash = normalizeSlashes(relative);
   if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return { ok: false, resolved: normalized, relative, reason: "path escapes root", isSecret: false, isHighRisk: false };
+    return {
+      ok: false,
+      resolved: normalized,
+      relative,
+      reason: "path escapes root",
+      isSecret: false,
+      isHighRisk: false,
+    };
   }
   if (isIgnoredDirectory(relativeSlash)) {
-    return { ok: false, resolved: normalized, relative, reason: "path is inside an ignored directory", isSecret: false, isHighRisk: false };
+    return {
+      ok: false,
+      resolved: normalized,
+      relative,
+      reason: "path is inside an ignored directory",
+      isSecret: false,
+      isHighRisk: false,
+    };
   }
   const secret = isSecretFile(relativeSlash);
   const highRisk = isHighRiskPath(relativeSlash);
@@ -200,7 +216,12 @@ export async function removeProjectFile(root: string, candidate: string): Promis
 
 export interface ApplyEditInput {
   root: string;
-  edit: { path: string; newText: string; oldText?: string; changeType: "replace" | "create" | "append" };
+  edit: {
+    path: string;
+    newText: string;
+    oldText?: string;
+    changeType: "replace" | "create" | "append";
+  };
 }
 
 export interface ApplyEditResult {

@@ -1,8 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { createServer as createViteServer } from "vite";
-import { startWorkbenchServer } from "../../api/src/server.ts";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
+import { startWorkbenchServer } from "../../api/src/server.ts";
 
 export interface WebServerOptions {
   config?: Partial<ConfigSnapshot>;

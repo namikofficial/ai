@@ -1,4 +1,9 @@
-import type { ProjectRecord, ProjectSummary, SessionRecord, TaskRecord } from "../../shared/src/index.ts";
+import type {
+  ProjectRecord,
+  ProjectSummary,
+  SessionRecord,
+  TaskRecord,
+} from "../../shared/src/index.ts";
 
 export interface ShellOptions {
   title: string;
@@ -31,7 +36,7 @@ function linkList(projects: ProjectSummary[] = [], activeProjectId?: string | nu
         <option value="${escapeHtml(project.id)}" ${project.id === activeProjectId ? "selected" : ""}>
           ${escapeHtml(project.name)} · ${escapeHtml(project.language ?? "unknown")}
         </option>
-      `,
+      `
     )
     .join("");
 }
@@ -580,7 +585,10 @@ function renderPaletteItems(): string {
     ["/settings", "Settings", "Local runtime configuration"],
   ];
   return items
-    .map(([href, label, description]) => `<div class="item" data-href="${href}"><strong>${label}</strong><small>${description}</small></div>`)
+    .map(
+      ([href, label, description]) =>
+        `<div class="item" data-href="${href}"><strong>${label}</strong><small>${description}</small></div>`
+    )
     .join("");
 }
 
@@ -591,7 +599,8 @@ export function renderCard(title: string, bodyHtml: string, span: 12 | 8 | 6 | 4
 export function renderKeyValueList(items: Array<[string, string]>): string {
   return `<div class="list">${items
     .map(
-      ([label, value]) => `<div class="list-item"><div class="tiny">${escapeHtml(label)}</div><div>${escapeHtml(value)}</div></div>`,
+      ([label, value]) =>
+        `<div class="list-item"><div class="tiny">${escapeHtml(label)}</div><div>${escapeHtml(value)}</div></div>`
     )
     .join("")}</div>`;
 }
@@ -635,14 +644,23 @@ export function renderProjectItem(project: ProjectSummary): string {
   </div>`;
 }
 
-export function renderEventFeed(events: Array<{ type: string; ts: string; sessionId: string | null; projectId: string | null; payload: Record<string, unknown> }>): string {
+export function renderEventFeed(
+  events: Array<{
+    type: string;
+    ts: string;
+    sessionId: string | null;
+    projectId: string | null;
+    payload: Record<string, unknown>;
+  }>
+): string {
   return `<div class="event-log" data-event-log>${events
     .slice(-20)
     .reverse()
     .map(
-      (event) => `<div class="event"><span class="type">${escapeHtml(event.type)}</span> <span class="ts">${escapeHtml(event.ts)}</span><div>${escapeHtml(
-        event.projectId ?? event.sessionId ?? "system",
-      )}</div></div>`,
+      (event) =>
+        `<div class="event"><span class="type">${escapeHtml(event.type)}</span> <span class="ts">${escapeHtml(event.ts)}</span><div>${escapeHtml(
+          event.projectId ?? event.sessionId ?? "system"
+        )}</div></div>`
     )
     .join("")}</div>`;
 }

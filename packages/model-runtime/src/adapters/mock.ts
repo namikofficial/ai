@@ -1,5 +1,12 @@
-import type { ModelInvokeRequest, ModelInvokeResult, EmbeddingRequest, EmbeddingResult, RerankRequest, RerankResult } from "../index.ts";
-import type { ModelProviderAdapter, ModelHealthResult } from "./types.ts";
+import type {
+  EmbeddingRequest,
+  EmbeddingResult,
+  ModelInvokeRequest,
+  ModelInvokeResult,
+  RerankRequest,
+  RerankResult,
+} from "../index.ts";
+import type { ModelHealthResult, ModelProviderAdapter } from "./types.ts";
 
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
@@ -40,7 +47,10 @@ export class MockAdapter implements ModelProviderAdapter {
 
   async rerank(request: RerankRequest): Promise<RerankResult> {
     return {
-      scores: request.documents.map((_, index) => ({ index, score: request.documents.length - index })),
+      scores: request.documents.map((_, index) => ({
+        index,
+        score: request.documents.length - index,
+      })),
     };
   }
 }

@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { dirname, join } from "node:path";
+import test from "node:test";
 import { runAskWorkflow } from "../packages/ask-engine/src/index.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 function createMockRuntime() {
   return {
@@ -31,13 +31,16 @@ function installInvokeModelStub(
   input: {
     failAnswer?: boolean;
     answerText?: string;
-  } = {},
+  } = {}
 ) {
   const original = store.invokeModel;
   store.invokeModel = async (profileId, request, options) => {
     const promptTokens = 24;
     const completionTokens = request.role === "answer" ? 48 : 12;
-    const response = { text: input.answerText ?? `mock:${request.role}`, usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens } };
+    const response = {
+      text: input.answerText ?? `mock:${request.role}`,
+      usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
+    };
     if (request.role === "answer" && input.failAnswer) {
       store.models.recordCall({
         profileId,
@@ -106,7 +109,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   for (let i = 0; i < 6; i++) {
     await writeFile(
       join(repo, "src", `feature-${i}.ts`),
-      `export function feature${i}() { return "noise ${i}"; }\n`,
+      `export function feature${i}() { return "noise ${i}"; }\n`
     );
   }
   await writeFile(
@@ -117,7 +120,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
       "}",
       "",
       "export const authNote = 'auth is handled in the auth router';",
-    ].join("\n"),
+    ].join("\n")
   );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
@@ -142,12 +145,22 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   assert.ok(selected.length >= 1, "selected context should be recorded");
   assert.ok(selected.length <= results.length, "selected is a subset of results");
 
-  const judgeCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "retrieval_judge");
+  const judgeCalls = store.models
+    .listCalls(answer.sessionId, 100)
+    .filter((c) => c.role === "retrieval_judge");
   assert.equal(judgeCalls.length, 1);
   const judgeRequest = judgeCalls[0]?.request as {
     metadata?: {
-      compiledPrompt?: { mode?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };
-      responseTrace?: { confidence?: number; confidenceNotes?: string[]; boost?: { good?: number; missed?: number; bad?: number } };
+      compiledPrompt?: {
+        mode?: string;
+        contextPackId?: string | null;
+        messages?: Array<{ role: string; content: string }>;
+      };
+      responseTrace?: {
+        confidence?: number;
+        confidenceNotes?: string[];
+        boost?: { good?: number; missed?: number; bad?: number };
+      };
     } | null;
   };
   assert.equal(judgeRequest.metadata?.compiledPrompt?.mode, "retrieval_judge");
@@ -155,33 +168,59 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   assert.ok(Array.isArray(judgeRequest.metadata?.responseTrace?.confidenceNotes));
   assert.ok(judgeRequest.metadata?.responseTrace?.boost);
 
-  const rewriteCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "query_rewrite");
+  const rewriteCalls = store.models
+    .listCalls(answer.sessionId, 100)
+    .filter((c) => c.role === "query_rewrite");
   assert.equal(rewriteCalls.length, 1, "ask should record exactly one query rewrite model call");
   const rewriteRequest = rewriteCalls[0]!.request as {
     metadata?: {
-      compiledPrompt?: { id?: string; mode?: string; messages?: Array<{ role: string; content: string }> };
+      compiledPrompt?: {
+        id?: string;
+        mode?: string;
+        messages?: Array<{ role: string; content: string }>;
+      };
       deterministicRewrite?: unknown;
     } | null;
   };
   assert.equal(rewriteRequest.metadata?.compiledPrompt?.mode, "query_rewrite");
-  assert.ok(rewriteRequest.metadata?.deterministicRewrite, "query rewrite call should record deterministic fallback metadata");
+  assert.ok(
+    rewriteRequest.metadata?.deterministicRewrite,
+    "query rewrite call should record deterministic fallback metadata"
+  );
 
-  const answerCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "answer");
+  const answerCalls = store.models
+    .listCalls(answer.sessionId, 100)
+    .filter((c) => c.role === "answer");
   assert.equal(answerCalls.length, 1, "ask should record exactly one answer model call");
-  const embeddingCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "embedding");
+  const embeddingCalls = store.models
+    .listCalls(answer.sessionId, 100)
+    .filter((c) => c.role === "embedding");
   assert.ok(embeddingCalls.length >= 1, "ask should record a query embedding call");
   const answerRequest = answerCalls[0]!.request as {
     metadata?: {
-      compiledPrompt?: { id?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };
+      compiledPrompt?: {
+        id?: string;
+        contextPackId?: string | null;
+        messages?: Array<{ role: string; content: string }>;
+      };
       retrievalQueryId?: string;
     } | null;
   };
-  assert.ok(answerRequest.metadata?.compiledPrompt?.id, "answer call should include replayable compiled prompt metadata");
+  assert.ok(
+    answerRequest.metadata?.compiledPrompt?.id,
+    "answer call should include replayable compiled prompt metadata"
+  );
   assert.equal(answerRequest.metadata?.retrievalQueryId, query.id);
   assert.ok(Array.isArray(answerRequest.metadata?.compiledPrompt?.messages));
 
   const routes = store.listModelRoutes(10).filter((route) => route.taskPattern === "ask");
-  assert.ok(routes.some((route) => route.reason?.includes("profile selected") || route.reason?.includes("local profile selected")));
+  assert.ok(
+    routes.some(
+      (route) =>
+        route.reason?.includes("profile selected") ||
+        route.reason?.includes("local profile selected")
+    )
+  );
 
   const contextPacks = store.context.listPacksForSession(answer.sessionId, 5);
   assert.equal(contextPacks.length, 1);
@@ -189,7 +228,9 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   const budgetEvents = store.context.listBudgetEvents(packId);
   assert.ok(budgetEvents.length >= 0);
 
-  const retrievalCompleted = store.listEvents(answer.sessionId, 100).filter((e) => e.type === "retrieval.completed");
+  const retrievalCompleted = store
+    .listEvents(answer.sessionId, 100)
+    .filter((e) => e.type === "retrieval.completed");
   assert.ok(retrievalCompleted.length >= 1);
 
   store.db.close();
@@ -242,7 +283,7 @@ test("runAskWorkflow records the current orchestration trace, compiled prompts, 
         "}",
       ].join("\n"),
     },
-    "sample-repo",
+    "sample-repo"
   );
   const restoreInvokeModel = installInvokeModelStub(fixture.store);
   try {
@@ -270,10 +311,11 @@ test("runAskWorkflow records the current orchestration trace, compiled prompts, 
 
     const prompts = fixture.store.listCompiledPrompts(response.sessionId, 10);
     assert.equal(prompts.length, 3);
-    assert.deepEqual(
-      prompts.map((prompt) => prompt.mode).sort(),
-      ["answer", "query_rewrite", "retrieval_judge"],
-    );
+    assert.deepEqual(prompts.map((prompt) => prompt.mode).sort(), [
+      "answer",
+      "query_rewrite",
+      "retrieval_judge",
+    ]);
 
     const packs = fixture.store.context.listPacksForSession(response.sessionId, 10);
     assert.equal(packs.length, 1);
@@ -328,7 +370,11 @@ test("runAskWorkflow falls back without a fake answer completion when nothing is
 
     const events = fixture.store.listEvents(response.sessionId, 50);
     assert.ok(events.some((event) => event.type === "answer.fallback"));
-    assert.equal(events.filter((event) => event.type === "model.completed" && event.payload.role === "answer").length, 0);
+    assert.equal(
+      events.filter((event) => event.type === "model.completed" && event.payload.role === "answer")
+        .length,
+      0
+    );
     assert.equal(fixture.store.evals.listAnswerEvaluations(10)[0]?.notes, "no_chunks");
   } finally {
     restoreInvokeModel();
@@ -348,7 +394,7 @@ test("runAskWorkflow records model.failed and still completes with synthesis fai
         "export const authNote = 'auth is handled in the auth router';",
       ].join("\n"),
     },
-    "sample-repo",
+    "sample-repo"
   );
   const restoreInvokeModel = installInvokeModelStub(fixture.store, { failAnswer: true });
   try {
@@ -367,8 +413,14 @@ test("runAskWorkflow records model.failed and still completes with synthesis fai
 
     assert.match(response.answer, /could not synthesize a model answer/i);
     const events = fixture.store.listEvents(response.sessionId, 100);
-    assert.ok(events.some((event) => event.type === "model.failed" && event.payload.role === "answer"));
-    assert.equal(events.filter((event) => event.type === "model.completed" && event.payload.role === "answer").length, 0);
+    assert.ok(
+      events.some((event) => event.type === "model.failed" && event.payload.role === "answer")
+    );
+    assert.equal(
+      events.filter((event) => event.type === "model.completed" && event.payload.role === "answer")
+        .length,
+      0
+    );
 
     const modelCalls = fixture.store.models.listCalls(response.sessionId, 20);
     assert.ok(modelCalls.some((call) => call.role === "answer" && call.status === "failed"));
@@ -392,25 +444,26 @@ test("runAskWorkflow prefers parsed JSON rewrite and retrieval judge outputs whe
         "}",
       ].join("\n"),
     },
-    "json-primary-repo",
+    "json-primary-repo"
   );
   const originalInvoke = fixture.store.invokeModel;
   fixture.store.invokeModel = async (profileId, request, options) => {
-    const text = request.role === "query_rewrite"
-      ? JSON.stringify({
-        rewrites: ["src/auth.ts handleLogin auth", "auth route login"],
-        pathHints: ["src/auth.ts"],
-        symbolHints: ["handleLogin"],
-      })
-      : request.role === "retrieval_judge"
-      ? JSON.stringify({
-        confidence: 0.88,
-        confidenceNotes: ["strong rewrite and path evidence"],
-        miss: null,
-      })
-      : request.role === "answer"
-      ? "parsed-json-answer"
-      : "ok";
+    const text =
+      request.role === "query_rewrite"
+        ? JSON.stringify({
+            rewrites: ["src/auth.ts handleLogin auth", "auth route login"],
+            pathHints: ["src/auth.ts"],
+            symbolHints: ["handleLogin"],
+          })
+        : request.role === "retrieval_judge"
+          ? JSON.stringify({
+              confidence: 0.88,
+              confidenceNotes: ["strong rewrite and path evidence"],
+              miss: null,
+            })
+          : request.role === "answer"
+            ? "parsed-json-answer"
+            : "ok";
     fixture.store.models.recordCall({
       profileId,
       role: request.role,
@@ -466,7 +519,7 @@ test("runAskWorkflow performs one repair attempt for JSON-like invalid rewrite/j
     {
       "src/auth.ts": "export const auth = true;\n",
     },
-    "json-repair-repo",
+    "json-repair-repo"
   );
   const originalInvoke = fixture.store.invokeModel;
   let queryRewriteCalls = 0;
@@ -475,22 +528,24 @@ test("runAskWorkflow performs one repair attempt for JSON-like invalid rewrite/j
     let text = "ok";
     if (request.role === "query_rewrite") {
       queryRewriteCalls += 1;
-      text = queryRewriteCalls === 1
-        ? "{broken"
-        : JSON.stringify({
-          rewrites: ["auth repaired rewrite"],
-          pathHints: ["src/auth.ts"],
-          symbolHints: ["auth"],
-        });
+      text =
+        queryRewriteCalls === 1
+          ? "{broken"
+          : JSON.stringify({
+              rewrites: ["auth repaired rewrite"],
+              pathHints: ["src/auth.ts"],
+              symbolHints: ["auth"],
+            });
     } else if (request.role === "retrieval_judge") {
       retrievalJudgeCalls += 1;
-      text = retrievalJudgeCalls === 1
-        ? "{oops"
-        : JSON.stringify({
-          confidence: 0.73,
-          confidenceNotes: ["repair succeeded"],
-          miss: null,
-        });
+      text =
+        retrievalJudgeCalls === 1
+          ? "{oops"
+          : JSON.stringify({
+              confidence: 0.73,
+              confidenceNotes: ["repair succeeded"],
+              miss: null,
+            });
     } else if (request.role === "answer") {
       text = "repair-answer";
     }

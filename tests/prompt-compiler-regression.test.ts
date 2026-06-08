@@ -8,29 +8,41 @@ test("prompt-compiler: redacts secrets from user request and context", () => {
     role: "answer",
     userRequest: "my key is sk-abcdefghijklmnopqrstuvwxyz123456",
     contextPackItems: [
-      { kind: "retrieval_chunk", excerpt: "env secret: sk-abcdefghijklmnopqrstuvwxyz789012", tokenCount: 10, rank: 0, sourceId: "c1" }
-    ]
+      {
+        kind: "retrieval_chunk",
+        excerpt: "env secret: sk-abcdefghijklmnopqrstuvwxyz789012",
+        tokenCount: 10,
+        rank: 0,
+        sourceId: "c1",
+      },
+    ],
   });
 
-  const userMessage = prompt.messages.find(m => m.role === "user");
+  const userMessage = prompt.messages.find((m) => m.role === "user");
   assert.ok(userMessage);
   if (userMessage) {
     assert.ok(userMessage.content.includes("[REDACTED:openai_key]"));
   }
-  
-  const systemMessages = prompt.messages.filter(m => m.role === "system");
-  const contextContent = systemMessages.find(m => m.content.includes("Selected Context Pack"));
+
+  const systemMessages = prompt.messages.filter((m) => m.role === "system");
+  const contextContent = systemMessages.find((m) => m.content.includes("Selected Context Pack"));
   assert.ok(contextContent?.content.includes("[REDACTED:openai_key]"));
   assert.ok(prompt.safetyNotes.length >= 2);
 });
 
 test("prompt-compiler: omits duplicate context", () => {
-  const item = { kind: "retrieval_chunk" as const, excerpt: "unique content", tokenCount: 10, rank: 0, sourceId: "c1" };
+  const item = {
+    kind: "retrieval_chunk" as const,
+    excerpt: "unique content",
+    tokenCount: 10,
+    rank: 0,
+    sourceId: "c1",
+  };
   const prompt = compilePrompt({
     mode: "answer",
     role: "answer",
     userRequest: "test",
-    contextPackItems: [item, { ...item, excerpt: "duplicate" }] // duplicates by sourceId
+    contextPackItems: [item, { ...item, excerpt: "duplicate" }], // duplicates by sourceId
   });
 
   assert.equal(prompt.includedContext.length, 1);

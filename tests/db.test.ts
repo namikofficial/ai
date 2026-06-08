@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 async function startQdrantStub(vectorSize: number): Promise<{
   url: string;
@@ -18,7 +18,9 @@ async function startQdrantStub(vectorSize: number): Promise<{
     if (req.method === "GET" && url.startsWith("/collections/")) {
       counts.gets += 1;
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ result: { config: { params: { vectors: { size: vectorSize } } } } }));
+      res.end(
+        JSON.stringify({ result: { config: { params: { vectors: { size: vectorSize } } } } })
+      );
       return;
     }
     if (req.method === "POST" && url.includes("/points/search")) {
@@ -39,14 +41,16 @@ async function startQdrantStub(vectorSize: number): Promise<{
   await new Promise<void>((resolve) => {
     server.listen(0, "127.0.0.1", resolve);
   });
-  const address = (server as any).address();
-  if (!address || typeof address === "string") {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const addr = (server as any).address?.();
+  const address = addr && typeof addr === "object" ? addr : null;
+  if (!address) {
     throw new Error("failed to start qdrant stub");
   }
   return {
     url: `http://127.0.0.1:${address.port}`,
     counts,
-    close: () => new Promise<void>((resolve) => (server as QdrantStubServer).close(() => resolve())),
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
   };
 }
 
@@ -55,20 +59,12 @@ test("applies the migration and stores projects", async () => {
   const dbPath = join(dir, "ai.db");
   await writeFile(
     join(dir, "README.md"),
-    [
-      "# Temp Project",
-      "",
-      "Auth is documented here.",
-    ].join("\n"),
+    ["# Temp Project", "", "Auth is documented here."].join("\n")
   );
   await mkdir(join(dir, "src"), { recursive: true });
   await writeFile(
     join(dir, "src", "auth.ts"),
-    [
-      "export function authenticateUser() {",
-      "  return true;",
-      "}",
-    ].join("\n"),
+    ["export function authenticateUser() {", "  return true;", "}"].join("\n")
   );
   const store = createStore(initializeStore(dbPath));
 
@@ -122,11 +118,7 @@ test("falls back when qdrant is enabled but unavailable", async () => {
   const dbPath = join(dir, "ai.db");
   await writeFile(
     join(dir, "README.md"),
-    [
-      "# Qdrant Fallback Project",
-      "",
-      "This README should still be indexed locally.",
-    ].join("\n"),
+    ["# Qdrant Fallback Project", "", "This README should still be indexed locally."].join("\n")
   );
 
   try {
@@ -162,11 +154,7 @@ test("keeps indexing and FTS working when qdrant is disabled", async () => {
   await mkdir(join(dir, "src"), { recursive: true });
   await writeFile(
     join(dir, "README.md"),
-    [
-      "# Disabled Qdrant Project",
-      "",
-      "This README should still be indexed locally.",
-    ].join("\n"),
+    ["# Disabled Qdrant Project", "", "This README should still be indexed locally."].join("\n")
   );
 
   try {
@@ -210,7 +198,7 @@ test("uses FTS fallback when qdrant collection dimension mismatches embedding di
       "# Dimension Mismatch Project",
       "",
       "Auth is documented here and should still be found by FTS.",
-    ].join("\n"),
+    ].join("\n")
   );
   await writeFile(join(dir, "src", "auth.ts"), "export const authNote = 'auth handled here';\n");
 

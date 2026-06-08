@@ -1,11 +1,9 @@
+import type { ModelHealthStatus } from "../../../shared/src/index.ts";
 import type {
-  ModelHealthStatus,
-} from "../../../shared/src/index.ts";
-import type {
-  ModelInvokeRequest,
-  ModelInvokeResult,
   EmbeddingRequest,
   EmbeddingResult,
+  ModelInvokeRequest,
+  ModelInvokeResult,
   RerankRequest,
   RerankResult,
 } from "../index.ts";

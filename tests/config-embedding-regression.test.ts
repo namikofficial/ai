@@ -1,9 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { resolveConfig, resolveProjectConfig, projectPathMatchesConfig, boostWeightForPath } from "../packages/config/src/index.ts";
-import { readEmbeddingConfig } from "../packages/indexer/src/config.ts";
-import { writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import test from "node:test";
+import {
+  boostWeightForPath,
+  projectPathMatchesConfig,
+  resolveConfig,
+  resolveProjectConfig,
+} from "../packages/config/src/index.ts";
+import { readEmbeddingConfig } from "../packages/indexer/src/config.ts";
 
 test("config: resolveConfig returns safe defaults", () => {
   const config = resolveConfig();
@@ -21,7 +26,7 @@ test("config: resolveProjectConfig loads valid .ai-workbench.json", () => {
     include: ["src/**"],
     chunking: { preferTreeSitter: false, maxChunkTokens: 500 },
     retrieval: { boostPaths: ["src/core/**"], authHints: ["secret"] },
-    models: { answer: "test-model", embedding: "test-embed" }
+    models: { answer: "test-model", embedding: "test-embed" },
   };
   writeFileSync(configPath, JSON.stringify(projectConfigData));
 
@@ -62,7 +67,7 @@ test("config: projectPathMatchesConfig handles include/ignore", () => {
     retrieval: { boostPaths: [], authHints: [] },
     models: { answer: null, embedding: null },
     sourcePath: null,
-    raw: {}
+    raw: {},
   };
 
   assert.equal(projectPathMatchesConfig("src/main.ts", config), true);
@@ -79,7 +84,7 @@ test("config: boostWeightForPath returns expected boost", () => {
     retrieval: { boostPaths: ["src/core/**"], authHints: [] },
     models: { answer: null, embedding: null },
     sourcePath: null,
-    raw: {}
+    raw: {},
   };
 
   assert.equal(boostWeightForPath("src/core/auth.ts", config), 1);
@@ -94,16 +99,16 @@ test("indexer/config: readEmbeddingConfig defaults and fallbacks", () => {
   assert.equal(config.dimension, 32);
 
   // Cloud fallback when disabled
-  const cloudConfig = readEmbeddingConfig({ 
+  const cloudConfig = readEmbeddingConfig({
     env: { AI_EMBEDDING_PROVIDER: "openai_compat", AI_CLOUD_ENABLED: "false" },
-    cloudEnabled: false
+    cloudEnabled: false,
   });
   assert.equal(cloudConfig.provider, "heuristic");
   assert.equal(cloudConfig.model, "heuristic-embedding");
 
   // Invalid env fallback
   const invalidConfig = readEmbeddingConfig({
-    env: { AI_EMBEDDING_BATCH_SIZE: "-10", AI_EMBEDDING_DIM: "abc" }
+    env: { AI_EMBEDDING_BATCH_SIZE: "-10", AI_EMBEDDING_DIM: "abc" },
   });
   assert.equal(invalidConfig.batchSize, 32);
   assert.equal(invalidConfig.dimension, 32);

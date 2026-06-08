@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, readFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
+import {
+  EMPTY_SESSION_TIMELINE_COUNTS,
+  getTimelineCounts,
+  getTimelineItems,
+} from "../apps/web/src/timeline.ts";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
-import { EMPTY_SESSION_TIMELINE_COUNTS, getTimelineCounts, getTimelineItems } from "../apps/web/src/timeline.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
+import type { SessionTimelineResponse, TimelineItem } from "../packages/shared/src/index.ts";
 
 test("defines the Vite React shell and router surface", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-web-"));
@@ -38,7 +43,10 @@ test("defines the Vite React shell and router surface", async () => {
     assert.ok(appSource.includes(path), `expected router surface to include ${path}`);
   }
 
-  const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
+  const pagesSource = await readFile(
+    "/home/namik/Documents/code/ai/apps/web/src/pages.tsx",
+    "utf8"
+  );
   for (const name of [
     "AgentRunDetailPage",
     "AgentsPage",
@@ -64,28 +72,32 @@ test("logs MCP calls through the shared store", async () => {
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "sample-repo" });
   await store.indexProject(project.id);
-  const mcpCall = await handleMcpRequest(store, {
-    databasePath: join(workspace, "ai.db"),
-    runtimeDir: join(workspace, "runtime"),
-    apiUrl: "http://127.0.0.1:4242",
-    webPort: 3000,
-    apiPort: 4242,
-    cloudEnabled: false,
-    qdrantEnabled: false,
-    qdrantUrl: null,
-    qdrantCollection: "ai_chunks",
-  }, {
-    jsonrpc: "2.0",
-    id: 9,
-    method: "tools/call",
-    params: {
-      name: "ai_search_project",
-      arguments: {
-        project: project.id,
-        query: "auth",
-      },
+  const mcpCall = await handleMcpRequest(
+    store,
+    {
+      databasePath: join(workspace, "ai.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiUrl: "http://127.0.0.1:4242",
+      webPort: 3000,
+      apiPort: 4242,
+      cloudEnabled: false,
+      qdrantEnabled: false,
+      qdrantUrl: null,
+      qdrantCollection: "ai_chunks",
     },
-  });
+    {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: {
+        name: "ai_search_project",
+        arguments: {
+          project: project.id,
+          query: "auth",
+        },
+      },
+    }
+  );
   assert.equal(Boolean(mcpCall?.result), true);
   assert.ok(store.listMcpCalls(10).length > 0);
   store.db.close();
@@ -98,8 +110,26 @@ test("session timeline helper handles empty timeline data safely", () => {
 });
 
 test("timeline link generation produces correct links and avoids broken links", () => {
-  const items = getTimelineItems({
-    session: {} as any,
+  const timeline: SessionTimelineResponse = {
+    session: {
+      id: "test-session",
+      projectId: "test-project",
+      title: "test",
+      userGoal: "test",
+      mode: "local",
+      status: "running",
+      source: "test",
+      startedAt: "",
+      finishedAt: null,
+      durationMs: null,
+      activeTaskId: null,
+      modelProfile: null,
+      finalSummary: null,
+      errorMessage: null,
+      createdAt: "",
+      updatedAt: "",
+    },
+    timeline: [],
     counts: EMPTY_SESSION_TIMELINE_COUNTS,
     items: [
       {
@@ -157,7 +187,8 @@ test("timeline link generation produces correct links and avoids broken links", 
         payload: {},
       },
     ],
-  } as any);
+  };
+  const items = getTimelineItems(timeline);
 
   assert.equal(items[0]?.link, "/prompts/prompt-1");
   assert.equal(items[1]?.link, "/retrieval/queries/query-1");

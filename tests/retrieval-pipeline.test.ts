@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { RetrievalChunk } from "../packages/shared/src/index.ts";
 import {
   applyFeedbackBoosts,
   buildFeedbackBoosts,
@@ -11,6 +10,7 @@ import {
   runRetrievalPipeline,
   selectTopByTokenBudget,
 } from "../packages/retrieval-engine/src/index.ts";
+import type { RetrievalChunk } from "../packages/shared/src/index.ts";
 
 const baseChunk = {
   id: "chunk_1",
@@ -62,13 +62,40 @@ test("retrieval-pipeline: rerank applies good/bad feedback and missed-path boost
   const chunks = [baseChunk, otherChunk];
   const ranked = rerankChunks({
     query: "auth",
-    analysis: { language: null, terms: ["auth"], pathHints: [], symbolHints: [], isLikelyDefinition: false, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: null,
+      terms: ["auth"],
+      pathHints: [],
+      symbolHints: [],
+      isLikelyDefinition: false,
+      isLikelyDebug: false,
+      notes: [],
+    },
     chunks,
     feedback: [
-      { id: "f1", retrievalQueryId: "rq", chunkId: "chunk_1", rating: "good", missedPath: null, notes: null, createdAt: "2024-01-01" },
-      { id: "f2", retrievalQueryId: "rq", chunkId: "chunk_2", rating: "bad", missedPath: null, notes: null, createdAt: "2024-01-01" },
+      {
+        id: "f1",
+        retrievalQueryId: "rq",
+        chunkId: "chunk_1",
+        rating: "good",
+        missedPath: null,
+        notes: null,
+        createdAt: "2024-01-01",
+      },
+      {
+        id: "f2",
+        retrievalQueryId: "rq",
+        chunkId: "chunk_2",
+        rating: "bad",
+        missedPath: null,
+        notes: null,
+        createdAt: "2024-01-01",
+      },
     ],
-    feedbackChunkPaths: new Map([["chunk_1", "src/auth.ts"], ["chunk_2", "src/db.ts"]]),
+    feedbackChunkPaths: new Map([
+      ["chunk_1", "src/auth.ts"],
+      ["chunk_2", "src/db.ts"],
+    ]),
     missRecords: [],
     pathBoosts: new Map(),
     memoryEntries: [],
@@ -97,9 +124,27 @@ test("retrieval-pipeline: hybridMerge dedupes by chunkId and adds cross-source b
 test("retrieval-pipeline: confidence drops on bad feedback and rises on good", () => {
   const rankedGood = rerankChunks({
     query: "auth",
-    analysis: { language: null, terms: ["auth"], pathHints: [], symbolHints: [], isLikelyDefinition: false, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: null,
+      terms: ["auth"],
+      pathHints: [],
+      symbolHints: [],
+      isLikelyDefinition: false,
+      isLikelyDebug: false,
+      notes: [],
+    },
     chunks: [baseChunk],
-    feedback: [{ id: "f1", retrievalQueryId: "rq", chunkId: "chunk_1", rating: "good", missedPath: null, notes: null, createdAt: "2024-01-01" }],
+    feedback: [
+      {
+        id: "f1",
+        retrievalQueryId: "rq",
+        chunkId: "chunk_1",
+        rating: "good",
+        missedPath: null,
+        notes: null,
+        createdAt: "2024-01-01",
+      },
+    ],
     feedbackChunkPaths: new Map([["chunk_1", "src/auth.ts"]]),
     missRecords: [],
     pathBoosts: new Map(),
@@ -111,9 +156,27 @@ test("retrieval-pipeline: confidence drops on bad feedback and rises on good", (
   });
   const rankedBad = rerankChunks({
     query: "auth",
-    analysis: { language: null, terms: ["auth"], pathHints: [], symbolHints: [], isLikelyDefinition: false, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: null,
+      terms: ["auth"],
+      pathHints: [],
+      symbolHints: [],
+      isLikelyDefinition: false,
+      isLikelyDebug: false,
+      notes: [],
+    },
     chunks: [baseChunk],
-    feedback: [{ id: "f2", retrievalQueryId: "rq", chunkId: "chunk_1", rating: "bad", missedPath: null, notes: null, createdAt: "2024-01-01" }],
+    feedback: [
+      {
+        id: "f2",
+        retrievalQueryId: "rq",
+        chunkId: "chunk_1",
+        rating: "bad",
+        missedPath: null,
+        notes: null,
+        createdAt: "2024-01-01",
+      },
+    ],
     feedbackChunkPaths: new Map([["chunk_1", "src/auth.ts"]]),
     missRecords: [],
     pathBoosts: new Map(),
@@ -136,7 +199,15 @@ test("retrieval-pipeline: token budget trims lower-ranked chunks and keeps top i
   ];
   const ranked = rerankChunks({
     query: "auth",
-    analysis: { language: null, terms: ["auth"], pathHints: [], symbolHints: [], isLikelyDefinition: false, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: null,
+      terms: ["auth"],
+      pathHints: [],
+      symbolHints: [],
+      isLikelyDefinition: false,
+      isLikelyDebug: false,
+      notes: [],
+    },
     chunks,
     feedback: [],
     feedbackChunkPaths: new Map(),
@@ -148,7 +219,11 @@ test("retrieval-pipeline: token budget trims lower-ranked chunks and keeps top i
     priorSessionPaths: [],
     depth: "standard",
   });
-  const { selected, dropped, usedTokens } = selectTopByTokenBudget({ ranked, budgetTokens: 250, depth: "standard" });
+  const { selected, dropped, usedTokens } = selectTopByTokenBudget({
+    ranked,
+    budgetTokens: 250,
+    depth: "standard",
+  });
   assert.equal(selected.length, 1);
   assert.equal(dropped.length, 2);
   assert.equal(selected[0].chunk.id, "a");
@@ -182,11 +257,38 @@ test("retrieval-pipeline: low-confidence retrieval records a miss", () => {
 test("retrieval-pipeline: buildFeedbackBoosts applies weights and bad chunk ids", () => {
   const { goodPaths, badChunkIds, missedPaths } = buildFeedbackBoosts(
     [
-      { id: "f1", retrievalQueryId: "rq", chunkId: "c1", rating: "good", missedPath: null, notes: null, createdAt: "2024-01-01" },
-      { id: "f2", retrievalQueryId: "rq", chunkId: "c2", rating: "bad", missedPath: null, notes: null, createdAt: "2024-01-01" },
-      { id: "f3", retrievalQueryId: "rq", chunkId: null, rating: "missed", missedPath: "src/missing.ts", notes: null, createdAt: "2024-01-01" },
+      {
+        id: "f1",
+        retrievalQueryId: "rq",
+        chunkId: "c1",
+        rating: "good",
+        missedPath: null,
+        notes: null,
+        createdAt: "2024-01-01",
+      },
+      {
+        id: "f2",
+        retrievalQueryId: "rq",
+        chunkId: "c2",
+        rating: "bad",
+        missedPath: null,
+        notes: null,
+        createdAt: "2024-01-01",
+      },
+      {
+        id: "f3",
+        retrievalQueryId: "rq",
+        chunkId: null,
+        rating: "missed",
+        missedPath: "src/missing.ts",
+        notes: null,
+        createdAt: "2024-01-01",
+      },
     ],
-    new Map([["c1", "src/auth.ts"], ["c2", "src/db.ts"]]),
+    new Map([
+      ["c1", "src/auth.ts"],
+      ["c2", "src/db.ts"],
+    ])
   );
   assert.equal(goodPaths.get("src/auth.ts"), 1);
   assert.ok(badChunkIds.has("c2"));
@@ -197,7 +299,7 @@ test("retrieval-pipeline: applyFeedbackBoosts combines miss and good signals", (
   const out = applyFeedbackBoosts(
     { ...baseChunk, path: "src/auth.ts" },
     { goodPaths: new Map([["src/auth.ts", 2]]), badChunkIds: new Set(), missedPaths: new Map() },
-    [],
+    []
   );
   assert.ok(out.applied.includes("good"));
   assert.ok(out.score > 0);
@@ -272,6 +374,6 @@ test("retrieval-pipeline: pathBoosts re-rank chunks when feedback is sparse", ()
   const betaScore = betaBoosted.finalScore;
   assert.ok(
     alphaScore > betaScore,
-    `alpha (${alphaScore}) should outrank beta (${betaScore}) after pathBoosts`,
+    `alpha (${alphaScore}) should outrank beta (${betaScore}) after pathBoosts`
   );
 });

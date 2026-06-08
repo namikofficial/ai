@@ -14,7 +14,15 @@ import type {
   RetrievalResultRecord,
   RetrievalSelectedContextRecord,
 } from "../../../shared/src/index.ts";
-import { asNumber, asString, asStringOrNull, now, newId, safeParseJson, safeParseJsonArray } from "./_shared.ts";
+import {
+  asNumber,
+  asString,
+  asStringOrNull,
+  newId,
+  now,
+  safeParseJson,
+  safeParseJsonArray,
+} from "./_shared.ts";
 
 interface RetrievalQueryRow {
   id: string;
@@ -241,7 +249,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
         `INSERT INTO retrieval_queries (
           id, session_id, task_id, project_id, original_query, intent, mode, depth,
           rewritten_query, analysis_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId ?? null,
@@ -253,7 +261,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
         input.depth,
         input.rewrittenQuery ?? null,
         JSON.stringify(input.analysis),
-        ts,
+        ts
       );
       return {
         id,
@@ -270,21 +278,30 @@ export function createRetrievalRepo(db: DatabaseSync) {
       };
     },
     updateRewrittenQuery(queryId: string, rewrittenQuery: string): void {
-      db.prepare("UPDATE retrieval_queries SET rewritten_query = ? WHERE id = ?").run(rewrittenQuery, queryId);
+      db.prepare("UPDATE retrieval_queries SET rewritten_query = ? WHERE id = ?").run(
+        rewrittenQuery,
+        queryId
+      );
     },
     getQuery(id: string): RetrievalQueryRecord | null {
-      const row = db.prepare("SELECT * FROM retrieval_queries WHERE id = ? LIMIT 1").get(id) as RetrievalQueryRow | undefined;
+      const row = db.prepare("SELECT * FROM retrieval_queries WHERE id = ? LIMIT 1").get(id) as
+        | RetrievalQueryRow
+        | undefined;
       return row ? rowToQuery(row) : null;
     },
     listQueriesForSession(sessionId: string, limit = 50): RetrievalQueryRecord[] {
       const rows = db
-        .prepare("SELECT * FROM retrieval_queries WHERE session_id = ? ORDER BY created_at ASC LIMIT ?")
+        .prepare(
+          "SELECT * FROM retrieval_queries WHERE session_id = ? ORDER BY created_at ASC LIMIT ?"
+        )
         .all(sessionId, limit) as RetrievalQueryRow[];
       return rows.map(rowToQuery);
     },
     listQueriesForProject(projectId: string, limit = 50): RetrievalQueryRecord[] {
       const rows = db
-        .prepare("SELECT * FROM retrieval_queries WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
+        .prepare(
+          "SELECT * FROM retrieval_queries WHERE project_id = ? ORDER BY created_at DESC LIMIT ?"
+        )
         .all(projectId, limit) as RetrievalQueryRow[];
       return rows.map(rowToQuery);
     },
@@ -302,7 +319,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
         `INSERT INTO retrieval_rewrites (
           id, retrieval_query_id, variant, terms_json, path_hints_json,
           symbol_hints_json, score, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.retrievalQueryId,
@@ -311,7 +328,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
         JSON.stringify(input.pathHints),
         JSON.stringify(input.symbolHints),
         input.score,
-        ts,
+        ts
       );
       return {
         id,
@@ -326,28 +343,33 @@ export function createRetrievalRepo(db: DatabaseSync) {
     },
     listRewrites(retrievalQueryId: string): QueryRewriteRecord[] {
       const rows = db
-        .prepare("SELECT * FROM retrieval_rewrites WHERE retrieval_query_id = ? ORDER BY score DESC, created_at ASC")
+        .prepare(
+          "SELECT * FROM retrieval_rewrites WHERE retrieval_query_id = ? ORDER BY score DESC, created_at ASC"
+        )
         .all(retrievalQueryId) as RetrievalRewriteRow[];
       return rows.map(rowToRewrite);
     },
-    recordResults(queryId: string, results: Array<{
-      chunkId: string;
-      path: string;
-      startLine: number;
-      endLine: number;
-      source: RetrievalResultRecord["source"];
-      baseScore: number;
-      rerankScore?: number;
-      finalScore: number;
-      included?: boolean;
-      reason?: string | null;
-    }>): RetrievalResultRecord[] {
+    recordResults(
+      queryId: string,
+      results: Array<{
+        chunkId: string;
+        path: string;
+        startLine: number;
+        endLine: number;
+        source: RetrievalResultRecord["source"];
+        baseScore: number;
+        rerankScore?: number;
+        finalScore: number;
+        included?: boolean;
+        reason?: string | null;
+      }>
+    ): RetrievalResultRecord[] {
       const ts = now();
       const insert = db.prepare(
         `INSERT INTO retrieval_results (
           id, retrieval_query_id, chunk_id, path, start_line, end_line, source,
           base_score, rerank_score, final_score, included, reason, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       const recorded: RetrievalResultRecord[] = [];
       for (const r of results) {
@@ -365,7 +387,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
           r.finalScore,
           r.included === false ? 0 : 1,
           r.reason ?? null,
-          ts,
+          ts
         );
         recorded.push({
           id,
@@ -387,21 +409,26 @@ export function createRetrievalRepo(db: DatabaseSync) {
     },
     listResults(queryId: string, limit = 200): RetrievalResultRecord[] {
       const rows = db
-        .prepare("SELECT * FROM retrieval_results WHERE retrieval_query_id = ? ORDER BY final_score DESC LIMIT ?")
+        .prepare(
+          "SELECT * FROM retrieval_results WHERE retrieval_query_id = ? ORDER BY final_score DESC LIMIT ?"
+        )
         .all(queryId, limit) as RetrievalResultRow[];
       return rows.map(rowToResult);
     },
-    recordSelectedContext(queryId: string, items: Array<{
-      chunkId: string;
-      rank: number;
-      tokenCount: number;
-      excerpt: string;
-    }>): RetrievalSelectedContextRecord[] {
+    recordSelectedContext(
+      queryId: string,
+      items: Array<{
+        chunkId: string;
+        rank: number;
+        tokenCount: number;
+        excerpt: string;
+      }>
+    ): RetrievalSelectedContextRecord[] {
       const ts = now();
       const insert = db.prepare(
         `INSERT INTO retrieval_selected_context (
           id, retrieval_query_id, chunk_id, rank, token_count, excerpt, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`
       );
       const recorded: RetrievalSelectedContextRecord[] = [];
       for (const item of items) {
@@ -427,7 +454,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
            JOIN rag_chunks r ON r.id = c.chunk_id
            JOIN rag_documents d ON d.id = r.document_id
            WHERE c.retrieval_query_id = ?
-           ORDER BY c.rank ASC`,
+           ORDER BY c.rank ASC`
         )
         .all(queryId) as RetrievalSelectedContextRow[];
       return rows.map(rowToSelectedContext);
@@ -446,7 +473,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
         db.prepare(
           `INSERT INTO retrieval_feedback (
             id, retrieval_query_id, chunk_id, rating, missed_path, notes, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)`
         ).run(
           id,
           input.retrievalQueryId,
@@ -454,7 +481,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
           input.rating,
           input.missedPath ?? null,
           input.notes ?? null,
-          ts,
+          ts
         );
         const queryRow = db
           .prepare("SELECT project_id FROM retrieval_queries WHERE id = ?")
@@ -464,7 +491,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
         if (input.chunkId) {
           const chunkRow = db
             .prepare(
-              "SELECT d.path AS path FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.id = ?",
+              "SELECT d.path AS path FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.id = ?"
             )
             .get(input.chunkId) as { path: string | null } | undefined;
           path = chunkRow?.path ?? null;
@@ -476,7 +503,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
           db.prepare(
             `INSERT INTO retrieval_path_feedback (
               id, project_id, retrieval_query_id, path, rating, weight, notes, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
           ).run(
             newId("rpf"),
             projectId,
@@ -485,7 +512,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
             input.rating,
             weight,
             input.notes ?? null,
-            ts,
+            ts
           );
           const existingRow = db
             .prepare("SELECT weight FROM chunk_path_boosts WHERE project_id = ? AND path = ?")
@@ -494,13 +521,13 @@ export function createRetrievalRepo(db: DatabaseSync) {
           const nextWeight = Math.max(0, Math.min(1, previousWeight * 0.7 + weight * 0.3));
           if (existingRow) {
             db.prepare(
-              "UPDATE chunk_path_boosts SET weight = ?, reason = ?, updated_at = ? WHERE project_id = ? AND path = ?",
+              "UPDATE chunk_path_boosts SET weight = ?, reason = ?, updated_at = ? WHERE project_id = ? AND path = ?"
             ).run(nextWeight, `feedback:${input.rating}`, ts, projectId, path);
           } else {
             db.prepare(
               `INSERT INTO chunk_path_boosts (
                 id, project_id, path, weight, source, reason, created_at, updated_at
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
             ).run(
               newId("cpb"),
               projectId,
@@ -509,7 +536,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
               "feedback",
               `feedback:${input.rating}`,
               ts,
-              ts,
+              ts
             );
           }
         }
@@ -530,7 +557,9 @@ export function createRetrievalRepo(db: DatabaseSync) {
     },
     listFeedback(queryId: string, limit = 50): RetrievalFeedbackRecord[] {
       const rows = db
-        .prepare("SELECT * FROM retrieval_feedback WHERE retrieval_query_id = ? ORDER BY created_at DESC LIMIT ?")
+        .prepare(
+          "SELECT * FROM retrieval_feedback WHERE retrieval_query_id = ? ORDER BY created_at DESC LIMIT ?"
+        )
         .all(queryId, limit) as RetrievalFeedbackRow[];
       return rows.map(rowToFeedback);
     },
@@ -545,14 +574,14 @@ export function createRetrievalRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO retrieval_misses (
           id, retrieval_query_id, missed_path, confidence, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.retrievalQueryId,
         input.missedPath,
         input.confidence,
         input.notes ?? null,
-        ts,
+        ts
       );
       return {
         id,
@@ -565,14 +594,16 @@ export function createRetrievalRepo(db: DatabaseSync) {
     },
     listMisses(queryId: string): RetrievalMissRecord[] {
       const rows = db
-        .prepare("SELECT * FROM retrieval_misses WHERE retrieval_query_id = ? ORDER BY confidence ASC")
+        .prepare(
+          "SELECT * FROM retrieval_misses WHERE retrieval_query_id = ? ORDER BY confidence ASC"
+        )
         .all(queryId) as RetrievalMissRow[];
       return rows.map(rowToMiss);
     },
     listPathFeedback(projectId: string, limit = 100): RetrievalPathFeedbackRecord[] {
       const rows = db
         .prepare(
-          "SELECT * FROM retrieval_path_feedback WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+          "SELECT * FROM retrieval_path_feedback WHERE project_id = ? ORDER BY created_at DESC LIMIT ?"
         )
         .all(projectId, limit) as RetrievalPathFeedbackRow[];
       return rows.map(rowToPathFeedback);
@@ -580,7 +611,7 @@ export function createRetrievalRepo(db: DatabaseSync) {
     listPathBoosts(projectId: string, limit = 100): ChunkPathBoostRecord[] {
       const rows = db
         .prepare(
-          "SELECT * FROM chunk_path_boosts WHERE project_id = ? ORDER BY weight DESC LIMIT ?",
+          "SELECT * FROM chunk_path_boosts WHERE project_id = ? ORDER BY weight DESC LIMIT ?"
         )
         .all(projectId, limit) as ChunkPathBoostRow[];
       return rows.map(rowToPathBoost);

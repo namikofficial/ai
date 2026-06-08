@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("creates a durable review record", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-review-"));
@@ -27,7 +27,11 @@ test("creates a durable review record", async () => {
   assert.ok(review.scopeCreep.includes("src/session.ts"));
   assert.ok(store.listReviews(project.id, 10).length > 0);
   assert.equal(store.getReview(review.id)?.title, "auth cleanup review");
-  assert.ok(store.listProjectLessons(project.id, 10).some((lesson) => lesson.title === "auth cleanup review"));
+  assert.ok(
+    store
+      .listProjectLessons(project.id, 10)
+      .some((lesson) => lesson.title === "auth cleanup review")
+  );
   assert.ok(store.listJobs(10).some((job) => job.type === "review.reflect"));
 
   store.db.close();

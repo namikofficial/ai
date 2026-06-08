@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
 import { processNextJob } from "../apps/worker/src/worker.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("worker session.reflect creates memory candidates from conversation", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-worker-reflect-"));
@@ -48,19 +48,28 @@ test("worker session.reflect creates memory candidates from conversation", async
   assert.ok(candidates.length >= 1, "reflection should produce at least one memory candidate");
   assert.ok(
     candidates.some((c) => /pure function|side effect/i.test(c.body)),
-    "candidate body should mention the user preference",
+    "candidate body should mention the user preference"
   );
 
-  const reflectedEvent = store.listEvents(session.id, 50).find(
-    (e) => e.type === "session.reflected",
-  );
+  const reflectedEvent = store
+    .listEvents(session.id, 50)
+    .find((e) => e.type === "session.reflected");
   assert.ok(reflectedEvent, "session.reflected event should be appended");
-  const reflectedPayload = reflectedEvent!.payload as { compiledId?: string; modelCallId?: string | null };
+  const reflectedPayload = reflectedEvent!.payload as {
+    compiledId?: string;
+    modelCallId?: string | null;
+  };
   assert.ok(reflectedPayload.compiledId);
   assert.ok(reflectedPayload.modelCallId);
 
-  const reflectionCalls = store.models.listCalls(session.id, 100).filter((call) => call.role === "reflection");
-  assert.equal(reflectionCalls.length, 1, "session.reflect should record exactly one runtime-backed reflection model call");
+  const reflectionCalls = store.models
+    .listCalls(session.id, 100)
+    .filter((call) => call.role === "reflection");
+  assert.equal(
+    reflectionCalls.length,
+    1,
+    "session.reflect should record exactly one runtime-backed reflection model call"
+  );
   const reflectionRequest = reflectionCalls[0]!.request as {
     metadata?: {
       compiledPrompt?: { mode?: string; messages?: Array<{ role: string; content: string }> };
@@ -216,7 +225,15 @@ test("worker session.reflect is atomic: a mid-flight failure rolls back all cand
     mode: "local",
     depth: "standard",
     intent: "lookup",
-    analysis: { language: "ts", terms: ["alpha"], pathHints: ["src/alpha"], symbolHints: ["alpha"], isLikelyDefinition: true, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: "ts",
+      terms: ["alpha"],
+      pathHints: ["src/alpha"],
+      symbolHints: ["alpha"],
+      isLikelyDefinition: true,
+      isLikelyDebug: false,
+      notes: [],
+    },
   });
   store.retrieval.recordMiss({
     retrievalQueryId: query.id,
@@ -236,43 +253,48 @@ test("worker session.reflect is atomic: a mid-flight failure rolls back all cand
 
   const originalCreateCandidate = store.memory.createCandidate.bind(store.memory);
   let createCandidateCalls = 0;
-  (store.memory as unknown as { createCandidate: typeof originalCreateCandidate }).createCandidate = (
-    ...args: Parameters<typeof originalCreateCandidate>
-  ) => {
+  store.memory.createCandidate = ((...args: Parameters<typeof originalCreateCandidate>) => {
     createCandidateCalls += 1;
     if (createCandidateCalls > 1) {
       throw new Error("simulated mid-flight failure");
     }
     return originalCreateCandidate(...args);
-  };
+  }) as typeof store.memory.createCandidate;
 
   try {
     await processNextJob(store);
   } finally {
-    (store.memory as unknown as { createCandidate: typeof originalCreateCandidate }).createCandidate = originalCreateCandidate;
+    store.memory.createCandidate = originalCreateCandidate;
   }
   assert.ok(createCandidateCalls > 1, "the override should have been called more than once");
 
   const failedJob = store.listJobs(10).find((entry) => entry.type === "session.reflect");
   assert.ok(failedJob, "session.reflect job should still be tracked");
-  assert.equal(failedJob!.status, "failed", "job should be marked failed after the simulated mid-flight failure");
+  assert.equal(
+    failedJob!.status,
+    "failed",
+    "job should be marked failed after the simulated mid-flight failure"
+  );
   const failurePayload = JSON.parse(failedJob!.payloadJson) as { error?: string };
-  assert.ok(failurePayload.error?.includes("simulated mid-flight failure"), `job payload should include the failure reason (got: ${failurePayload.error})`);
+  assert.ok(
+    failurePayload.error?.includes("simulated mid-flight failure"),
+    `job payload should include the failure reason (got: ${failurePayload.error})`
+  );
 
   assert.equal(
     store.memory.listCandidates("pending", null, 100).length,
     beforeCandidates,
-    "memory candidates should have been rolled back",
+    "memory candidates should have been rolled back"
   );
   assert.equal(
     store.skills.listCandidates("pending", 100).length,
     beforeSkills,
-    "skill candidates should have been rolled back",
+    "skill candidates should have been rolled back"
   );
   assert.equal(
     store.memory.listFacts(project.id, 100).length,
     beforeFacts,
-    "facts should have been rolled back",
+    "facts should have been rolled back"
   );
 
   store.db.close();
@@ -351,7 +373,9 @@ test("worker session.reflect parses valid model JSON and records parseStatus", a
 
   try {
     assert.equal(await processNextJob(store), true);
-    const reflectedEvent = store.listEvents(session.id, 50).find((e) => e.type === "session.reflected");
+    const reflectedEvent = store
+      .listEvents(session.id, 50)
+      .find((e) => e.type === "session.reflected");
     assert.ok(reflectedEvent);
     assert.equal((reflectedEvent!.payload as { parseStatus?: string }).parseStatus, "parsed");
     const candidates = store.memory.listCandidates("pending", project.id, 20);

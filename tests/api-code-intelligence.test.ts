@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("api: code intelligence endpoints", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-api-code-intel-"));
@@ -17,7 +17,7 @@ test("api: code intelligence endpoints", async () => {
       codeIntelligence: {
         enabled: true,
       },
-    }),
+    })
   );
   await writeFile(join(repo, "src", "auth.ts"), "export function login() {}");
 
@@ -46,7 +46,7 @@ test("api: code intelligence endpoints", async () => {
       url: `/projects/${project.id}/symbols`,
     });
     const body1 = JSON.parse(res1.body);
-    if (res1.statusCode !== 200 || !body1.data) console.error('res1 error:', res1.body);
+    if (res1.statusCode !== 200 || !body1.data) console.error("res1 error:", res1.body);
     assert.equal(res1.statusCode, 200);
     assert.equal(body1.data.symbols.length, 0);
 
@@ -109,7 +109,6 @@ test("api: code intelligence endpoints", async () => {
     // 8. Count helpers return 0 for unknown project
     assert.equal(store.codeIntelligence.countSymbols("nonexistent"), 0);
     assert.equal(store.codeIntelligence.countEdges("nonexistent"), 0);
-
   } finally {
     await handle.close();
     store.db.close();

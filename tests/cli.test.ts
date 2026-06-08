@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { type ChildProcessLike, spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { spawn, type ChildProcessLike } from "node:child_process";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
 import { resolveConfig } from "../packages/config/src/index.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 const cliCommand = "node";
 const cliArgs = ["--experimental-strip-types", "cli/ai/src/main.ts"];
@@ -27,10 +27,12 @@ function decodeChunk(chunk: string | Uint8Array): string {
 
 function attachDataListener(
   stream: ChildProcessLike["stdout"],
-  handler: (chunk: string | Uint8Array) => void,
+  handler: (chunk: string | Uint8Array) => void
 ): void {
   if (!stream) return;
-  const on = (stream as { on: (event: "data", listener: (chunk: string | Uint8Array) => void) => void }).on.bind(stream);
+  const on = (
+    stream as { on: (event: "data", listener: (chunk: string | Uint8Array) => void) => void }
+  ).on.bind(stream);
   on("data", handler);
 }
 
@@ -68,8 +70,14 @@ test("ai retrieval explain runs the full pipeline and prints ranked/selected/dro
   const workspace = await mkdtemp(join(tmpdir(), "ai-cli-"));
   const repo = join(workspace, "repo");
   await mkdir(join(repo, "src"), { recursive: true });
-  await writeFile(join(repo, "src", "auth.ts"), "export function login(user: string) { return user; }\n");
-  await writeFile(join(repo, "src", "session.ts"), "export function getSession() { return null; }\n");
+  await writeFile(
+    join(repo, "src", "auth.ts"),
+    "export function login(user: string) { return user; }\n"
+  );
+  await writeFile(
+    join(repo, "src", "session.ts"),
+    "export function getSession() { return null; }\n"
+  );
 
   const dbPath = join(workspace, "ai.db");
   const runtimeDir = join(workspace, "runtime");
@@ -86,7 +94,7 @@ test("ai retrieval explain runs the full pipeline and prints ranked/selected/dro
       AI_DATABASE_PATH: dbPath,
       AI_RUNTIME_DIR: runtimeDir,
     },
-    ["retrieval", "explain", "how does login work", "--project", project.id, "--depth", "standard"],
+    ["retrieval", "explain", "how does login work", "--project", project.id, "--depth", "standard"]
   );
   assert.equal(explain.exitCode, 0, `retrieval explain failed: ${explain.stderr}`);
   const output = JSON.parse(explain.stdout) as {
@@ -116,15 +124,11 @@ test("ai project symbols and symbol inspect code intelligence rows", async () =>
       codeIntelligence: {
         enabled: true,
       },
-    }),
+    })
   );
   await writeFile(
     join(repo, "src", "auth.ts"),
-    [
-      "export function handleLogin() {",
-      "  return { ok: true };",
-      "}",
-    ].join("\n"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n")
   );
 
   const dbPath = join(workspace, "ai.db");
@@ -142,10 +146,13 @@ test("ai project symbols and symbol inspect code intelligence rows", async () =>
       AI_DATABASE_PATH: dbPath,
       AI_RUNTIME_DIR: runtimeDir,
     },
-    ["project", "symbols", project.id, "--query", "handleLogin"],
+    ["project", "symbols", project.id, "--query", "handleLogin"]
   );
   assert.equal(list.exitCode, 0, `project symbols failed: ${list.stderr}`);
-  const listOutput = JSON.parse(list.stdout) as { project: { id: string }; symbols: Array<{ id: string }> };
+  const listOutput = JSON.parse(list.stdout) as {
+    project: { id: string };
+    symbols: Array<{ id: string }>;
+  };
   assert.equal(listOutput.project.id, project.id);
   assert.ok(listOutput.symbols.some((symbol) => symbol.id === symbolId));
 
@@ -154,7 +161,7 @@ test("ai project symbols and symbol inspect code intelligence rows", async () =>
       AI_DATABASE_PATH: dbPath,
       AI_RUNTIME_DIR: runtimeDir,
     },
-    ["project", "symbol", symbolId],
+    ["project", "symbol", symbolId]
   );
   assert.equal(single.exitCode, 0, `project symbol failed: ${single.stderr}`);
   const singleOutput = JSON.parse(single.stdout) as {
@@ -179,7 +186,7 @@ test("ai models list and health run via direct store", async () => {
       AI_DATABASE_PATH: dbPath,
       AI_RUNTIME_DIR: runtimeDir,
     },
-    ["models", "list"],
+    ["models", "list"]
   );
   assert.equal(list.exitCode, 0, `models list failed: ${list.stderr}`);
   const listed = JSON.parse(list.stdout) as { providers: unknown[]; profiles: unknown[] };
@@ -191,7 +198,7 @@ test("ai models list and health run via direct store", async () => {
       AI_DATABASE_PATH: dbPath,
       AI_RUNTIME_DIR: runtimeDir,
     },
-    ["models", "health"],
+    ["models", "health"]
   );
   assert.equal(health.exitCode, 0, `models health failed: ${health.stderr}`);
   const healthOutput = JSON.parse(health.stdout) as { health: unknown[]; recentCalls: unknown[] };
@@ -211,7 +218,7 @@ test("ai trace timeline prints normalized session timeline json", async () => {
       "}",
       "",
       "export const authNote = 'auth is handled in the auth router';",
-    ].join("\n"),
+    ].join("\n")
   );
 
   const dbPath = join(workspace, "ai.db");
@@ -232,7 +239,7 @@ test("ai trace timeline prints normalized session timeline json", async () => {
       AI_DATABASE_PATH: dbPath,
       AI_RUNTIME_DIR: runtimeDir,
     },
-    ["trace", "timeline", ask.sessionId],
+    ["trace", "timeline", ask.sessionId]
   );
   assert.equal(trace.exitCode, 0, `trace timeline failed: ${trace.stderr}`);
   const output = JSON.parse(trace.stdout) as {
@@ -271,7 +278,7 @@ test("ai prompts list accepts split session and limit flags", async () => {
       AI_DATABASE_PATH: dbPath,
       AI_RUNTIME_DIR: runtimeDir,
     },
-    ["prompts", "list", "--session", ask.sessionId, "--limit", "5"],
+    ["prompts", "list", "--session", ask.sessionId, "--limit", "5"]
   );
   assert.equal(prompts.exitCode, 0, `prompts list failed: ${prompts.stderr}`);
   assert.match(prompts.stdout, /mode=/);

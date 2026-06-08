@@ -1,10 +1,12 @@
 export function isLikelyJsonOutput(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length === 0) return false;
-  return trimmed.startsWith("{") ||
+  return (
+    trimmed.startsWith("{") ||
     trimmed.startsWith("[") ||
     trimmed.startsWith("```json") ||
-    (trimmed.includes("{") && trimmed.includes("}"));
+    (trimmed.includes("{") && trimmed.includes("}"))
+  );
 }
 
 export function extractJsonFragment(text: string): string | null {

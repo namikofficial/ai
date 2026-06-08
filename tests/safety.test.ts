@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkCloudGuard, isCloudProviderKind, redactSecrets, checkPathPolicy, isCheckAllowed, isShellCommandSafe } from "../packages/safety/src/index.ts";
+import {
+  checkCloudGuard,
+  checkPathPolicy,
+  isCheckAllowed,
+  isCloudProviderKind,
+  isShellCommandSafe,
+  redactSecrets,
+} from "../packages/safety/src/index.ts";
 
 test("safety: checkCloudGuard blocks cloud provider when cloud disabled", () => {
   const blocked = checkCloudGuard({ cloudEnabled: false, providerKind: "cloud_openai_compat" });
@@ -22,7 +29,9 @@ test("safety: isCloudProviderKind detects cloud kinds", () => {
 });
 
 test("safety: redactSecrets redacts known secret patterns", () => {
-  const result = redactSecrets("aws key AKIAABCDEFGHIJKLMNOP and token sk-abcdefghijklmnopqrstuvwxyz1234567890");
+  const result = redactSecrets(
+    "aws key AKIAABCDEFGHIJKLMNOP and token sk-abcdefghijklmnopqrstuvwxyz1234567890"
+  );
   assert.equal(result.text.includes("[REDACTED:aws_access_key]"), true);
   assert.equal(result.text.includes("[REDACTED:openai_key]"), true);
   assert.equal(result.redactions.length >= 2, true);

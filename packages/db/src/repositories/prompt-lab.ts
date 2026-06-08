@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { PromptLabResultRecord, PromptLabRunRecord } from "../../../shared/src/index.ts";
-import { asNumber, asString, asStringOrNull, now, newId, safeParseJsonArray } from "./_shared.ts";
+import { asNumber, asString, asStringOrNull, newId, now, safeParseJsonArray } from "./_shared.ts";
 
 interface PromptLabRunRow {
   id: string;
@@ -65,17 +65,23 @@ function rowToResult(row: PromptLabResultRow): PromptLabResultRecord {
 export function createPromptLabRepo(db: DatabaseSync) {
   return {
     listRuns(limit = 100): PromptLabRunRecord[] {
-      const rows = db.prepare("SELECT * FROM prompt_lab_runs ORDER BY created_at DESC LIMIT ?").all(limit) as PromptLabRunRow[];
+      const rows = db
+        .prepare("SELECT * FROM prompt_lab_runs ORDER BY created_at DESC LIMIT ?")
+        .all(limit) as PromptLabRunRow[];
       return rows.map(rowToRun);
     },
 
     getRun(runId: string): PromptLabRunRecord | null {
-      const row = db.prepare("SELECT * FROM prompt_lab_runs WHERE id = ? LIMIT 1").get(runId) as PromptLabRunRow | undefined;
+      const row = db.prepare("SELECT * FROM prompt_lab_runs WHERE id = ? LIMIT 1").get(runId) as
+        | PromptLabRunRow
+        | undefined;
       return row ? rowToRun(row) : null;
     },
 
     listResults(runId: string): PromptLabResultRecord[] {
-      const rows = db.prepare("SELECT * FROM prompt_lab_results WHERE run_id = ? ORDER BY created_at ASC").all(runId) as PromptLabResultRow[];
+      const rows = db
+        .prepare("SELECT * FROM prompt_lab_results WHERE run_id = ? ORDER BY created_at ASC")
+        .all(runId) as PromptLabResultRow[];
       return rows.map(rowToResult);
     },
 
@@ -95,8 +101,18 @@ export function createPromptLabRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO prompt_lab_runs (
           id, session_id, project_id, prompt_id, mode, selected_profiles_json, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(runId, input.sessionId ?? null, input.projectId, input.promptId, input.mode, JSON.stringify(input.selectedProfiles), input.notes ?? null, ts, ts);
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        runId,
+        input.sessionId ?? null,
+        input.projectId,
+        input.promptId,
+        input.mode,
+        JSON.stringify(input.selectedProfiles),
+        input.notes ?? null,
+        ts,
+        ts
+      );
       return {
         id: runId,
         sessionId: input.sessionId ?? null,
@@ -131,7 +147,7 @@ export function createPromptLabRepo(db: DatabaseSync) {
         `INSERT INTO prompt_lab_results (
           id, run_id, profile_id, profile_name, model_name, status,
           prompt_tokens, completion_tokens, latency_ms, output_text, error, approx_cost, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         resultId,
         input.runId,
@@ -145,7 +161,7 @@ export function createPromptLabRepo(db: DatabaseSync) {
         input.outputText ?? null,
         input.error ?? null,
         input.approxCost ?? null,
-        ts,
+        ts
       );
       return {
         id: resultId,

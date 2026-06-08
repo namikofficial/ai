@@ -125,8 +125,13 @@ export function parseDevRequest(value: unknown): DevRequest {
         ? "manual"
         : oneOf(value.approvalPolicy, APPROVAL_POLICIES, "approvalPolicy"),
     approveEdits: value.approveEdits === true,
-    checks: Array.isArray(value.checks) ? (value.checks.filter((item) => typeof item === "string") as string[]) : undefined,
-    maxRepairs: typeof value.maxRepairs === "number" && Number.isFinite(value.maxRepairs) ? Math.max(0, Math.floor(value.maxRepairs)) : undefined,
+    checks: Array.isArray(value.checks)
+      ? (value.checks.filter((item) => typeof item === "string") as string[])
+      : undefined,
+    maxRepairs:
+      typeof value.maxRepairs === "number" && Number.isFinite(value.maxRepairs)
+        ? Math.max(0, Math.floor(value.maxRepairs))
+        : undefined,
     editorProfileId: optionalString(value.editorProfileId),
     repairProfileId: optionalString(value.repairProfileId),
     plannerProfileId: optionalString(value.plannerProfileId),
@@ -138,9 +143,12 @@ export function parseDevEdit(value: unknown): DevEdit {
   const path = requiredString(value.path, "path");
   const reason = requiredString(value.reason, "reason");
   const newText = typeof value.newText === "string" ? value.newText : "";
-  const changeType = value.changeType == null
-    ? (newText.length > 0 && (typeof value.oldText !== "string" || value.oldText.length === 0) ? "create" : "replace")
-    : oneOf(value.changeType, EDIT_CHANGE_TYPES, "changeType");
+  const changeType =
+    value.changeType == null
+      ? newText.length > 0 && (typeof value.oldText !== "string" || value.oldText.length === 0)
+        ? "create"
+        : "replace"
+      : oneOf(value.changeType, EDIT_CHANGE_TYPES, "changeType");
   const edit: DevEdit = {
     path,
     reason,
@@ -157,11 +165,14 @@ export function parseDevPlan(value: unknown): DevPlan {
   if (!isObject(value)) throw new TypeError("dev plan must be an object");
   const summary = typeof value.summary === "string" ? value.summary : "";
   const edits = Array.isArray(value.edits) ? value.edits.map(parseDevEdit) : [];
-  const checks = Array.isArray(value.checks) ? (value.checks.filter((item) => typeof item === "string") as string[]) : [];
+  const checks = Array.isArray(value.checks)
+    ? (value.checks.filter((item) => typeof item === "string") as string[])
+    : [];
   const risk = value.risk == null ? "low" : oneOf(value.risk, RISK_LEVELS, "risk");
   const plan: DevPlan = { summary, edits, checks, risk };
   if (typeof value.notes === "string") plan.notes = value.notes;
-  if (typeof value.missingContextReason === "string") plan.missingContextReason = value.missingContextReason;
+  if (typeof value.missingContextReason === "string")
+    plan.missingContextReason = value.missingContextReason;
   return plan;
 }
 
@@ -174,9 +185,10 @@ export function parseDevCheckResult(value: unknown): DevCheckResult {
       : oneOf(
           value.status,
           ["queued", "running", "completed", "failed", "blocked"] as const,
-          "status",
+          "status"
         );
-  const startedAt = typeof value.startedAt === "string" ? value.startedAt : new Date(0).toISOString();
+  const startedAt =
+    typeof value.startedAt === "string" ? value.startedAt : new Date(0).toISOString();
   const finishedAt = typeof value.finishedAt === "string" ? value.finishedAt : startedAt;
   return {
     name,
@@ -233,10 +245,16 @@ export function parseDevRun(value: unknown): DevRun {
     summary: typeof value.summary === "string" ? value.summary : "",
     diffSummary: typeof value.diffSummary === "string" ? value.diffSummary : "",
     diffText: typeof value.diffText === "string" ? value.diffText : "",
-    filesEdited: Array.isArray(value.filesEdited) ? value.filesEdited.filter((f): f is string => typeof f === "string") : [],
-    filesCreated: Array.isArray(value.filesCreated) ? value.filesCreated.filter((f): f is string => typeof f === "string") : [],
+    filesEdited: Array.isArray(value.filesEdited)
+      ? value.filesEdited.filter((f): f is string => typeof f === "string")
+      : [],
+    filesCreated: Array.isArray(value.filesCreated)
+      ? value.filesCreated.filter((f): f is string => typeof f === "string")
+      : [],
     appliedAt: typeof value.appliedAt === "string" ? value.appliedAt : null,
-    appliedFiles: Array.isArray(value.appliedFiles) ? value.appliedFiles.filter((f): f is string => typeof f === "string") : [],
+    appliedFiles: Array.isArray(value.appliedFiles)
+      ? value.appliedFiles.filter((f): f is string => typeof f === "string")
+      : [],
     createdAt: typeof value.createdAt === "string" ? value.createdAt : new Date().toISOString(),
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : new Date().toISOString(),
     finishedAt: typeof value.finishedAt === "string" ? value.finishedAt : null,
@@ -269,11 +287,14 @@ export function parseDevResult(value: unknown): DevResult {
     summary: typeof value.summary === "string" ? value.summary : "",
     filesEdited: isStringArray(value.filesEdited) ? value.filesEdited : [],
     filesCreated: isStringArray(value.filesCreated) ? value.filesCreated : [],
-    checks: Array.isArray(value.checks) ? (value.checks.map(parseDevCheckResult) as DevCheckResult[]) : [],
+    checks: Array.isArray(value.checks)
+      ? (value.checks.map(parseDevCheckResult) as DevCheckResult[])
+      : [],
     diffSummary: typeof value.diffSummary === "string" ? value.diffSummary : "",
     diff: typeof value.diff === "string" ? value.diff : "",
     applied: value.applied === true,
-    missingContextReason: typeof value.missingContextReason === "string" ? value.missingContextReason : null,
+    missingContextReason:
+      typeof value.missingContextReason === "string" ? value.missingContextReason : null,
     errorMessage: typeof value.errorMessage === "string" ? value.errorMessage : null,
     workspacePath: typeof value.workspacePath === "string" ? value.workspacePath : null,
     repairAttempts: typeof value.repairAttempts === "number" ? value.repairAttempts : 0,
@@ -291,7 +312,10 @@ export function parseExecutionEvent(value: unknown): ExecutionEvent {
     sessionId: requiredString(value.sessionId, "sessionId"),
     projectId: requiredString(value.projectId, "projectId"),
     kind: parseExecutionEventKind(value.kind),
-    level: value.level === "warn" || value.level === "error" || value.level === "debug" ? value.level : "info",
+    level:
+      value.level === "warn" || value.level === "error" || value.level === "debug"
+        ? value.level
+        : "info",
     ts: typeof value.ts === "string" ? value.ts : new Date().toISOString(),
     message: typeof value.message === "string" ? value.message : "",
     data: isObject(value.data) ? value.data : {},

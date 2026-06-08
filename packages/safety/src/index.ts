@@ -2,7 +2,15 @@ import * as path from "node:path";
 
 export interface CloudGuardInput {
   cloudEnabled: boolean;
-  providerKind: "heuristic" | "openai_compat" | "llama_cpp" | "mock" | "cloud_openai_compat" | "local_openai_compat" | "fastembed" | string;
+  providerKind:
+    | "heuristic"
+    | "openai_compat"
+    | "llama_cpp"
+    | "mock"
+    | "cloud_openai_compat"
+    | "local_openai_compat"
+    | "fastembed"
+    | string;
   profileLocalOnly?: boolean;
 }
 
@@ -27,11 +35,18 @@ const SECRET_PATTERNS: Array<{ name: string; pattern: RegExp }> = [
   { name: "github_token", pattern: /gh[pousr]_[A-Za-z0-9]{20,}/g },
   { name: "openai_key", pattern: /sk-[A-Za-z0-9]{20,}/g },
   { name: "anthropic_key", pattern: /sk-ant-[A-Za-z0-9_-]{20,}/g },
-  { name: "google_api_key", pattern: /AIza[0-9A-Za-z_\-]{30,}/g },
+  { name: "google_api_key", pattern: /AIza[0-9A-Za-z_-]{30,}/g },
   { name: "slack_token", pattern: /xox[abprs]-[A-Za-z0-9-]{20,}/g },
-  { name: "jwt", pattern: /eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}/g },
-  { name: "private_key", pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g },
-  { name: "bearer_token", pattern: /(?:bearer|authorization)\s*[:=]\s*["']?[A-Za-z0-9._\-]{20,}["']?/gi },
+  { name: "jwt", pattern: /eyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}/g },
+  {
+    name: "private_key",
+    pattern:
+      /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/g,
+  },
+  {
+    name: "bearer_token",
+    pattern: /(?:bearer|authorization)\s*[:=]\s*["']?[A-Za-z0-9._-]{20,}["']?/gi,
+  },
 ];
 
 export interface RedactionResult {
@@ -75,7 +90,11 @@ export function checkPathPolicy(input: PathPolicyInput): PathPolicyResult {
   const normalizedCandidate = path.normalize(candidate);
   const rel = path.relative(root, normalizedCandidate);
   if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    return { allowed: false, resolvedPath: normalizedCandidate, reason: "path escapes project root" };
+    return {
+      allowed: false,
+      resolvedPath: normalizedCandidate,
+      reason: "path escapes project root",
+    };
   }
   return { allowed: true, resolvedPath: normalizedCandidate, reason: "ok" };
 }

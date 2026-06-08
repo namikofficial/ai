@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAnswer, createModelRuntime, selectModelProfile } from "../packages/model-runtime/src/index.ts";
+import {
+  buildAnswer,
+  createModelRuntime,
+  selectModelProfile,
+} from "../packages/model-runtime/src/index.ts";
 
 test("model-runtime: selectModelProfile keeps the current heuristic routing", () => {
   assert.equal(selectModelProfile("cloud"), "ask-cloud-router");
@@ -17,7 +21,24 @@ test("model-runtime: selectModelProfile keeps the current heuristic routing", ()
 test("model-runtime: buildAnswer includes citations and confidence", () => {
   const answer = buildAnswer(
     "where is auth handled?",
-    { id: "proj_1", name: "demo", path: "/repo", repoUrl: null, branch: null, language: null, framework: null, status: "ready", lastIndexedAt: null, createdAt: "2024-01-01", updatedAt: "2024-01-01", fileCount: 1, chunkCount: 1, indexedFileCount: 1, dirty: false, health: "healthy" },
+    {
+      id: "proj_1",
+      name: "demo",
+      path: "/repo",
+      repoUrl: null,
+      branch: null,
+      language: null,
+      framework: null,
+      status: "ready",
+      lastIndexedAt: null,
+      createdAt: "2024-01-01",
+      updatedAt: "2024-01-01",
+      fileCount: 1,
+      chunkCount: 1,
+      indexedFileCount: 1,
+      dirty: false,
+      health: "healthy",
+    },
     [
       {
         id: "chunk_1",
@@ -33,7 +54,7 @@ test("model-runtime: buildAnswer includes citations and confidence", () => {
       },
     ],
     [{ path: "src/auth.ts", startLine: 1, endLine: 2, score: 9 }],
-    0.84,
+    0.84
   );
 
   assert.ok(/Confidence: 84%/.test(answer));
@@ -43,8 +64,22 @@ test("model-runtime: buildAnswer includes citations and confidence", () => {
 test("model-runtime: routes locally and blocks cloud when disabled", async () => {
   const runtime = createModelRuntime({
     providers: [
-      { id: "provider_local", kind: "local_openai_compat", displayName: "Local", baseUrl: "http://127.0.0.1:11434", apiKeyEnv: null, enabled: true },
-      { id: "provider_cloud", kind: "cloud_openai_compat", displayName: "Cloud", baseUrl: "http://127.0.0.1:11434", apiKeyEnv: null, enabled: true },
+      {
+        id: "provider_local",
+        kind: "local_openai_compat",
+        displayName: "Local",
+        baseUrl: "http://127.0.0.1:11434",
+        apiKeyEnv: null,
+        enabled: true,
+      },
+      {
+        id: "provider_cloud",
+        kind: "cloud_openai_compat",
+        displayName: "Cloud",
+        baseUrl: "http://127.0.0.1:11434",
+        apiKeyEnv: null,
+        enabled: true,
+      },
     ],
     profiles: [
       {
@@ -104,7 +139,14 @@ test("model-runtime: routes locally and blocks cloud when disabled", async () =>
 test("model-runtime: route scoring prefers deeper local profiles for larger context need", async () => {
   const runtime = createModelRuntime({
     providers: [
-      { id: "provider_local", kind: "heuristic", displayName: "Local", baseUrl: null, apiKeyEnv: null, enabled: true },
+      {
+        id: "provider_local",
+        kind: "heuristic",
+        displayName: "Local",
+        baseUrl: null,
+        apiKeyEnv: null,
+        enabled: true,
+      },
     ],
     profiles: [
       {

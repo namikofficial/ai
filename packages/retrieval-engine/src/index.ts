@@ -1,3 +1,4 @@
+import { redactSecrets } from "../../safety/src/index.ts";
 import type {
   MemoryEntryRecord,
   ProjectRuleRecord,
@@ -12,19 +13,14 @@ import type {
   RetrievalResultRecord,
   RetrievalSelectedContextRecord,
 } from "../../shared/src/index.ts";
-import { redactSecrets } from "../../safety/src/index.ts";
 
 export {
-  QdrantClient,
-  checkQdrantCollectionDimension,
-  embedQueryForQdrant,
-  ensureQdrantCollectionSync,
-  hashContent,
-  qdrantPointForChunk,
-  readQdrantRuntimeSettings,
-  searchQdrantChunksSync,
-  upsertQdrantChunksSync,
-} from "./qdrant.ts";
+  ftsSearch,
+  syncSearchIndexForFile,
+  tryEnableSearchIndex,
+} from "./fts.ts";
+export type { BuildRetrievalPipelineInputArgs, RetrievalPipelineSource } from "./pipeline.ts";
+export { buildRetrievalPipelineInput } from "./pipeline.ts";
 export type {
   QdrantClientOptions,
   QdrantDimensionState,
@@ -33,27 +29,80 @@ export type {
   QdrantRuntimeSettings,
   QueryEmbeddingInput,
 } from "./qdrant.ts";
-
 export {
-  ftsSearch,
-  syncSearchIndexForFile,
-  tryEnableSearchIndex,
-} from "./fts.ts";
-export { searchProjectChunks } from "./search.ts";
+  checkQdrantCollectionDimension,
+  embedQueryForQdrant,
+  ensureQdrantCollectionSync,
+  hashContent,
+  QdrantClient,
+  qdrantPointForChunk,
+  readQdrantRuntimeSettings,
+  searchQdrantChunksSync,
+  upsertQdrantChunksSync,
+} from "./qdrant.ts";
 export type { SearchProjectChunksInput } from "./search.ts";
-export { buildRetrievalPipelineInput } from "./pipeline.ts";
-export type { BuildRetrievalPipelineInputArgs, RetrievalPipelineSource } from "./pipeline.ts";
+export { searchProjectChunks } from "./search.ts";
 
 const DEFINITION_TOKENS = new Set(["what", "where", "how", "why", "when", "which", "who"]);
-const DEBUG_TOKENS = new Set(["fix", "bug", "error", "failing", "regression", "crash", "trace", "stack", "panic", "exception"]);
+const DEBUG_TOKENS = new Set([
+  "fix",
+  "bug",
+  "error",
+  "failing",
+  "regression",
+  "crash",
+  "trace",
+  "stack",
+  "panic",
+  "exception",
+]);
 const SYMBOL_TOKEN = /[A-Za-z_][A-Za-z0-9_]*[A-Z][A-Za-z0-9_]*/g;
 const PATH_TOKEN = /[A-Za-z0-9_./-]+\.[a-z]{1,4}(?:\b|$)/g;
 const STOP_TOKENS = new Set([
-  "the", "and", "for", "are", "with", "this", "that", "from", "have", "has", "into",
-  "you", "your", "our", "what", "where", "how", "why", "when", "which", "who",
-  "find", "show", "give", "tell", "explain", "describe", "about", "please",
-  "should", "would", "could", "there", "their", "they", "them", "then",
-  "any", "all", "some", "most", "more", "less", "than",
+  "the",
+  "and",
+  "for",
+  "are",
+  "with",
+  "this",
+  "that",
+  "from",
+  "have",
+  "has",
+  "into",
+  "you",
+  "your",
+  "our",
+  "what",
+  "where",
+  "how",
+  "why",
+  "when",
+  "which",
+  "who",
+  "find",
+  "show",
+  "give",
+  "tell",
+  "explain",
+  "describe",
+  "about",
+  "please",
+  "should",
+  "would",
+  "could",
+  "there",
+  "their",
+  "they",
+  "them",
+  "then",
+  "any",
+  "all",
+  "some",
+  "most",
+  "more",
+  "less",
+  "than",
 ]);
 
 export function tokenize(text: string): string[] {
@@ -62,25 +111,30 @@ export function tokenize(text: string): string[] {
       text
         .toLowerCase()
         .split(/[^a-z0-9_]+/g)
-        .filter((term) => term.length >= 3 && !STOP_TOKENS.has(term)),
-    ),
+        .filter((term) => term.length >= 3 && !STOP_TOKENS.has(term))
+    )
   );
 }
 
-export function classifyIntent(query: string, mode: "local" | "cloud" | "hybrid" | "index"): RetrievalIntentKind {
+export function classifyIntent(
+  query: string,
+  mode: "local" | "cloud" | "hybrid" | "index"
+): RetrievalIntentKind {
   const lowered = query.toLowerCase();
   if (mode === "index") return "lookup";
   if (Array.from(DEBUG_TOKENS).some((token) => lowered.includes(token))) return "debug";
   if (lowered.startsWith("plan") || lowered.includes(" plan ")) return "plan";
   if (lowered.startsWith("review") || lowered.includes(" review ")) return "review";
   if (lowered.startsWith("summarize") || lowered.startsWith("summary")) return "summary";
-  if (lowered.includes("explain") || lowered.includes("how does") || lowered.includes("how do")) return "explain";
+  if (lowered.includes("explain") || lowered.includes("how does") || lowered.includes("how do"))
+    return "explain";
   return "lookup";
 }
 
 export function detectQueryLanguage(query: string): string | null {
   const lowered = query.toLowerCase();
-  if (lowered.includes("typescript") || lowered.includes(" ts ") || lowered.includes(".ts")) return "typescript";
+  if (lowered.includes("typescript") || lowered.includes(" ts ") || lowered.includes(".ts"))
+    return "typescript";
   if (lowered.includes("python") || lowered.includes(".py")) return "python";
   if (lowered.includes("rust") || lowered.includes(".rs")) return "rust";
   if (lowered.includes("go ") || lowered.includes(".go")) return "go";
@@ -95,10 +149,13 @@ export function analyzeQuery(query: string): QueryAnalysis {
   const language = detectQueryLanguage(query);
   const notes: string[] = [];
   const startsWithDefinition = Array.from(DEFINITION_TOKENS).some((token) =>
-    query.toLowerCase().trimStart().startsWith(`${token} `),
+    query.toLowerCase().trimStart().startsWith(`${token} `)
   );
-  const isLikelyDefinition = startsWithDefinition || /what is|where is|how does/.test(query.toLowerCase());
-  const isLikelyDebug = Array.from(DEBUG_TOKENS).some((token) => query.toLowerCase().includes(token));
+  const isLikelyDefinition =
+    startsWithDefinition || /what is|where is|how does/.test(query.toLowerCase());
+  const isLikelyDebug = Array.from(DEBUG_TOKENS).some((token) =>
+    query.toLowerCase().includes(token)
+  );
   if (isLikelyDefinition) notes.push("definition-style question");
   if (isLikelyDebug) notes.push("debug-style question");
   if (symbolMatches.length > 0) notes.push("contains identifiers");
@@ -127,7 +184,8 @@ export function rewriteQuery(query: string, analysis: QueryAnalysis): QueryRewri
   const symbolHints = analysis.symbolHints;
   const pathHints = analysis.pathHints;
   const extra = symbolHints.length > 0 ? ` ${symbolHints.join(" ")}` : "";
-  const variant = terms.length > 0 ? `${query.trim()} ${terms.join(" ")}${extra}`.trim() : query.trim();
+  const variant =
+    terms.length > 0 ? `${query.trim()} ${terms.join(" ")}${extra}`.trim() : query.trim();
   return {
     variant,
     terms,
@@ -150,7 +208,7 @@ export function rankChunk(
   path: string,
   content: string,
   startLine: number,
-  endLine: number,
+  endLine: number
 ): number {
   const haystack = `${path}\n${content}`.toLowerCase();
   const terms = tokenize(question);
@@ -163,23 +221,38 @@ export function rankChunk(
       score += term.length >= 6 ? 3 : 1;
     }
   }
-  const pathParts = path.toLowerCase().split(/[^a-z0-9]+/g).filter(Boolean);
+  const pathParts = path
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter(Boolean);
   for (const term of terms) {
     if (pathParts.includes(term)) {
       score += 2;
     }
   }
-  if (terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))) {
+  if (
+    terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))
+  ) {
     score += 1;
   }
   if (/auth|login|session|token/i.test(path)) score += 2;
   if (/test|spec/i.test(path)) score += 1;
   if (/readme|docs?|notes?/i.test(path)) score += 1;
   if (/index|overview|summary/i.test(path)) score += 0.5;
-  if (terms.some((term) => content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `))) {
+  if (
+    terms.some(
+      (term) =>
+        content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `)
+    )
+  ) {
     score += 1;
   }
-  if (content.split("\n")[0]?.toLowerCase().includes(terms[0] ?? "")) {
+  if (
+    content
+      .split("\n")[0]
+      ?.toLowerCase()
+      .includes(terms[0] ?? "")
+  ) {
     score += 0.5;
   }
   score += Math.max(0, 5 - Math.min(5, Math.abs(endLine - startLine) / 40));
@@ -194,7 +267,7 @@ export interface FeedbackBoostEntry {
 
 export function buildFeedbackBoosts(
   feedback: RetrievalFeedbackRecord[],
-  fallbackChunkPaths: Map<string, string>,
+  fallbackChunkPaths: Map<string, string>
 ): { goodPaths: Map<string, number>; badChunkIds: Set<string>; missedPaths: Map<string, number> } {
   const goodPaths = new Map<string, number>();
   const badChunkIds = new Set<string>();
@@ -216,8 +289,12 @@ export function buildFeedbackBoosts(
 
 export function applyFeedbackBoosts(
   chunk: RetrievalChunk,
-  boosts: { goodPaths: Map<string, number>; badChunkIds: Set<string>; missedPaths: Map<string, number> },
-  missRecords: RetrievalMissRecord[],
+  boosts: {
+    goodPaths: Map<string, number>;
+    badChunkIds: Set<string>;
+    missedPaths: Map<string, number>;
+  },
+  missRecords: RetrievalMissRecord[]
 ): { score: number; applied: Array<"good" | "bad" | "missed"> } {
   const applied: Array<"good" | "bad" | "missed"> = [];
   let score = chunk.score;
@@ -250,7 +327,9 @@ export interface RankedChunk {
   rerankScore: number;
   finalScore: number;
   rerankReason: string;
-  boosters: Array<"good" | "bad" | "missed" | "memory" | "fact" | "rule" | "session" | "symbol" | "graph">;
+  boosters: Array<
+    "good" | "bad" | "missed" | "memory" | "fact" | "rule" | "session" | "symbol" | "graph"
+  >;
 }
 
 export function rerankChunks(input: {
@@ -267,16 +346,16 @@ export function rerankChunks(input: {
   priorSessionPaths: string[];
   depth: RetrievalDepth;
 }): RankedChunk[] {
-  const { goodPaths, badChunkIds, missedPaths } = buildFeedbackBoosts(input.feedback, input.feedbackChunkPaths);
+  const { goodPaths, badChunkIds, missedPaths } = buildFeedbackBoosts(
+    input.feedback,
+    input.feedbackChunkPaths
+  );
   const memoryTermSet = new Set(
-    input.memoryEntries
-      .flatMap((entry) => tokenize(`${entry.title} ${entry.body}`)),
+    input.memoryEntries.flatMap((entry) => tokenize(`${entry.title} ${entry.body}`))
   );
-  const factTermSet = new Set(
-    input.facts.flatMap((fact) => tokenize(`${fact.key} ${fact.value}`)),
-  );
+  const factTermSet = new Set(input.facts.flatMap((fact) => tokenize(`${fact.key} ${fact.value}`)));
   const ruleTermSet = new Set(
-    input.rules.flatMap((rule) => tokenize(`${rule.title} ${rule.body}`)),
+    input.rules.flatMap((rule) => tokenize(`${rule.title} ${rule.body}`))
   );
   const priorSessionPathSet = new Set(input.priorSessionPaths);
 
@@ -326,10 +405,15 @@ export function rerankChunks(input: {
         break;
       }
     }
-    const codeSymbols = Array.isArray(chunk.metadata.codeSymbols) ? chunk.metadata.codeSymbols as Array<Record<string, unknown>> : [];
+    const codeSymbols = Array.isArray(chunk.metadata.codeSymbols)
+      ? (chunk.metadata.codeSymbols as Array<Record<string, unknown>>)
+      : [];
     if (codeSymbols.length > 0) {
       const symbolHaystack = codeSymbols
-        .map((symbol) => `${String(symbol.name ?? "")} ${String(symbol.qualifiedName ?? "")} ${String(symbol.kind ?? "")}`)
+        .map(
+          (symbol) =>
+            `${String(symbol.name ?? "")} ${String(symbol.qualifiedName ?? "")} ${String(symbol.kind ?? "")}`
+        )
         .join(" ")
         .toLowerCase();
       for (const term of tokenize(input.query)) {
@@ -379,9 +463,7 @@ export function generateRewrites(input: {
   memory: MemoryEntryRecord[];
 }): RewriteCandidate[] {
   const base = rewriteQuery(input.query, input.analysis);
-  const rewrites: RewriteCandidate[] = [
-    { ...base, score: 1.0 },
-  ];
+  const rewrites: RewriteCandidate[] = [{ ...base, score: 1.0 }];
   if (input.analysis.pathHints.length > 0) {
     const variant = `${input.query} ${input.analysis.pathHints.join(" ")}`.trim();
     rewrites.push({
@@ -408,8 +490,8 @@ export function generateRewrites(input: {
     new Set(
       input.feedback
         .filter((entry) => entry.rating === "missed" && entry.missedPath)
-        .map((entry) => entry.missedPath as string),
-    ),
+        .map((entry) => entry.missedPath as string)
+    )
   );
   if (missedPaths.length > 0) {
     const variant = `${input.query} ${missedPaths.join(" ")}`.trim();
@@ -424,8 +506,10 @@ export function generateRewrites(input: {
   }
   const factTerms = Array.from(
     new Set(
-      input.facts.flatMap((fact) => tokenize(`${fact.key} ${fact.value}`)).filter((term) => term.length >= 4),
-    ),
+      input.facts
+        .flatMap((fact) => tokenize(`${fact.key} ${fact.value}`))
+        .filter((term) => term.length >= 4)
+    )
   ).slice(0, 6);
   if (factTerms.length > 0) {
     const variant = `${input.query} ${factTerms.join(" ")}`.trim();
@@ -450,7 +534,11 @@ export interface HybridChunkSource {
 }
 
 export function hybridMerge(
-  candidates: Array<{ source: "fts" | "vector" | "heuristic"; chunk: RetrievalChunk; score: number }>,
+  candidates: Array<{
+    source: "fts" | "vector" | "heuristic";
+    chunk: RetrievalChunk;
+    score: number;
+  }>
 ): RetrievalChunk[] {
   const merged = new Map<string, { chunk: RetrievalChunk; score: number; sources: Set<string> }>();
   for (const entry of candidates) {
@@ -483,18 +571,32 @@ export interface ConfidenceBreakdown {
   notes: string[];
 }
 
-export function computeConfidence(ranked: RankedChunk[], intent: RetrievalIntentKind, depth: RetrievalDepth): ConfidenceBreakdown {
+export function computeConfidence(
+  ranked: RankedChunk[],
+  intent: RetrievalIntentKind,
+  depth: RetrievalDepth
+): ConfidenceBreakdown {
   const top = ranked.slice(0, 3);
   if (top.length === 0) {
     return { base: 0, boost: 0, penalty: 0, final: 0, notes: ["no candidates"] };
   }
   const base = Math.min(1, top[0].finalScore / 8);
   const coverage = top.length / 3;
-  const boost = top.reduce((sum, entry) => sum + (entry.boosters.includes("good") ? 0.1 : 0) + (entry.boosters.includes("rule") ? 0.05 : 0) + (entry.boosters.includes("fact") ? 0.05 : 0), 0);
+  const boost = top.reduce(
+    (sum, entry) =>
+      sum +
+      (entry.boosters.includes("good") ? 0.1 : 0) +
+      (entry.boosters.includes("rule") ? 0.05 : 0) +
+      (entry.boosters.includes("fact") ? 0.05 : 0),
+    0
+  );
   const penalty = top.reduce((sum, entry) => sum + (entry.boosters.includes("bad") ? 0.2 : 0), 0);
   const depthWeight = depth === "deep" ? 0.05 : depth === "shallow" ? -0.05 : 0;
   const intentWeight = intent === "debug" ? -0.05 : intent === "explain" ? 0.05 : 0;
-  const final = Math.max(0, Math.min(1, base * 0.7 + coverage * 0.3 + boost - penalty + depthWeight + intentWeight));
+  const final = Math.max(
+    0,
+    Math.min(1, base * 0.7 + coverage * 0.3 + boost - penalty + depthWeight + intentWeight)
+  );
   const notes: string[] = [];
   if (base < 0.4) notes.push("low-base-score");
   if (coverage < 1) notes.push("thin-coverage");
@@ -574,8 +676,16 @@ export function runRetrievalPipeline(input: RetrievalPipelineInput): RetrievalPi
   });
   const merged = hybridMerge([
     ...input.ftsChunks.map((chunk) => ({ source: "fts" as const, chunk, score: chunk.score })),
-    ...input.vectorChunks.map((chunk) => ({ source: "vector" as const, chunk, score: chunk.score })),
-    ...input.heuristicChunks.map((chunk) => ({ source: "heuristic" as const, chunk, score: chunk.score })),
+    ...input.vectorChunks.map((chunk) => ({
+      source: "vector" as const,
+      chunk,
+      score: chunk.score,
+    })),
+    ...input.heuristicChunks.map((chunk) => ({
+      source: "heuristic" as const,
+      chunk,
+      score: chunk.score,
+    })),
   ]);
   const ranked = rerankChunks({
     query: input.query,
@@ -633,7 +743,10 @@ export function runRetrievalPipeline(input: RetrievalPipelineInput): RetrievalPi
   };
 }
 
-export function buildQueryRewriteRecords(retrievalQueryId: string, rewrites: RewriteCandidate[]): QueryRewriteRecord[] {
+export function buildQueryRewriteRecords(
+  retrievalQueryId: string,
+  rewrites: RewriteCandidate[]
+): QueryRewriteRecord[] {
   const ts = new Date().toISOString();
   return rewrites.map((rewrite, index) => ({
     id: `${retrievalQueryId}_rewrite_${index}`,
@@ -650,7 +763,7 @@ export function buildQueryRewriteRecords(retrievalQueryId: string, rewrites: Rew
 export function buildResultRecords(
   retrievalQueryId: string,
   ranked: RankedChunk[],
-  selected: RankedChunk[],
+  selected: RankedChunk[]
 ): RetrievalResultRecord[] {
   const selectedIds = new Set(selected.map((entry) => entry.chunk.id));
   const ts = new Date().toISOString();

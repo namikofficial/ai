@@ -1,7 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { RetrievalChunk } from "../../shared/src/index.ts";
 import { ftsSearch } from "./fts.ts";
-import { embedQueryForQdrant, searchQdrantChunksSync, type QdrantRuntimeSettings } from "./qdrant.ts";
+import {
+  embedQueryForQdrant,
+  type QdrantRuntimeSettings,
+  searchQdrantChunksSync,
+} from "./qdrant.ts";
 
 function tokenize(text: string): string[] {
   return Array.from(
@@ -9,8 +13,8 @@ function tokenize(text: string): string[] {
       text
         .toLowerCase()
         .split(/[^a-z0-9_]+/g)
-        .filter((term) => term.length >= 3),
-    ),
+        .filter((term) => term.length >= 3)
+    )
   );
 }
 
@@ -27,7 +31,7 @@ function rankChunk(
   path: string,
   content: string,
   startLine: number,
-  endLine: number,
+  endLine: number
 ): number {
   const haystack = `${path}\n${content}`.toLowerCase();
   const terms = tokenize(question);
@@ -40,23 +44,38 @@ function rankChunk(
       score += term.length >= 6 ? 3 : 1;
     }
   }
-  const pathParts = path.toLowerCase().split(/[^a-z0-9]+/g).filter(Boolean);
+  const pathParts = path
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter(Boolean);
   for (const term of terms) {
     if (pathParts.includes(term)) {
       score += 2;
     }
   }
-  if (terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))) {
+  if (
+    terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))
+  ) {
     score += 1;
   }
   if (/auth|login|session|token/i.test(path)) score += 2;
   if (/test|spec/i.test(path)) score += 1;
   if (/readme|docs?|notes?/i.test(path)) score += 1;
   if (/index|overview|summary/i.test(path)) score += 0.5;
-  if (terms.some((term) => content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `))) {
+  if (
+    terms.some(
+      (term) =>
+        content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `)
+    )
+  ) {
     score += 1;
   }
-  if (content.split("\n")[0]?.toLowerCase().includes(terms[0] ?? "")) {
+  if (
+    content
+      .split("\n")[0]
+      ?.toLowerCase()
+      .includes(terms[0] ?? "")
+  ) {
     score += 0.5;
   }
   score += Math.max(0, 5 - Math.min(5, Math.abs(endLine - startLine) / 40));
@@ -118,7 +137,10 @@ function scoreSymbolRow(query: string, row: Record<string, unknown>): number {
   if (/auth|session|jwt|tenant/.test(lowered) && /auth|session|jwt|tenant/i.test(haystack)) {
     score += 3;
   }
-  if (/where is|how is|how does|what calls|handled|used/i.test(lowered) && /route|middleware|function|class|method|import/i.test(kind)) {
+  if (
+    /where is|how is|how does|what calls|handled|used/i.test(lowered) &&
+    /route|middleware|function|class|method|import/i.test(kind)
+  ) {
     score += 1;
   }
   if (/test|spec/i.test(path) && /test|spec/.test(lowered)) {
@@ -127,14 +149,19 @@ function scoreSymbolRow(query: string, row: Record<string, unknown>): number {
   return score;
 }
 
-function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: string, limit: number): RetrievalChunk[] {
+function selectTopSymbolChunks(
+  db: DatabaseSync,
+  projectId: string,
+  query: string,
+  limit: number
+): RetrievalChunk[] {
   if (query.trim().length === 0) return [];
   try {
     const symbolRows = db
       .prepare(
         `SELECT id, path, language, kind, name, qualified_name, start_line, end_line, signature, doc, metadata_json
          FROM code_symbols
-         WHERE project_id = ?`,
+         WHERE project_id = ?`
       )
       .all(projectId) as Array<Record<string, unknown>>;
     const scoredSymbols = symbolRows
@@ -152,23 +179,31 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
        FROM code_symbol_chunks cs
        JOIN rag_chunks c ON c.id = cs.chunk_id
        WHERE cs.project_id = ? AND cs.symbol_id = ? AND c.project_id = ?
-       ORDER BY cs.overlap_lines DESC, c.start_line ASC`,
+       ORDER BY cs.overlap_lines DESC, c.start_line ASC`
     );
     const edgeRows = db.prepare(
       `SELECT * FROM code_edges
-       WHERE project_id = ? AND (from_symbol_id = ? OR to_symbol_id = ?)`,
+       WHERE project_id = ? AND (from_symbol_id = ? OR to_symbol_id = ?)`
     );
     for (const symbolEntry of scoredSymbols) {
       const symbol = symbolEntry.row;
       const symbolId = asString(symbol.id);
       const symbolMetadata = safeParseJson(asString(symbol.metadata_json));
       const symbolBoost = Math.min(2.5, Math.max(0.5, symbolEntry.score * 0.5));
-      const symbolChunkRows = chunkRows.all(projectId, symbolId, projectId) as Array<Record<string, unknown>>;
+      const symbolChunkRows = chunkRows.all(projectId, symbolId, projectId) as Array<
+        Record<string, unknown>
+      >;
       for (const row of symbolChunkRows) {
         const content = asString(row.content);
         const metadata = safeParseJson(asString(row.metadata_json));
         const path = asString(row.path) || asString(metadata.path);
-        const chunkScore = rankChunk(query, path, content, toNumberOrZero(row.start_line), toNumberOrZero(row.end_line));
+        const chunkScore = rankChunk(
+          query,
+          path,
+          content,
+          toNumberOrZero(row.start_line),
+          toNumberOrZero(row.end_line)
+        );
         chunks.push({
           id: asString(row.id),
           projectId: asString(row.project_id),
@@ -178,7 +213,7 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
           startLine: toNumberOrZero(row.start_line),
           endLine: toNumberOrZero(row.end_line),
           tokenCount: toNumberOrZero(row.token_count),
-          score: chunkScore + symbolBoost + (toNumberOrZero(row.overlap_lines) / 10),
+          score: chunkScore + symbolBoost + toNumberOrZero(row.overlap_lines) / 10,
           metadata: {
             ...metadata,
             codeSymbols: [
@@ -200,18 +235,31 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
         });
       }
 
-      const incomingEdges = edgeRows.all(projectId, symbolId, symbolId) as Array<Record<string, unknown>>;
+      const incomingEdges = edgeRows.all(projectId, symbolId, symbolId) as Array<
+        Record<string, unknown>
+      >;
       for (const edge of incomingEdges) {
-        const otherId = asString(edge.from_symbol_id) === symbolId ? asString(edge.to_symbol_id) : asString(edge.from_symbol_id);
+        const otherId =
+          asString(edge.from_symbol_id) === symbolId
+            ? asString(edge.to_symbol_id)
+            : asString(edge.from_symbol_id);
         if (!otherId) continue;
         const target = symbolRows.find((row) => asString(row.id) === otherId);
         if (!target) continue;
-        const targetChunks = chunkRows.all(projectId, otherId, projectId) as Array<Record<string, unknown>>;
+        const targetChunks = chunkRows.all(projectId, otherId, projectId) as Array<
+          Record<string, unknown>
+        >;
         for (const row of targetChunks.slice(0, 2)) {
           const content = asString(row.content);
           const metadata = safeParseJson(asString(row.metadata_json));
           const path = asString(row.path) || asString(metadata.path);
-          const chunkScore = rankChunk(query, path, content, toNumberOrZero(row.start_line), toNumberOrZero(row.end_line));
+          const chunkScore = rankChunk(
+            query,
+            path,
+            content,
+            toNumberOrZero(row.start_line),
+            toNumberOrZero(row.end_line)
+          );
           chunks.push({
             id: asString(row.id),
             projectId: asString(row.project_id),
@@ -221,7 +269,7 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
             startLine: toNumberOrZero(row.start_line),
             endLine: toNumberOrZero(row.end_line),
             tokenCount: toNumberOrZero(row.token_count),
-            score: chunkScore + (symbolBoost * 0.5) + toNumberOrZero(edge.confidence ?? 0),
+            score: chunkScore + symbolBoost * 0.5 + toNumberOrZero(edge.confidence ?? 0),
             metadata: {
               ...metadata,
               graphExpansion: {
@@ -280,12 +328,14 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
   };
 
   if (normalizedQuery.length > 0 && input.qdrantSettings) {
-    const queryVector = input.queryVector ?? embedQueryForQdrant({ text: normalizedQuery, dimension: input.queryVectorDimension ?? 32 });
+    const queryVector =
+      input.queryVector ??
+      embedQueryForQdrant({ text: normalizedQuery, dimension: input.queryVectorDimension ?? 32 });
     const qdrantChunks = searchQdrantChunksSync(
       input.qdrantSettings,
       input.projectId,
       queryVector,
-      limit,
+      limit
     );
     if (qdrantChunks) {
       addCandidates(qdrantChunks);
@@ -337,7 +387,7 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
            JOIN rag_chunks c ON c.id = rag_chunks_fts.chunk_id
            WHERE c.project_id = ?
            ORDER BY bm25(rag_chunks_fts) ASC
-           LIMIT ?`,
+           LIMIT ?`
         )
         .all(input.projectId, limit * 4) as Array<Record<string, unknown>>;
       const scored = rows
@@ -345,7 +395,13 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
           const content = asString(row.content);
           const metadata = safeParseJson(asString(row.metadata_json));
           const path = asString(row.path) || asString(metadata.path);
-          const heuristicScore = rankChunk(normalizedQuery, path, content, toNumber(row.start_line), toNumber(row.end_line));
+          const heuristicScore = rankChunk(
+            normalizedQuery,
+            path,
+            content,
+            toNumber(row.start_line),
+            toNumber(row.end_line)
+          );
           return {
             id: asString(row.id),
             projectId: asString(row.project_id),

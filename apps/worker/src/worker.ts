@@ -1,15 +1,18 @@
 import { mkdir } from "node:fs/promises";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
-import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
+import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
+import { compilePrompt } from "../../../packages/prompt-compiler/src/index.ts";
+import type { ReflectInput } from "../../../packages/reflection-engine/src/index.ts";
+import {
+  type ReflectionOutput,
+  reflect as reflectEngine,
+} from "../../../packages/reflection-engine/src/index.ts";
 import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
-import { isLikelyJsonOutput, parseJsonFragment } from "../../../packages/shared/src/model-output.ts";
-import { compilePrompt } from "../../../packages/prompt-compiler/src/index.ts";
 import {
-  reflect as reflectEngine,
-  type ReflectionOutput,
-} from "../../../packages/reflection-engine/src/index.ts";
-import type { ReflectInput } from "../../../packages/reflection-engine/src/index.ts";
+  isLikelyJsonOutput,
+  parseJsonFragment,
+} from "../../../packages/shared/src/model-output.ts";
 
 interface WorkerOptions {
   config?: Partial<ConfigSnapshot>;
@@ -55,24 +58,39 @@ function parseReflectionOutput(value: unknown): ReflectionOutput | null {
     notes,
   };
   if (Array.isArray(value.memoryCandidates)) {
-    output.memoryCandidates = value.memoryCandidates.filter((entry: unknown) => isObjectRecord(entry) && typeof entry.kind === "string" &&
-      typeof entry.title === "string" && typeof entry.body === "string")
+    output.memoryCandidates = value.memoryCandidates
+      .filter(
+        (entry: unknown) =>
+          isObjectRecord(entry) &&
+          typeof entry.kind === "string" &&
+          typeof entry.title === "string" &&
+          typeof entry.body === "string"
+      )
       .map((entry: Record<string, unknown>) => ({
         kind: entry.kind as ReflectionOutput["memoryCandidates"][number]["kind"],
         title: String(entry.title),
         body: String(entry.body),
-        confidence: typeof entry.confidence === "number" ? Math.max(0, Math.min(1, entry.confidence)) : 0.5,
-        evidence: Array.isArray(entry.evidence) ? entry.evidence.filter((ev: unknown) => isObjectRecord(ev)).map((ev: Record<string, unknown>) => ({
-          kind: typeof ev.kind === "string" ? ev.kind as ReflectionOutput["memoryCandidates"][number]["evidence"][number]["kind"] : "conversation",
-          refId: typeof ev.refId === "string" ? ev.refId : "",
-          excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
-          meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
-        })) : [],
+        confidence:
+          typeof entry.confidence === "number" ? Math.max(0, Math.min(1, entry.confidence)) : 0.5,
+        evidence: Array.isArray(entry.evidence)
+          ? entry.evidence
+              .filter((ev: unknown) => isObjectRecord(ev))
+              .map((ev: Record<string, unknown>) => ({
+                kind:
+                  typeof ev.kind === "string"
+                    ? (ev.kind as ReflectionOutput["memoryCandidates"][number]["evidence"][number]["kind"])
+                    : "conversation",
+                refId: typeof ev.refId === "string" ? ev.refId : "",
+                excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
+                meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
+              }))
+          : [],
         scope: entry.scope === "global" ? "global" : "project",
       }));
   }
   if (Array.isArray(value.skillCandidates)) {
-    output.skillCandidates = value.skillCandidates.filter((entry: unknown) => isObjectRecord(entry) && typeof entry.title === "string")
+    output.skillCandidates = value.skillCandidates
+      .filter((entry: unknown) => isObjectRecord(entry) && typeof entry.title === "string")
       .map((entry: Record<string, unknown>) => ({
         title: String(entry.title),
         triggerTerms: toStringArray(entry.triggerTerms) ?? [],
@@ -81,72 +99,125 @@ function parseReflectionOutput(value: unknown): ReflectionOutput | null {
         commands: toStringArray(entry.commands) ?? [],
         safetyNotes: typeof entry.safetyNotes === "string" ? entry.safetyNotes : null,
         validation: toStringArray(entry.validation) ?? [],
-        confidence: typeof entry.confidence === "number" ? Math.max(0, Math.min(1, entry.confidence)) : 0.5,
-        sourceKind: entry.sourceKind === "manual" || entry.sourceKind === "imported" ? entry.sourceKind : "reflection",
-        exampleSessionId: typeof entry.exampleSessionId === "string" ? entry.exampleSessionId : null,
-        evidence: Array.isArray(entry.evidence) ? entry.evidence.filter((ev: unknown) => isObjectRecord(ev)).map((ev: Record<string, unknown>) => ({
-          kind: typeof ev.kind === "string" ? ev.kind as ReflectionOutput["skillCandidates"][number]["evidence"][number]["kind"] : "conversation",
-          refId: typeof ev.refId === "string" ? ev.refId : "",
-          excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
-          meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
-        })) : [],
+        confidence:
+          typeof entry.confidence === "number" ? Math.max(0, Math.min(1, entry.confidence)) : 0.5,
+        sourceKind:
+          entry.sourceKind === "manual" || entry.sourceKind === "imported"
+            ? entry.sourceKind
+            : "reflection",
+        exampleSessionId:
+          typeof entry.exampleSessionId === "string" ? entry.exampleSessionId : null,
+        evidence: Array.isArray(entry.evidence)
+          ? entry.evidence
+              .filter((ev: unknown) => isObjectRecord(ev))
+              .map((ev: Record<string, unknown>) => ({
+                kind:
+                  typeof ev.kind === "string"
+                    ? (ev.kind as ReflectionOutput["skillCandidates"][number]["evidence"][number]["kind"])
+                    : "conversation",
+                refId: typeof ev.refId === "string" ? ev.refId : "",
+                excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
+                meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
+              }))
+          : [],
       }));
   }
   if (Array.isArray(value.facts)) {
-    output.facts = value.facts.filter((entry: unknown) => isObjectRecord(entry) && typeof entry.key === "string" && typeof entry.value === "string")
+    output.facts = value.facts
+      .filter(
+        (entry: unknown) =>
+          isObjectRecord(entry) && typeof entry.key === "string" && typeof entry.value === "string"
+      )
       .map((entry: Record<string, unknown>) => ({
         key: String(entry.key),
         value: String(entry.value),
         kind: typeof entry.kind === "string" ? entry.kind : "reflection",
-        confidence: typeof entry.confidence === "number" ? Math.max(0, Math.min(1, entry.confidence)) : 0.5,
+        confidence:
+          typeof entry.confidence === "number" ? Math.max(0, Math.min(1, entry.confidence)) : 0.5,
         sourceKind: typeof entry.sourceKind === "string" ? entry.sourceKind : "reflection",
-        sources: Array.isArray(entry.sources) ? entry.sources.filter((source: unknown) => isObjectRecord(source)).map((source: Record<string, unknown>) => ({
-          kind: typeof source.kind === "string" ? source.kind : "session",
-          ref: typeof source.ref === "string" ? source.ref : "",
-          excerpt: typeof source.excerpt === "string" ? source.excerpt : null,
-        })) : [],
-        evidence: Array.isArray(entry.evidence) ? entry.evidence.filter((ev: unknown) => isObjectRecord(ev)).map((ev: Record<string, unknown>) => ({
-          kind: typeof ev.kind === "string" ? ev.kind as ReflectionOutput["facts"][number]["evidence"][number]["kind"] : "conversation",
-          refId: typeof ev.refId === "string" ? ev.refId : "",
-          excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
-          meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
-        })) : [],
+        sources: Array.isArray(entry.sources)
+          ? entry.sources
+              .filter((source: unknown) => isObjectRecord(source))
+              .map((source: Record<string, unknown>) => ({
+                kind: typeof source.kind === "string" ? source.kind : "session",
+                ref: typeof source.ref === "string" ? source.ref : "",
+                excerpt: typeof source.excerpt === "string" ? source.excerpt : null,
+              }))
+          : [],
+        evidence: Array.isArray(entry.evidence)
+          ? entry.evidence
+              .filter((ev: unknown) => isObjectRecord(ev))
+              .map((ev: Record<string, unknown>) => ({
+                kind:
+                  typeof ev.kind === "string"
+                    ? (ev.kind as ReflectionOutput["facts"][number]["evidence"][number]["kind"])
+                    : "conversation",
+                refId: typeof ev.refId === "string" ? ev.refId : "",
+                excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
+                meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
+              }))
+          : [],
       }));
   }
   if (Array.isArray(value.staleFacts)) {
-    output.staleFacts = value.staleFacts.filter((entry: unknown) => isObjectRecord(entry) && typeof entry.factId === "string" &&
-      typeof entry.reason === "string")
+    output.staleFacts = value.staleFacts
+      .filter(
+        (entry: unknown) =>
+          isObjectRecord(entry) &&
+          typeof entry.factId === "string" &&
+          typeof entry.reason === "string"
+      )
       .map((entry: Record<string, unknown>) => ({
         factId: String(entry.factId),
         reason: String(entry.reason),
-        evidence: Array.isArray(entry.evidence) ? entry.evidence.filter((ev: unknown) => isObjectRecord(ev)).map((ev: Record<string, unknown>) => ({
-          kind: typeof ev.kind === "string" ? ev.kind as ReflectionOutput["staleFacts"][number]["evidence"][number]["kind"] : "review",
-          refId: typeof ev.refId === "string" ? ev.refId : "",
-          excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
-          meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
-        })) : [],
+        evidence: Array.isArray(entry.evidence)
+          ? entry.evidence
+              .filter((ev: unknown) => isObjectRecord(ev))
+              .map((ev: Record<string, unknown>) => ({
+                kind:
+                  typeof ev.kind === "string"
+                    ? (ev.kind as ReflectionOutput["staleFacts"][number]["evidence"][number]["kind"])
+                    : "review",
+                refId: typeof ev.refId === "string" ? ev.refId : "",
+                excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
+                meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
+              }))
+          : [],
       }));
   }
   if (Array.isArray(value.retrievalFeedback)) {
-    output.retrievalFeedback = value.retrievalFeedback.filter((entry: unknown) => isObjectRecord(entry) && typeof entry.retrievalQueryId === "string")
+    output.retrievalFeedback = value.retrievalFeedback
+      .filter(
+        (entry: unknown) => isObjectRecord(entry) && typeof entry.retrievalQueryId === "string"
+      )
       .map((entry: Record<string, unknown>) => ({
         retrievalQueryId: String(entry.retrievalQueryId),
         chunkId: typeof entry.chunkId === "string" ? entry.chunkId : null,
         rating: entry.rating === "good" || entry.rating === "bad" ? entry.rating : "missed",
         missedPath: typeof entry.missedPath === "string" ? entry.missedPath : null,
         notes: typeof entry.notes === "string" ? entry.notes : null,
-        evidence: Array.isArray(entry.evidence) ? entry.evidence.filter((ev: unknown) => isObjectRecord(ev)).map((ev: Record<string, unknown>) => ({
-          kind: typeof ev.kind === "string" ? ev.kind as ReflectionOutput["retrievalFeedback"][number]["evidence"][number]["kind"] : "query",
-          refId: typeof ev.refId === "string" ? ev.refId : "",
-          excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
-          meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
-        })) : [],
+        evidence: Array.isArray(entry.evidence)
+          ? entry.evidence
+              .filter((ev: unknown) => isObjectRecord(ev))
+              .map((ev: Record<string, unknown>) => ({
+                kind:
+                  typeof ev.kind === "string"
+                    ? (ev.kind as ReflectionOutput["retrievalFeedback"][number]["evidence"][number]["kind"])
+                    : "query",
+                refId: typeof ev.refId === "string" ? ev.refId : "",
+                excerpt: typeof ev.excerpt === "string" ? ev.excerpt : "",
+                meta: isObjectRecord(ev.meta) ? ev.meta : undefined,
+              }))
+          : [],
       }));
   }
   return output;
 }
 
-function mergeReflectionOutput(base: ReflectionOutput, modelOutput: ReflectionOutput | null): ReflectionOutput {
+function mergeReflectionOutput(
+  base: ReflectionOutput,
+  modelOutput: ReflectionOutput | null
+): ReflectionOutput {
   if (!modelOutput) return base;
   const merged: ReflectionOutput = {
     memoryCandidates: [...base.memoryCandidates],
@@ -156,7 +227,9 @@ function mergeReflectionOutput(base: ReflectionOutput, modelOutput: ReflectionOu
     retrievalFeedback: [...base.retrievalFeedback],
     notes: [...base.notes],
   };
-  const memoryKeys = new Set(merged.memoryCandidates.map((entry) => `${entry.kind}:${entry.title}:${entry.body}`));
+  const memoryKeys = new Set(
+    merged.memoryCandidates.map((entry) => `${entry.kind}:${entry.title}:${entry.body}`)
+  );
   for (const entry of modelOutput.memoryCandidates) {
     const key = `${entry.kind}:${entry.title}:${entry.body}`;
     if (memoryKeys.has(key)) continue;
@@ -182,7 +255,12 @@ function mergeReflectionOutput(base: ReflectionOutput, modelOutput: ReflectionOu
     staleKeys.add(entry.factId);
     merged.staleFacts.push(entry);
   }
-  const retrievalKeys = new Set(merged.retrievalFeedback.map((entry) => `${entry.retrievalQueryId}:${entry.chunkId ?? ""}:${entry.rating}:${entry.missedPath ?? ""}`));
+  const retrievalKeys = new Set(
+    merged.retrievalFeedback.map(
+      (entry) =>
+        `${entry.retrievalQueryId}:${entry.chunkId ?? ""}:${entry.rating}:${entry.missedPath ?? ""}`
+    )
+  );
   for (const entry of modelOutput.retrievalFeedback) {
     const key = `${entry.retrievalQueryId}:${entry.chunkId ?? ""}:${entry.rating}:${entry.missedPath ?? ""}`;
     if (retrievalKeys.has(key)) continue;
@@ -198,7 +276,10 @@ function mergeReflectionOutput(base: ReflectionOutput, modelOutput: ReflectionOu
   return merged;
 }
 
-function buildReflectionInput(store: ReturnType<typeof createStore>, sessionId: string): ReflectInput {
+function buildReflectionInput(
+  store: ReturnType<typeof createStore>,
+  sessionId: string
+): ReflectInput {
   const session = store.getSession(sessionId);
   if (!session) {
     throw new Error(`Unknown session: ${sessionId}`);
@@ -207,9 +288,16 @@ function buildReflectionInput(store: ReturnType<typeof createStore>, sessionId: 
   const conversation = store.conversation.listMessages(sessionId);
   const retrievals = store.retrieval.listQueriesForSession(sessionId, 50);
   const retrievalResults = new Map<string, ReturnType<typeof store.retrieval.listResults>>();
-  const retrievalSelectedContext = new Map<string, ReturnType<typeof store.retrieval.listSelectedContext>>();
-  const allFeedback: ReturnType<typeof store.retrieval.listFeedback> extends Array<infer T> ? T[] : never = [];
-  const allMisses: ReturnType<typeof store.retrieval.listMisses> extends Array<infer T> ? T[] : never = [];
+  const retrievalSelectedContext = new Map<
+    string,
+    ReturnType<typeof store.retrieval.listSelectedContext>
+  >();
+  const allFeedback: ReturnType<typeof store.retrieval.listFeedback> extends Array<infer T>
+    ? T[]
+    : never = [];
+  const allMisses: ReturnType<typeof store.retrieval.listMisses> extends Array<infer T>
+    ? T[]
+    : never = [];
   for (const query of retrievals) {
     retrievalResults.set(query.id, store.retrieval.listResults(query.id, 200));
     retrievalSelectedContext.set(query.id, store.retrieval.listSelectedContext(query.id));
@@ -234,10 +322,10 @@ function buildReflectionInput(store: ReturnType<typeof createStore>, sessionId: 
   const answerEvaluations = store.evals.listAnswerEvaluations(50);
   const outcomes = store.evals.listOutcomes(sessionId, 20);
   const outcome = outcomes.at(-1) ?? null;
-  const existingFacts = projectId ? store.memory.listFacts(projectId, 200) : store.memory.listFacts(null, 200);
-  const existingRules = projectId
-    ? store.memory.listProjectRules(projectId, 200)
-    : [];
+  const existingFacts = projectId
+    ? store.memory.listFacts(projectId, 200)
+    : store.memory.listFacts(null, 200);
+  const existingRules = projectId ? store.memory.listProjectRules(projectId, 200) : [];
   const existingSkills = store.skills.listSkills(undefined, 200);
   return {
     session,
@@ -263,7 +351,7 @@ function buildReflectionInput(store: ReturnType<typeof createStore>, sessionId: 
 async function recordReflectionModelTrace(
   store: ReturnType<typeof createStore>,
   sessionId: string,
-  input: ReflectInput,
+  input: ReflectInput
 ): Promise<{
   compiledId: string;
   modelCallId: string | null;
@@ -271,7 +359,8 @@ async function recordReflectionModelTrace(
   parseStatus: "parsed" | "repaired" | "deterministic_fallback";
 }> {
   const contextItems = input.contextPacks.flatMap((pack) =>
-    store.context.listItems(pack.id)
+    store.context
+      .listItems(pack.id)
       .filter((item) => item.included)
       .map((item) => ({
         kind: item.kind,
@@ -279,7 +368,7 @@ async function recordReflectionModelTrace(
         tokenCount: item.tokenCount,
         excerpt: item.excerpt,
         sourceId: item.sourceId,
-      })),
+      }))
   );
   const compiled = compilePrompt({
     mode: "reflection",
@@ -307,7 +396,14 @@ async function recordReflectionModelTrace(
         retrievalFeedback: { type: "array" },
         notes: { type: "array", items: { type: "string" } },
       },
-      required: ["memoryCandidates", "skillCandidates", "facts", "staleFacts", "retrievalFeedback", "notes"],
+      required: [
+        "memoryCandidates",
+        "skillCandidates",
+        "facts",
+        "staleFacts",
+        "retrievalFeedback",
+        "notes",
+      ],
     },
     metadata: { sessionId, projectId: input.session.projectId },
     tokenBudget: 4096,
@@ -334,7 +430,7 @@ async function recordReflectionModelTrace(
         },
       },
     },
-    { sessionId },
+    { sessionId }
   );
   const parseReflectionResult = (text: string): ReflectionOutput | null => {
     try {
@@ -355,7 +451,10 @@ async function recordReflectionModelTrace(
         messages: [
           ...compiled.messages,
           { role: "assistant", content: reflectionResult.text },
-          { role: "user", content: "Return ONLY valid JSON matching the output schema. No markdown fences." },
+          {
+            role: "user",
+            content: "Return ONLY valid JSON matching the output schema. No markdown fences.",
+          },
         ],
         temperature: 0,
         metadata: {
@@ -366,16 +465,18 @@ async function recordReflectionModelTrace(
           },
         },
       },
-      { sessionId },
+      { sessionId }
     );
     parsedOutput = parseReflectionResult(repaired.text);
     if (parsedOutput) {
       parseStatus = "repaired";
     }
   }
-  const modelCallId = store.models.listCalls(sessionId, 200)
-    .filter((call) => call.role === "reflection" && call.profileId === "reflection-local")
-    .at(-1)?.id ?? null;
+  const modelCallId =
+    store.models
+      .listCalls(sessionId, 200)
+      .filter((call) => call.role === "reflection" && call.profileId === "reflection-local")
+      .at(-1)?.id ?? null;
   return { compiledId: compiled.id, modelCallId, parsedOutput, parseStatus };
 }
 
@@ -390,7 +491,7 @@ interface ReflectionCounts {
 function applyReflectionOutput(
   store: ReturnType<typeof createStore>,
   sessionId: string,
-  output: ReflectionOutput,
+  output: ReflectionOutput
 ): ReflectionCounts {
   const session = store.getSession(sessionId);
   const projectId = session?.projectId ?? null;
@@ -438,7 +539,11 @@ function applyReflectionOutput(
         kind: fact.kind,
         confidence: fact.confidence,
         sourceKind: fact.sourceKind,
-        sources: fact.sources.map((source) => ({ kind: source.kind, ref: source.ref, excerpt: source.excerpt })),
+        sources: fact.sources.map((source) => ({
+          kind: source.kind,
+          ref: source.ref,
+          excerpt: source.excerpt,
+        })),
       });
       facts += 1;
     }
@@ -457,7 +562,13 @@ function applyReflectionOutput(
     store.db.exec("ROLLBACK");
     throw error;
   }
-  return { memoryCandidates, skillCandidates, facts, staleFacts: output.staleFacts.length, retrievalFeedback };
+  return {
+    memoryCandidates,
+    skillCandidates,
+    facts,
+    staleFacts: output.staleFacts.length,
+    retrievalFeedback,
+  };
 }
 
 export async function processNextJob(store: ReturnType<typeof createStore>): Promise<boolean> {
@@ -478,9 +589,17 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       const editedFiles = taskGraph.flatMap((task) => {
         if (typeof task !== "object" || task === null) return [];
         const files = (task as { expectedFiles?: unknown }).expectedFiles;
-        return Array.isArray(files) ? files.filter((file): file is string => typeof file === "string") : [];
+        return Array.isArray(files)
+          ? files.filter((file): file is string => typeof file === "string")
+          : [];
       });
-      let counts: ReflectionCounts = { memoryCandidates: 0, skillCandidates: 0, facts: 0, staleFacts: 0, retrievalFeedback: 0 };
+      let counts: ReflectionCounts = {
+        memoryCandidates: 0,
+        skillCandidates: 0,
+        facts: 0,
+        staleFacts: 0,
+        retrievalFeedback: 0,
+      };
       let notes: string[] = [];
       if (sessionId) {
         const reflectInput = buildReflectionInput(store, sessionId);
@@ -503,8 +622,8 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
               modelCallId: trace.modelCallId,
               parseStatus: trace.parseStatus,
             },
-            { sessionId, projectId, agent: "reflection" },
-          ),
+            { sessionId, projectId, agent: "reflection" }
+          )
         );
       }
       output = {
@@ -515,17 +634,19 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
           plannedFiles: [],
           editedFiles,
           checks: ["typecheck", "tests"],
-          notes: notes.length > 0
-            ? notes.join("\n")
-            : `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
+          notes:
+            notes.length > 0
+              ? notes.join("\n")
+              : `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
         }),
         lesson: store.createLesson({
           projectId,
           sessionId,
           title: `Plan review: ${goal}`,
-          body: notes.length > 0
-            ? notes.join("\n")
-            : `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
+          body:
+            notes.length > 0
+              ? notes.join("\n")
+              : `Reviewed a generated plan with ${taskGraph.length} tasks for ${goal}.`,
           tags: ["worker", "review", "plan"],
           importance: 2,
         }),
@@ -536,7 +657,13 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
       const target = typeof payload.target === "string" ? payload.target : "manual";
       const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
-      let counts: ReflectionCounts = { memoryCandidates: 0, skillCandidates: 0, facts: 0, staleFacts: 0, retrievalFeedback: 0 };
+      let counts: ReflectionCounts = {
+        memoryCandidates: 0,
+        skillCandidates: 0,
+        facts: 0,
+        staleFacts: 0,
+        retrievalFeedback: 0,
+      };
       let notes: string[] = [];
       if (sessionId) {
         const reflectInput = buildReflectionInput(store, sessionId);
@@ -558,8 +685,8 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
               modelCallId: trace.modelCallId,
               parseStatus: trace.parseStatus,
             },
-            { sessionId, projectId, agent: "reflection" },
-          ),
+            { sessionId, projectId, agent: "reflection" }
+          )
         );
       }
       const reflectionBody = notes.length > 0 ? notes.join("\n") : prompt.slice(0, 500);
@@ -601,7 +728,10 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
         projectId: session.projectId,
         sessionId: session.id,
         title: `Reflection: ${session.title}`,
-        body: reflection.notes.length > 0 ? reflection.notes.join("\n") : session.finalSummary ?? session.userGoal,
+        body:
+          reflection.notes.length > 0
+            ? reflection.notes.join("\n")
+            : (session.finalSummary ?? session.userGoal),
         tags: ["worker", "reflection", "engine"],
         importance: 3,
       });
@@ -617,8 +747,8 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
             modelCallId: trace.modelCallId,
             parseStatus: trace.parseStatus,
           },
-          { sessionId, projectId: session.projectId, agent: "reflection" },
-        ),
+          { sessionId, projectId: session.projectId, agent: "reflection" }
+        )
       );
       output = { lesson, counts, notes: reflection.notes };
     } else if (job.type === "review.reflect") {
@@ -628,7 +758,13 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
         throw new Error(`Unknown review: ${reviewId ?? "missing"}`);
       }
       const sessionId = review.sessionId;
-      let counts: ReflectionCounts = { memoryCandidates: 0, skillCandidates: 0, facts: 0, staleFacts: 0, retrievalFeedback: 0 };
+      let counts: ReflectionCounts = {
+        memoryCandidates: 0,
+        skillCandidates: 0,
+        facts: 0,
+        staleFacts: 0,
+        retrievalFeedback: 0,
+      };
       if (sessionId) {
         const reflectInput = buildReflectionInput(store, sessionId);
         const trace = await recordReflectionModelTrace(store, sessionId, reflectInput);
@@ -638,9 +774,16 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
         store.appendEvent(
           createEvent(
             "review.reflected",
-            { reviewId, sessionId, counts, compiledId: trace.compiledId, modelCallId: trace.modelCallId, parseStatus: trace.parseStatus },
-            { sessionId, projectId: review.projectId, agent: "reflection" },
-          ),
+            {
+              reviewId,
+              sessionId,
+              counts,
+              compiledId: trace.compiledId,
+              modelCallId: trace.modelCallId,
+              parseStatus: trace.parseStatus,
+            },
+            { sessionId, projectId: review.projectId, agent: "reflection" }
+          )
         );
       }
       output = store.createLesson({

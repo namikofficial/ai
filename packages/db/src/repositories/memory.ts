@@ -10,7 +10,16 @@ import type {
   MemoryScope,
   ProjectRuleRecord,
 } from "../../../shared/src/index.ts";
-import { asBool, asNumber, asString, asStringOrNull, now, newId, safeParseJson, safeParseJsonArray } from "./_shared.ts";
+import {
+  asBool,
+  asNumber,
+  asString,
+  asStringOrNull,
+  newId,
+  now,
+  safeParseJson,
+  safeParseJsonArray,
+} from "./_shared.ts";
 
 interface MemoryCandidateRow {
   id: string;
@@ -168,7 +177,7 @@ export function createMemoryRepo(db: DatabaseSync) {
       kind: MemoryCandidateKind;
       title: string;
       body: string;
-      evidence?: Array<Record<string, unknown>>;
+      evidence?: Array<{ [key: string]: unknown }>;
       confidence: number;
       scope?: MemoryScope;
     }): MemoryCandidateRecord {
@@ -179,7 +188,7 @@ export function createMemoryRepo(db: DatabaseSync) {
         `INSERT INTO memory_candidates (
           id, project_id, session_id, kind, title, body, evidence_json,
           confidence, scope, status, reviewed_at, reviewer_notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.projectId ?? null,
@@ -194,7 +203,7 @@ export function createMemoryRepo(db: DatabaseSync) {
         null,
         null,
         ts,
-        ts,
+        ts
       );
       return {
         id,
@@ -213,7 +222,11 @@ export function createMemoryRepo(db: DatabaseSync) {
         updatedAt: ts,
       };
     },
-    listCandidates(status?: MemoryCandidateStatus, projectId?: string | null, limit = 50): MemoryCandidateRecord[] {
+    listCandidates(
+      status?: MemoryCandidateStatus,
+      projectId?: string | null,
+      limit = 50
+    ): MemoryCandidateRecord[] {
       const conditions: string[] = [];
       const params: unknown[] = [];
       if (status) {
@@ -232,17 +245,26 @@ export function createMemoryRepo(db: DatabaseSync) {
       return rows.map(rowToCandidate);
     },
     getCandidate(id: string): MemoryCandidateRecord | null {
-      const row = db.prepare("SELECT * FROM memory_candidates WHERE id = ? LIMIT 1").get(id) as MemoryCandidateRow | undefined;
+      const row = db.prepare("SELECT * FROM memory_candidates WHERE id = ? LIMIT 1").get(id) as
+        | MemoryCandidateRow
+        | undefined;
       return row ? rowToCandidate(row) : null;
     },
-    reviewCandidate(id: string, status: Exclude<MemoryCandidateStatus, "pending">, notes?: string | null, body?: string | null): MemoryCandidateRecord {
+    reviewCandidate(
+      id: string,
+      status: Exclude<MemoryCandidateStatus, "pending">,
+      notes?: string | null,
+      body?: string | null
+    ): MemoryCandidateRecord {
       const ts = now();
       db.prepare(
         `UPDATE memory_candidates
            SET status = ?, reviewed_at = ?, reviewer_notes = ?, body = COALESCE(?, body), updated_at = ?
-         WHERE id = ?`,
+         WHERE id = ?`
       ).run(status, ts, notes ?? null, body ?? null, ts, id);
-      const updated = db.prepare("SELECT * FROM memory_candidates WHERE id = ?").get(id) as MemoryCandidateRow;
+      const updated = db
+        .prepare("SELECT * FROM memory_candidates WHERE id = ?")
+        .get(id) as MemoryCandidateRow;
       return rowToCandidate(updated);
     },
     acceptCandidate(id: string, notes?: string | null): MemoryEntryRecord {
@@ -254,7 +276,7 @@ export function createMemoryRepo(db: DatabaseSync) {
         `INSERT INTO memory_entries (
           id, candidate_id, project_id, scope, kind, title, body, evidence_json,
           confidence, pinned, archived, last_used_at, use_count, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         entryId,
         candidate.id,
@@ -270,7 +292,7 @@ export function createMemoryRepo(db: DatabaseSync) {
         null,
         0,
         ts,
-        ts,
+        ts
       );
       this.reviewCandidate(candidate.id, "accepted", notes ?? null);
       return {
@@ -304,12 +326,18 @@ export function createMemoryRepo(db: DatabaseSync) {
       }
       params.push(limit);
       const rows = db
-        .prepare(`SELECT * FROM memory_entries WHERE ${conditions.join(" AND ")} ORDER BY pinned DESC, confidence DESC, created_at DESC LIMIT ?`)
+        .prepare(
+          `SELECT * FROM memory_entries WHERE ${conditions.join(" AND ")} ORDER BY pinned DESC, confidence DESC, created_at DESC LIMIT ?`
+        )
         .all(...params) as MemoryEntryRow[];
       return rows.map(rowToEntry);
     },
     pinEntry(id: string, pinned: boolean): MemoryEntryRecord {
-      db.prepare("UPDATE memory_entries SET pinned = ?, updated_at = ? WHERE id = ?").run(pinned ? 1 : 0, now(), id);
+      db.prepare("UPDATE memory_entries SET pinned = ?, updated_at = ? WHERE id = ?").run(
+        pinned ? 1 : 0,
+        now(),
+        id
+      );
       const row = db.prepare("SELECT * FROM memory_entries WHERE id = ?").get(id) as MemoryEntryRow;
       return rowToEntry(row);
     },
@@ -328,7 +356,7 @@ export function createMemoryRepo(db: DatabaseSync) {
         `INSERT INTO facts (
           id, project_id, key, value, kind, confidence, source_kind, status,
           last_verified_at, expires_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.projectId ?? null,
@@ -341,10 +369,10 @@ export function createMemoryRepo(db: DatabaseSync) {
         ts,
         null,
         ts,
-        ts,
+        ts
       );
       const sourceInsert = db.prepare(
-        `INSERT INTO fact_sources (id, fact_id, source_kind, source_ref, excerpt, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO fact_sources (id, fact_id, source_kind, source_ref, excerpt, created_at) VALUES (?, ?, ?, ?, ?, ?)`
       );
       for (const source of input.sources ?? []) {
         sourceInsert.run(newId("fs"), id, source.kind, source.ref, source.excerpt ?? null, ts);
@@ -366,8 +394,14 @@ export function createMemoryRepo(db: DatabaseSync) {
     },
     listFacts(projectId?: string | null, limit = 50): FactRecord[] {
       const rows = projectId
-        ? (db.prepare("SELECT * FROM facts WHERE project_id = ? OR project_id IS NULL ORDER BY confidence DESC, updated_at DESC LIMIT ?").all(projectId, limit) as FactRow[])
-        : (db.prepare("SELECT * FROM facts ORDER BY confidence DESC, updated_at DESC LIMIT ?").all(limit) as FactRow[]);
+        ? (db
+            .prepare(
+              "SELECT * FROM facts WHERE project_id = ? OR project_id IS NULL ORDER BY confidence DESC, updated_at DESC LIMIT ?"
+            )
+            .all(projectId, limit) as FactRow[])
+        : (db
+            .prepare("SELECT * FROM facts ORDER BY confidence DESC, updated_at DESC LIMIT ?")
+            .all(limit) as FactRow[]);
       return rows.map(rowToFact);
     },
     markFactStatus(id: string, status: FactStatus): FactRecord {
@@ -376,14 +410,21 @@ export function createMemoryRepo(db: DatabaseSync) {
       return rowToFact(row);
     },
     listFactSources(factId: string): FactSourceRecord[] {
-      const rows = db.prepare("SELECT * FROM fact_sources WHERE fact_id = ? ORDER BY created_at ASC").all(factId) as FactSourceRow[];
+      const rows = db
+        .prepare("SELECT * FROM fact_sources WHERE fact_id = ? ORDER BY created_at ASC")
+        .all(factId) as FactSourceRow[];
       return rows.map(rowToFactSource);
     },
-    addProjectRule(input: { projectId: string; title: string; body: string; pinned?: boolean }): ProjectRuleRecord {
+    addProjectRule(input: {
+      projectId: string;
+      title: string;
+      body: string;
+      pinned?: boolean;
+    }): ProjectRuleRecord {
       const id = newId("pr");
       const ts = now();
       db.prepare(
-        `INSERT INTO project_rules (id, project_id, title, body, pinned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO project_rules (id, project_id, title, body, pinned, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`
       ).run(id, input.projectId, input.title, input.body, input.pinned ? 1 : 0, ts, ts);
       return {
         id,
@@ -397,7 +438,9 @@ export function createMemoryRepo(db: DatabaseSync) {
     },
     listProjectRules(projectId: string, limit = 50): ProjectRuleRecord[] {
       const rows = db
-        .prepare("SELECT * FROM project_rules WHERE project_id = ? ORDER BY pinned DESC, updated_at DESC LIMIT ?")
+        .prepare(
+          "SELECT * FROM project_rules WHERE project_id = ? ORDER BY pinned DESC, updated_at DESC LIMIT ?"
+        )
         .all(projectId, limit) as ProjectRuleRow[];
       return rows.map(rowToRule);
     },

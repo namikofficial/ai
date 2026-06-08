@@ -7,7 +7,7 @@ import type {
   SessionOutcomeKind,
   SessionOutcomeRecord,
 } from "../../../shared/src/index.ts";
-import { asNumber, asString, asStringOrNull, now, newId, safeParseJsonArray } from "./_shared.ts";
+import { asNumber, asString, asStringOrNull, newId, now, safeParseJsonArray } from "./_shared.ts";
 
 interface EvalCaseRow {
   id: string;
@@ -145,7 +145,7 @@ export function createEvalRepo(db: DatabaseSync) {
         `INSERT INTO eval_cases (
           id, project_id, question, expected_files_json, expected_answer_contains,
           difficulty, tags_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.projectId ?? null,
@@ -155,7 +155,7 @@ export function createEvalRepo(db: DatabaseSync) {
         input.difficulty ?? "standard",
         JSON.stringify(input.tags ?? []),
         ts,
-        ts,
+        ts
       );
       return {
         id,
@@ -171,16 +171,36 @@ export function createEvalRepo(db: DatabaseSync) {
     },
     listCases(projectId?: string | null, limit = 50): EvalCaseRecord[] {
       const rows = projectId
-        ? (db.prepare("SELECT * FROM eval_cases WHERE project_id = ? ORDER BY created_at DESC LIMIT ?").all(projectId, limit) as EvalCaseRow[])
-        : (db.prepare("SELECT * FROM eval_cases ORDER BY created_at DESC LIMIT ?").all(limit) as EvalCaseRow[]);
+        ? (db
+            .prepare(
+              "SELECT * FROM eval_cases WHERE project_id = ? ORDER BY created_at DESC LIMIT ?"
+            )
+            .all(projectId, limit) as EvalCaseRow[])
+        : (db
+            .prepare("SELECT * FROM eval_cases ORDER BY created_at DESC LIMIT ?")
+            .all(limit) as EvalCaseRow[]);
       return rows.map(rowToCase);
     },
-    startRun(input: { caseId: string; sessionId?: string | null; projectId?: string | null }): EvalRunRecord {
+    startRun(input: {
+      caseId: string;
+      sessionId?: string | null;
+      projectId?: string | null;
+    }): EvalRunRecord {
       const id = newId("erun");
       const ts = now();
       db.prepare(
-        `INSERT INTO eval_runs (id, case_id, session_id, project_id, started_at, finished_at, passed, score, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).run(id, input.caseId, input.sessionId ?? null, input.projectId ?? null, ts, null, 0, 0, null);
+        `INSERT INTO eval_runs (id, case_id, session_id, project_id, started_at, finished_at, passed, score, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id,
+        input.caseId,
+        input.sessionId ?? null,
+        input.projectId ?? null,
+        ts,
+        null,
+        0,
+        0,
+        null
+      );
       return {
         id,
         caseId: input.caseId,
@@ -193,10 +213,13 @@ export function createEvalRepo(db: DatabaseSync) {
         notes: null,
       };
     },
-    completeRun(id: string, input: { passed: boolean; score: number; notes?: string | null }): EvalRunRecord {
+    completeRun(
+      id: string,
+      input: { passed: boolean; score: number; notes?: string | null }
+    ): EvalRunRecord {
       const ts = now();
       db.prepare(
-        `UPDATE eval_runs SET finished_at = ?, passed = ?, score = ?, notes = ? WHERE id = ?`,
+        `UPDATE eval_runs SET finished_at = ?, passed = ?, score = ?, notes = ? WHERE id = ?`
       ).run(ts, input.passed ? 1 : 0, input.score, input.notes ?? null, id);
       const row = db.prepare("SELECT * FROM eval_runs WHERE id = ?").get(id) as EvalRunRow;
       return rowToRun(row);
@@ -220,7 +243,7 @@ export function createEvalRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO answer_evaluations (
           id, session_id, retrieval_query_id, groundedness, citation_coverage, contradiction, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId ?? null,
@@ -229,7 +252,7 @@ export function createEvalRepo(db: DatabaseSync) {
         input.citationCoverage,
         input.contradiction,
         input.notes ?? null,
-        ts,
+        ts
       );
       return {
         id,
@@ -261,7 +284,7 @@ export function createEvalRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO retrieval_evaluations (
           id, retrieval_query_id, hit_at_k, mrr, precision, recall, notes, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.retrievalQueryId,
@@ -270,7 +293,7 @@ export function createEvalRepo(db: DatabaseSync) {
         input.precision,
         input.recall,
         input.notes ?? null,
-        ts,
+        ts
       );
       return {
         id,
@@ -283,11 +306,16 @@ export function createEvalRepo(db: DatabaseSync) {
         createdAt: ts,
       };
     },
-    recordSessionOutcome(input: { sessionId: string; outcome: SessionOutcomeKind; score: number; notes?: string | null }): SessionOutcomeRecord {
+    recordSessionOutcome(input: {
+      sessionId: string;
+      outcome: SessionOutcomeKind;
+      score: number;
+      notes?: string | null;
+    }): SessionOutcomeRecord {
       const id = newId("so");
       const ts = now();
       db.prepare(
-        `INSERT INTO session_outcomes (id, session_id, outcome, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO session_outcomes (id, session_id, outcome, score, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`
       ).run(id, input.sessionId, input.outcome, input.score, input.notes ?? null, ts);
       return {
         id,
@@ -300,7 +328,9 @@ export function createEvalRepo(db: DatabaseSync) {
     },
     listOutcomes(sessionId: string, limit = 20): SessionOutcomeRecord[] {
       const rows = db
-        .prepare("SELECT * FROM session_outcomes WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
+        .prepare(
+          "SELECT * FROM session_outcomes WHERE session_id = ? ORDER BY created_at DESC LIMIT ?"
+        )
         .all(sessionId, limit) as SessionOutcomeRow[];
       return rows.map(rowToOutcome);
     },

@@ -11,7 +11,16 @@ import type {
   RiskLevel,
   WorkspaceStrategy,
 } from "../../../shared/src/index.ts";
-import { asBool, asNumber, asString, asStringOrNull, now, newId, safeParseJson, safeParseJsonArray } from "./_shared.ts";
+import {
+  asBool,
+  asNumber,
+  asString,
+  asStringOrNull,
+  newId,
+  now,
+  safeParseJson,
+  safeParseJsonArray,
+} from "./_shared.ts";
 
 interface DevRunRow {
   id: string;
@@ -76,7 +85,12 @@ export interface DevRunUpdateInput {
   status?: DevRunStatus;
   risk?: RiskLevel;
   plan?: DevPlan | null;
-  workspace?: { id: string; strategy: WorkspaceStrategy; path: string; branch: string | null } | null;
+  workspace?: {
+    id: string;
+    strategy: WorkspaceStrategy;
+    path: string;
+    branch: string | null;
+  } | null;
   checks?: DevCheckResult[];
   repairAttempts?: number;
   diffSummary?: string;
@@ -96,14 +110,15 @@ export interface DevRunWithEdits extends DevRun {
 }
 
 function rowToRun(row: DevRunRow): DevRun {
-  const workspace = row.workspace_id && row.workspace_path && row.workspace_strategy
-    ? {
-        id: asString(row.workspace_id),
-        strategy: asString(row.workspace_strategy) as WorkspaceStrategy,
-        path: asString(row.workspace_path),
-        branch: asStringOrNull(row.workspace_branch),
-      }
-    : null;
+  const workspace =
+    row.workspace_id && row.workspace_path && row.workspace_strategy
+      ? {
+          id: asString(row.workspace_id),
+          strategy: asString(row.workspace_strategy) as WorkspaceStrategy,
+          path: asString(row.workspace_path),
+          branch: asStringOrNull(row.workspace_branch),
+        }
+      : null;
   const plan = safeParseJson<DevPlan | null>(row.plan_json);
   const checks = safeParseJsonArray<DevCheckResult>(row.checks_json);
   const filesEdited = safeParseJsonArray<string>(asString(row.files_edited_json ?? "[]"));
@@ -181,7 +196,7 @@ export function createDevRunsRepo(db: DatabaseSync) {
           diff_summary, diff_text, summary, files_edited_json, files_created_json,
           error_message, applied_at, applied_files_json,
           created_at, updated_at, finished_at, duration_ms
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId,
@@ -207,13 +222,15 @@ export function createDevRunsRepo(db: DatabaseSync) {
         ts,
         ts,
         null,
-        null,
+        null
       );
       const row = db.prepare("SELECT * FROM dev_runs WHERE id = ?").get(id) as DevRunRow;
       return rowToRun(row);
     },
     updateRun(runId: string, input: DevRunUpdateInput): DevRun {
-      const existing = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(runId) as DevRunRow | undefined;
+      const existing = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(runId) as
+        | DevRunRow
+        | undefined;
       if (!existing) throw new Error(`dev run not found: ${runId}`);
       const current = rowToRun(existing);
       const merged: DevRun = {
@@ -229,12 +246,19 @@ export function createDevRunsRepo(db: DatabaseSync) {
         durationMs: input.durationMs !== undefined ? input.durationMs : current.durationMs,
       };
       const ts = now();
-      const appliedFiles = input.appliedFiles !== undefined ? JSON.stringify(input.appliedFiles) : asString(existing.applied_files_json ?? "[]");
-      const appliedAt = input.appliedAt !== undefined ? input.appliedAt : asStringOrNull(existing.applied_at);
+      const appliedFiles =
+        input.appliedFiles !== undefined
+          ? JSON.stringify(input.appliedFiles)
+          : asString(existing.applied_files_json ?? "[]");
+      const appliedAt =
+        input.appliedAt !== undefined ? input.appliedAt : asStringOrNull(existing.applied_at);
       const workspaceId = merged.workspace?.id ?? asStringOrNull(existing.workspace_id) ?? null;
-      const workspaceStrategy = merged.workspace?.strategy ?? asStringOrNull(existing.workspace_strategy) ?? null;
-      const workspacePath = merged.workspace?.path ?? asStringOrNull(existing.workspace_path) ?? null;
-      const workspaceBranch = merged.workspace?.branch ?? asStringOrNull(existing.workspace_branch) ?? null;
+      const workspaceStrategy =
+        merged.workspace?.strategy ?? asStringOrNull(existing.workspace_strategy) ?? null;
+      const workspacePath =
+        merged.workspace?.path ?? asStringOrNull(existing.workspace_path) ?? null;
+      const workspaceBranch =
+        merged.workspace?.branch ?? asStringOrNull(existing.workspace_branch) ?? null;
       db.prepare(
         `UPDATE dev_runs
            SET plan_json = ?, status = ?, risk = ?,
@@ -244,7 +268,7 @@ export function createDevRunsRepo(db: DatabaseSync) {
                files_edited_json = ?, files_created_json = ?,
                error_message = ?, applied_at = ?, applied_files_json = ?,
                updated_at = ?, finished_at = ?, duration_ms = ?
-         WHERE id = ?`,
+         WHERE id = ?`
       ).run(
         JSON.stringify(merged.plan ?? {}),
         merged.status,
@@ -258,15 +282,21 @@ export function createDevRunsRepo(db: DatabaseSync) {
         input.diffSummary ?? asString(existing.diff_summary ?? ""),
         input.diffText ?? asString(existing.diff_text ?? ""),
         input.summary ?? asString(existing.summary ?? ""),
-        JSON.stringify(input.filesEdited ?? safeParseJsonArray<string>(asString(existing.files_edited_json ?? "[]"))),
-        JSON.stringify(input.filesCreated ?? safeParseJsonArray<string>(asString(existing.files_created_json ?? "[]"))),
+        JSON.stringify(
+          input.filesEdited ??
+            safeParseJsonArray<string>(asString(existing.files_edited_json ?? "[]"))
+        ),
+        JSON.stringify(
+          input.filesCreated ??
+            safeParseJsonArray<string>(asString(existing.files_created_json ?? "[]"))
+        ),
         merged.errorMessage,
         appliedAt,
         appliedFiles,
         ts,
         merged.finishedAt,
         merged.durationMs,
-        runId,
+        runId
       );
       const row = db.prepare("SELECT * FROM dev_runs WHERE id = ?").get(runId) as DevRunRow;
       return rowToRun(row);
@@ -286,7 +316,7 @@ export function createDevRunsRepo(db: DatabaseSync) {
         `INSERT INTO dev_edits (
           id, run_id, project_id, path, reason, old_text, new_text, change_type, status, risk,
           blocked_reason, error_message, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.runId,
@@ -301,18 +331,28 @@ export function createDevRunsRepo(db: DatabaseSync) {
         input.blockedReason ?? null,
         input.errorMessage ?? null,
         ts,
-        ts,
+        ts
       );
       return id;
     },
-    listEdits(runId: string): Array<DevEdit & { id: string; status: string; risk: RiskLevel; blockedReason: string | null; errorMessage: string | null }> {
+    listEdits(runId: string): Array<
+      DevEdit & {
+        id: string;
+        status: string;
+        risk: RiskLevel;
+        blockedReason: string | null;
+        errorMessage: string | null;
+      }
+    > {
       const rows = db
         .prepare("SELECT * FROM dev_edits WHERE run_id = ? ORDER BY created_at ASC")
         .all(runId) as DevEditRow[];
       return rows.map(rowToEditRecord);
     },
     getRun(id: string): DevRun | null {
-      const row = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(id) as DevRunRow | undefined;
+      const row = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(id) as
+        | DevRunRow
+        | undefined;
       return row ? rowToRun(row) : null;
     },
     listRuns(input?: { projectId?: string; sessionId?: string; limit?: number }): DevRun[] {
@@ -320,7 +360,9 @@ export function createDevRunsRepo(db: DatabaseSync) {
       let rows: DevRunRow[];
       if (input?.projectId && input.sessionId) {
         rows = db
-          .prepare("SELECT * FROM dev_runs WHERE project_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT ?")
+          .prepare(
+            "SELECT * FROM dev_runs WHERE project_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT ?"
+          )
           .all(input.projectId, input.sessionId, limit) as DevRunRow[];
       } else if (input?.projectId) {
         rows = db

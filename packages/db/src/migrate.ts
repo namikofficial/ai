@@ -1,4 +1,4 @@
-// @ts-ignore - node:fs types in this workspace are incomplete; runtime works.
+// @ts-expect-error - node:fs types in this workspace are incomplete; runtime works.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -36,7 +36,9 @@ export function runMigrations(db: DatabaseSync): { applied: string[]; skipped: s
       applied_at TEXT NOT NULL
     );
   `);
-  const knownRows = db.prepare("SELECT version FROM schema_migrations").all() as Array<{ version: string }>;
+  const knownRows = db.prepare("SELECT version FROM schema_migrations").all() as Array<{
+    version: string;
+  }>;
   const known = new Set(knownRows.map((row) => row.version));
   const applied: string[] = [];
   const skipped: string[] = [];
@@ -51,7 +53,7 @@ export function runMigrations(db: DatabaseSync): { applied: string[]; skipped: s
     db.exec(migration.sql);
     db.prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)").run(
       migration.version,
-      new Date().toISOString(),
+      new Date().toISOString()
     );
     applied.push(migration.version);
   }

@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeFile, mkdir, rm } from "node:fs/promises";
-import { createStore } from "../packages/db/src/store.ts";
+import test from "node:test";
 import { initializeStore } from "../packages/db/src/index.ts";
+import { createStore } from "../packages/db/src/store.ts";
 
 test("retrieval recordFeedback writes to retrieval_path_feedback and chunk_path_boosts", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-rfb-"));
@@ -29,7 +28,15 @@ test("retrieval recordFeedback writes to retrieval_path_feedback and chunk_path_
     mode: "local",
     depth: "standard",
     intent: "lookup",
-    analysis: { language: "ts", terms: ["alpha"], pathHints: ["src/alpha"], symbolHints: ["alpha"], isLikelyDefinition: true, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: "ts",
+      terms: ["alpha"],
+      pathHints: ["src/alpha"],
+      symbolHints: ["alpha"],
+      isLikelyDefinition: true,
+      isLikelyDebug: false,
+      notes: [],
+    },
   });
   await store.indexProject(project.id);
   const projectFiles = store.listProjectFiles(project.id, 100);
@@ -42,7 +49,7 @@ test("retrieval recordFeedback writes to retrieval_path_feedback and chunk_path_
   for (const file of [file1!, file2!]) {
     const chunkRow = db
       .prepare(
-        "SELECT c.id AS id FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.project_id = ? AND d.path = ? LIMIT 1",
+        "SELECT c.id AS id FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.project_id = ? AND d.path = ? LIMIT 1"
       )
       .get(project.id, file.path) as { id: string } | undefined;
     assert.ok(chunkRow, `chunk for ${file.path} should exist after indexProject`);
@@ -101,7 +108,10 @@ test("retrieval recordFeedback writes to retrieval_path_feedback and chunk_path_
   assert.ok(alphaBoost);
   assert.ok(betaBoost);
   assert.ok(missBoost);
-  assert.ok(alphaBoost!.weight > betaBoost!.weight, `alpha (${alphaBoost!.weight}) should outrank beta (${betaBoost!.weight})`);
+  assert.ok(
+    alphaBoost!.weight > betaBoost!.weight,
+    `alpha (${alphaBoost!.weight}) should outrank beta (${betaBoost!.weight})`
+  );
   assert.ok(alphaBoost!.weight > 0.5, "good feedback should push weight above neutral");
   assert.ok(betaBoost!.weight < 0.5, "bad feedback should push weight below neutral");
   store.db.close();
@@ -129,12 +139,20 @@ test("retrieval recordFeedback is atomic: a constraint violation rolls back all 
     mode: "local",
     depth: "standard",
     intent: "lookup",
-    analysis: { language: "ts", terms: ["alpha"], pathHints: ["src/alpha"], symbolHints: ["alpha"], isLikelyDefinition: true, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: "ts",
+      terms: ["alpha"],
+      pathHints: ["src/alpha"],
+      symbolHints: ["alpha"],
+      isLikelyDefinition: true,
+      isLikelyDebug: false,
+      notes: [],
+    },
   });
   await store.indexProject(project.id);
   const alphaChunk = store.db
     .prepare(
-      "SELECT c.id AS id FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.project_id = ? AND d.path = ? LIMIT 1",
+      "SELECT c.id AS id FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.project_id = ? AND d.path = ? LIMIT 1"
     )
     .get(project.id, "src/alpha.ts") as { id: string };
 
@@ -152,17 +170,17 @@ test("retrieval recordFeedback is atomic: a constraint violation rolls back all 
   assert.equal(
     store.retrieval.listFeedback(query.id, 50).length,
     beforeFeedback + 1,
-    "first call should persist the feedback",
+    "first call should persist the feedback"
   );
   assert.equal(
     store.retrieval.listPathFeedback(project.id, 50).length,
     beforePathFeedback + 1,
-    "first call should persist path feedback",
+    "first call should persist path feedback"
   );
   assert.equal(
     store.retrieval.listPathBoosts(project.id, 50).length,
     beforeBoosts + 1,
-    "first call should persist a chunk path boost",
+    "first call should persist a chunk path boost"
   );
 
   const baselineFeedback = store.retrieval.listFeedback(query.id, 50).length;
@@ -171,41 +189,46 @@ test("retrieval recordFeedback is atomic: a constraint violation rolls back all 
 
   const originalPrepare = store.db.prepare.bind(store.db);
   let shouldThrow = false;
-  (store.db as unknown as { prepare: (sql: string) => unknown }).prepare = (sql: string) => {
-    if (shouldThrow && sql.includes("chunk_path_boosts") && (sql.includes("INSERT") || sql.includes("UPDATE"))) {
+  store.db.prepare = ((sql: string) => {
+    if (
+      shouldThrow &&
+      sql.includes("chunk_path_boosts") &&
+      (sql.includes("INSERT") || sql.includes("UPDATE"))
+    ) {
       throw new Error("simulated constraint violation");
     }
     return originalPrepare(sql);
-  };
+  }) as typeof store.db.prepare;
   shouldThrow = true;
   try {
     assert.throws(
-      () => store.retrieval.recordFeedback({
-        retrievalQueryId: query.id,
-        chunkId: alphaChunk.id,
-        rating: "good",
-        notes: "this should roll back",
-      }),
-      /simulated constraint violation/,
+      () =>
+        store.retrieval.recordFeedback({
+          retrievalQueryId: query.id,
+          chunkId: alphaChunk.id,
+          rating: "good",
+          notes: "this should roll back",
+        }),
+      /simulated constraint violation/
     );
   } finally {
-    (store.db as unknown as { prepare: (sql: string) => unknown }).prepare = originalPrepare;
+    store.db.prepare = originalPrepare;
   }
 
   assert.equal(
     store.retrieval.listFeedback(query.id, 50).length,
     baselineFeedback,
-    "feedback row should have been rolled back",
+    "feedback row should have been rolled back"
   );
   assert.equal(
     store.retrieval.listPathFeedback(project.id, 50).length,
     baselinePathFeedback,
-    "path_feedback row should have been rolled back",
+    "path_feedback row should have been rolled back"
   );
   assert.equal(
     store.retrieval.listPathBoosts(project.id, 50).length,
     baselineBoosts,
-    "chunk_path_boost row should have been rolled back",
+    "chunk_path_boost row should have been rolled back"
   );
 
   store.db.close();

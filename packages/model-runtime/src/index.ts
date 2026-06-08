@@ -1,3 +1,4 @@
+import { checkCloudGuard, redactSecrets } from "../../safety/src/index.ts";
 import type {
   ModelCallStatus,
   ModelHealthStatus,
@@ -5,14 +6,13 @@ import type {
   ModelProviderRecord,
   ModelRole,
 } from "../../shared/src/index.ts";
-import { checkCloudGuard, redactSecrets } from "../../safety/src/index.ts";
 import { HeuristicAdapter } from "./adapters/heuristic.ts";
 import { MockAdapter } from "./adapters/mock.ts";
 import { OpenAICompatAdapter } from "./adapters/openai-compat.ts";
-import type { ModelProviderAdapter, ModelHealthResult } from "./adapters/types.ts";
+import type { ModelHealthResult, ModelProviderAdapter } from "./adapters/types.ts";
 import { HeuristicModelRouter, type ModelRouter } from "./router.ts";
 
-export type { ModelProviderAdapter, ModelHealthResult };
+export type { ModelHealthResult, ModelProviderAdapter };
 
 export interface ModelRouteDetails {
   risk?: "low" | "medium" | "high";
@@ -93,22 +93,20 @@ export interface ModelRouteDecision {
   reason: string;
 }
 
-export interface ModelCallRecordedHook {
-  (input: {
-    profileId: string;
-    role: ModelRole;
-    promptTokens: number;
-    completionTokens: number;
-    latencyMs: number;
-    status: ModelCallStatus;
-    request: Record<string, unknown>;
-    response: Record<string, unknown>;
-    error?: string | null;
-    sessionId?: string | null;
-    taskId?: string | null;
-    retrievalQueryId?: string | null;
-  }): void;
-}
+export type ModelCallRecordedHook = (input: {
+  profileId: string;
+  role: ModelRole;
+  promptTokens: number;
+  completionTokens: number;
+  latencyMs: number;
+  status: ModelCallStatus;
+  request: Record<string, unknown>;
+  response: Record<string, unknown>;
+  error?: string | null;
+  sessionId?: string | null;
+  taskId?: string | null;
+  retrievalQueryId?: string | null;
+}) => void;
 
 export interface ModelInvokeOptions {
   sessionId?: string | null;
@@ -120,23 +118,44 @@ export interface ModelInvokeOptions {
 
 export interface ModelRuntime {
   route(input: ModelRouteInput): Promise<ModelRouteDecision>;
-  health(providerId?: string): Promise<Array<{ providerId: string; status: ModelHealthStatus; latencyMs: number | null; detail: string | null }>>;
-  invoke(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
-  embed(profileId: string, request: EmbeddingRequest, options?: ModelInvokeOptions): Promise<EmbeddingResult>;
+  health(providerId?: string): Promise<
+    Array<{
+      providerId: string;
+      status: ModelHealthStatus;
+      latencyMs: number | null;
+      detail: string | null;
+    }>
+  >;
+  invoke(
+    profileId: string,
+    request: ModelInvokeRequest,
+    options?: ModelInvokeOptions
+  ): Promise<ModelInvokeResult>;
+  embed(
+    profileId: string,
+    request: EmbeddingRequest,
+    options?: ModelInvokeOptions
+  ): Promise<EmbeddingResult>;
   rerank(profileId: string, request: RerankRequest): Promise<RerankResult>;
   listProfiles(): ModelProfileRecord[];
-  listProviders(): Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
+  listProviders(): Array<
+    Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">
+  >;
   isCloudEnabled(): boolean;
 }
 
 export interface ModelRuntimeInput {
-  providers: Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
+  providers: Array<
+    Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">
+  >;
   profiles: ModelProfileRecord[];
   cloudEnabled: boolean;
   recordCall?: ModelCallRecordedHook;
 }
 
-function redactMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | null {
+function redactMetadata(
+  metadata: Record<string, unknown> | undefined
+): Record<string, unknown> | null {
   if (!metadata) return null;
   try {
     const text = JSON.stringify(metadata);
@@ -156,7 +175,10 @@ export interface LegacyRouteDetails {
   goal?: string;
 }
 
-export function selectModelProfile(mode: LegacyRouteMode, details: LegacyRouteDetails = {}): string {
+export function selectModelProfile(
+  mode: LegacyRouteMode,
+  details: LegacyRouteDetails = {}
+): string {
   if (mode === "cloud") return "ask-cloud-router";
   if (mode === "hybrid") return "ask-hybrid-router";
   if (mode === "index") return "indexer-local";
@@ -176,11 +198,19 @@ export function selectModelProfile(mode: LegacyRouteMode, details: LegacyRouteDe
 export function buildAnswer(
   question: string,
   project: { name: string; id?: string; path?: string; [key: string]: unknown },
-  chunks: Array<{ path: string; startLine: number; endLine: number; content?: string; [key: string]: unknown }>,
+  chunks: Array<{
+    path: string;
+    startLine: number;
+    endLine: number;
+    content?: string;
+    [key: string]: unknown;
+  }>,
   citations: Array<{ path: string; startLine: number; endLine: number; score?: number }>,
-  confidence: number,
+  confidence: number
 ): string {
-  const citationLines = citations.map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}`).join("\n");
+  const citationLines = citations
+    .map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}`)
+    .join("\n");
   const chunkSummary = chunks
     .map((chunk) => `- ${chunk.path}:${chunk.startLine}-${chunk.endLine}`)
     .join("\n");
@@ -226,7 +256,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
           provider.id,
           kind,
           provider.baseUrl ?? "http://127.0.0.1:11434",
-          provider.apiKeyEnv ? process.env[provider.apiKeyEnv] ?? null : null
+          provider.apiKeyEnv ? (process.env[provider.apiKeyEnv] ?? null) : null
         );
         break;
       default:
@@ -236,7 +266,10 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
     return adapter;
   }
 
-  function recordCallSafely(payload: Parameters<ModelCallRecordedHook>[0], options?: ModelInvokeOptions): void {
+  function recordCallSafely(
+    payload: Parameters<ModelCallRecordedHook>[0],
+    options?: ModelInvokeOptions
+  ): void {
     const hook = options?.recordCall ?? input.recordCall;
     if (!hook) return;
     try {
@@ -260,19 +293,37 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
       return input.cloudEnabled;
     },
     async health(providerId?: string) {
-      const providers = providerId ? input.providers.filter((p) => p.id === providerId) : input.providers;
-      const results: Array<{ providerId: string; status: ModelHealthStatus; latencyMs: number | null; detail: string | null }> = [];
+      const providers = providerId
+        ? input.providers.filter((p) => p.id === providerId)
+        : input.providers;
+      const results: Array<{
+        providerId: string;
+        status: ModelHealthStatus;
+        latencyMs: number | null;
+        detail: string | null;
+      }> = [];
       for (const provider of providers) {
         const normalized = normalizeProviderKind(provider.kind);
         if (normalized === "openai_compat" && !input.cloudEnabled) {
-          results.push({ providerId: provider.id, status: "disabled", latencyMs: null, detail: "cloud disabled" });
+          results.push({
+            providerId: provider.id,
+            status: "disabled",
+            latencyMs: null,
+            detail: "cloud disabled",
+          });
           continue;
         }
         // Use a heuristic adapter to check health if no profile exists for this provider yet
-        const profile = input.profiles.find((p) => p.providerId === provider.id) ?? input.profiles[0];
+        const profile =
+          input.profiles.find((p) => p.providerId === provider.id) ?? input.profiles[0];
         const adapter = profile ? getAdapter(profile) : new HeuristicAdapter(provider.id);
         const result = await adapter.health();
-        results.push({ providerId: provider.id, status: result.status, latencyMs: result.latencyMs, detail: result.detail });
+        results.push({
+          providerId: provider.id,
+          status: result.status,
+          latencyMs: result.latencyMs,
+          detail: result.detail,
+        });
       }
       return results;
     },
@@ -288,21 +339,28 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
           profileLocalOnly: profile.localOnly,
         });
         if (!guard.allowed) {
-          const fallbackId = options?.fallbackProfileId ?? profile.fallbackProfileId ?? input.profiles.find((p) => p.role === profile.role && p.localOnly && p.enabled)?.id ?? null;
-          recordCallSafely({
-            profileId,
-            role: request.role,
-            promptTokens: 0,
-            completionTokens: 0,
-            latencyMs: 0,
-            status: "blocked",
-            request: { ...request, metadata: redactMetadata(request.metadata) },
-            response: { blocked: true, reason: guard.reason },
-            error: guard.reason,
-            sessionId: options?.sessionId,
-            taskId: options?.taskId,
-            retrievalQueryId: options?.retrievalQueryId,
-          }, options);
+          const fallbackId =
+            options?.fallbackProfileId ??
+            profile.fallbackProfileId ??
+            input.profiles.find((p) => p.role === profile.role && p.localOnly && p.enabled)?.id ??
+            null;
+          recordCallSafely(
+            {
+              profileId,
+              role: request.role,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs: 0,
+              status: "blocked",
+              request: { ...request, metadata: redactMetadata(request.metadata) },
+              response: { blocked: true, reason: guard.reason },
+              error: guard.reason,
+              sessionId: options?.sessionId,
+              taskId: options?.taskId,
+              retrievalQueryId: options?.retrievalQueryId,
+            },
+            options
+          );
           if (fallbackId && fallbackId !== profileId) {
             return this.invoke(fallbackId, request, options);
           }
@@ -313,42 +371,51 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
       const adapter = getAdapter(profile);
       const started = Date.now();
       try {
-        const result = await adapter.invoke({ ...request, modelName: request.modelName ?? profile.modelName });
+        const result = await adapter.invoke({
+          ...request,
+          modelName: request.modelName ?? profile.modelName,
+        });
         const latencyMs = Date.now() - started;
-        
-        recordCallSafely({
-          profileId,
-          role: request.role,
-          promptTokens: result.promptTokens,
-          completionTokens: result.completionTokens,
-          latencyMs,
-          status: "ok",
-          request: { ...request, metadata: redactMetadata(request.metadata) },
-          response: { text: result.text.slice(0, 1000), usage: result.usage },
-          sessionId: options?.sessionId,
-          taskId: options?.taskId,
-          retrievalQueryId: options?.retrievalQueryId,
-        }, options);
+
+        recordCallSafely(
+          {
+            profileId,
+            role: request.role,
+            promptTokens: result.promptTokens,
+            completionTokens: result.completionTokens,
+            latencyMs,
+            status: "ok",
+            request: { ...request, metadata: redactMetadata(request.metadata) },
+            response: { text: result.text.slice(0, 1000), usage: result.usage },
+            sessionId: options?.sessionId,
+            taskId: options?.taskId,
+            retrievalQueryId: options?.retrievalQueryId,
+          },
+          options
+        );
 
         return { ...result, profileId, providerId: profile.providerId, status: "ok", latencyMs };
       } catch (error) {
         const latencyMs = Date.now() - started;
         const message = error instanceof Error ? error.message : String(error);
-        
-        recordCallSafely({
-          profileId,
-          role: request.role,
-          promptTokens: 0,
-          completionTokens: 0,
-          latencyMs,
-          status: "failed",
-          request: { ...request, metadata: redactMetadata(request.metadata) },
-          response: { error: message },
-          error: message,
-          sessionId: options?.sessionId,
-          taskId: options?.taskId,
-          retrievalQueryId: options?.retrievalQueryId,
-        }, options);
+
+        recordCallSafely(
+          {
+            profileId,
+            role: request.role,
+            promptTokens: 0,
+            completionTokens: 0,
+            latencyMs,
+            status: "failed",
+            request: { ...request, metadata: redactMetadata(request.metadata) },
+            response: { error: message },
+            error: message,
+            sessionId: options?.sessionId,
+            taskId: options?.taskId,
+            retrievalQueryId: options?.retrievalQueryId,
+          },
+          options
+        );
 
         const fallbackId = options?.fallbackProfileId ?? profile.fallbackProfileId;
         if (fallbackId && fallbackId !== profileId) {
@@ -357,22 +424,38 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
         if (profile.providerId) {
           const heuristic = new HeuristicAdapter(profile.providerId);
           const fallbackStarted = Date.now();
-          const fallbackResult = await heuristic.invoke({ ...request, modelName: request.modelName ?? profile.modelName });
-          recordCallSafely({
+          const fallbackResult = await heuristic.invoke({
+            ...request,
+            modelName: request.modelName ?? profile.modelName,
+          });
+          recordCallSafely(
+            {
+              profileId,
+              role: request.role,
+              promptTokens: fallbackResult.promptTokens,
+              completionTokens: fallbackResult.completionTokens,
+              latencyMs: Date.now() - fallbackStarted,
+              status: "fallback",
+              request: { ...request, metadata: redactMetadata(request.metadata) },
+              response: {
+                text: fallbackResult.text.slice(0, 1000),
+                usage: fallbackResult.usage,
+                fallbackFrom: message,
+              },
+              error: message,
+              sessionId: options?.sessionId,
+              taskId: options?.taskId,
+              retrievalQueryId: options?.retrievalQueryId,
+            },
+            options
+          );
+          return {
+            ...fallbackResult,
             profileId,
-            role: request.role,
-            promptTokens: fallbackResult.promptTokens,
-            completionTokens: fallbackResult.completionTokens,
-            latencyMs: Date.now() - fallbackStarted,
+            providerId: profile.providerId,
             status: "fallback",
-            request: { ...request, metadata: redactMetadata(request.metadata) },
-            response: { text: fallbackResult.text.slice(0, 1000), usage: fallbackResult.usage, fallbackFrom: message },
-            error: message,
-            sessionId: options?.sessionId,
-            taskId: options?.taskId,
-            retrievalQueryId: options?.retrievalQueryId,
-          }, options);
-          return { ...fallbackResult, profileId, providerId: profile.providerId, status: "fallback", latencyMs: Date.now() - fallbackStarted };
+            latencyMs: Date.now() - fallbackStarted,
+          };
         }
         throw error;
       }
@@ -386,51 +469,70 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
         const result = adapter.embed
           ? await adapter.embed(request)
           : await new HeuristicAdapter(profile.providerId).embed(request);
-        recordCallSafely({
-          profileId,
-          role: "embedding",
-          promptTokens: Array.isArray(request.input) ? request.input.join("\n").length : request.input.length,
-          completionTokens: result.embeddings.length,
-          latencyMs: Date.now() - started,
-          status: "ok",
-          request: { ...request },
-          response: { dimensions: result.dimensions, modelName: result.modelName, providerId: result.providerId },
-          sessionId: options?.sessionId,
-          taskId: options?.taskId,
-          retrievalQueryId: options?.retrievalQueryId,
-        }, options);
+        recordCallSafely(
+          {
+            profileId,
+            role: "embedding",
+            promptTokens: Array.isArray(request.input)
+              ? request.input.join("\n").length
+              : request.input.length,
+            completionTokens: result.embeddings.length,
+            latencyMs: Date.now() - started,
+            status: "ok",
+            request: { ...request },
+            response: {
+              dimensions: result.dimensions,
+              modelName: result.modelName,
+              providerId: result.providerId,
+            },
+            sessionId: options?.sessionId,
+            taskId: options?.taskId,
+            retrievalQueryId: options?.retrievalQueryId,
+          },
+          options
+        );
         return result;
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         const heuristic = new HeuristicAdapter(profile.providerId);
         const fallback = await heuristic.embed(request);
-        recordCallSafely({
-          profileId,
-          role: "embedding",
-          promptTokens: Array.isArray(request.input) ? request.input.join("\n").length : request.input.length,
-          completionTokens: fallback.embeddings.length,
-          latencyMs: Date.now() - started,
-          status: "fallback",
-          request: { ...request },
-          response: { dimensions: fallback.dimensions, modelName: fallback.modelName, providerId: fallback.providerId, fallbackFrom: message },
-          error: message,
-          sessionId: options?.sessionId,
-          taskId: options?.taskId,
-          retrievalQueryId: options?.retrievalQueryId,
-        }, options);
+        recordCallSafely(
+          {
+            profileId,
+            role: "embedding",
+            promptTokens: Array.isArray(request.input)
+              ? request.input.join("\n").length
+              : request.input.length,
+            completionTokens: fallback.embeddings.length,
+            latencyMs: Date.now() - started,
+            status: "fallback",
+            request: { ...request },
+            response: {
+              dimensions: fallback.dimensions,
+              modelName: fallback.modelName,
+              providerId: fallback.providerId,
+              fallbackFrom: message,
+            },
+            error: message,
+            sessionId: options?.sessionId,
+            taskId: options?.taskId,
+            retrievalQueryId: options?.retrievalQueryId,
+          },
+          options
+        );
         return fallback;
       }
     },
     async rerank(profileId: string, request: RerankRequest) {
       const profile = input.profiles.find((p) => p.id === profileId);
       if (!profile) throw new Error(`Unknown profile: ${profileId}`);
-      
+
       const adapter = getAdapter(profile);
       if (!adapter.rerank) {
         const heuristic = new HeuristicAdapter(profile.providerId);
         return heuristic.rerank(request);
       }
       return adapter.rerank(request);
-    }
+    },
   };
 }

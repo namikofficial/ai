@@ -1,6 +1,11 @@
-import type { ConfigSnapshot, ProjectSummary, SessionRecord, TaskRecord } from "../../../packages/shared/src/index.ts";
-import { createEvent } from "../../../packages/shared/src/index.ts";
 import type { createStore } from "../../../packages/db/src/store.ts";
+import type {
+  ConfigSnapshot,
+  ProjectSummary,
+  SessionRecord,
+  TaskRecord,
+} from "../../../packages/shared/src/index.ts";
+import { createEvent } from "../../../packages/shared/src/index.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -139,7 +144,8 @@ function toolDescriptors(): ToolDescriptor[] {
     },
     {
       name: "ai_get_subtask_context",
-      description: "Return the session, task, files, chunks, and lessons needed to work on a subtask.",
+      description:
+        "Return the session, task, files, chunks, and lessons needed to work on a subtask.",
       inputSchema: {
         type: "object",
         properties: {
@@ -351,7 +357,8 @@ function toolDescriptors(): ToolDescriptor[] {
     },
     {
       name: "ai_record_feedback",
-      description: "Record retrieval feedback (good/bad chunk or missed path) so future rerank calls are tuned. Triggers chunk_path_boost updates.",
+      description:
+        "Record retrieval feedback (good/bad chunk or missed path) so future rerank calls are tuned. Triggers chunk_path_boost updates.",
       inputSchema: {
         type: "object",
         properties: {
@@ -367,14 +374,17 @@ function toolDescriptors(): ToolDescriptor[] {
   ];
 }
 
-function logMcpCall(store: Store, input: {
-  toolName: string;
-  sessionId?: string | null;
-  projectId?: string | null;
-  payload: Record<string, unknown>;
-  blocked?: boolean;
-  output?: unknown;
-}): void {
+function logMcpCall(
+  store: Store,
+  input: {
+    toolName: string;
+    sessionId?: string | null;
+    projectId?: string | null;
+    payload: Record<string, unknown>;
+    blocked?: boolean;
+    output?: unknown;
+  }
+): void {
   store.createMcpCall({
     toolName: input.toolName,
     sessionId: input.sessionId ?? null,
@@ -385,12 +395,21 @@ function logMcpCall(store: Store, input: {
   });
 }
 
-async function handleTool(store: Store, config: ConfigSnapshot, name: string, args: Record<string, unknown>): Promise<unknown> {
+async function handleTool(
+  store: Store,
+  config: ConfigSnapshot,
+  name: string,
+  args: Record<string, unknown>
+): Promise<unknown> {
   switch (name) {
     case "ai_search_project": {
       const project = asString(args.project);
       const query = asString(args.query);
-      return { project, query, chunks: store.searchChunks(project, query, { limit: asNumber(args.limit, 8) }) };
+      return {
+        project,
+        query,
+        chunks: store.searchChunks(project, query, { limit: asNumber(args.limit, 8) }),
+      };
     }
     case "ai_ask_rag": {
       return store.ask({
@@ -411,22 +430,33 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
       return session;
     }
     case "ai_create_plan":
-      return (await store.createPlan({
-        project: asString(args.project),
-        goal: asString(args.goal),
-        risk: args.risk === "low" || args.risk === "high" ? args.risk : "medium",
-      })).response;
+      return (
+        await store.createPlan({
+          project: asString(args.project),
+          goal: asString(args.goal),
+          risk: args.risk === "low" || args.risk === "high" ? args.risk : "medium",
+        })
+      ).response;
     case "ai_get_current_task":
       return store.getCurrentTask(asString(args.sessionId));
     case "ai_get_next_subtask":
       return store.getNextSubtask(asString(args.sessionId));
     case "ai_get_subtask_context":
-      return store.getSubtaskContext(asString(args.sessionId), args.taskId == null ? null : asString(args.taskId));
+      return store.getSubtaskContext(
+        asString(args.sessionId),
+        args.taskId == null ? null : asString(args.taskId)
+      );
     case "ai_create_handoff":
       return await store.createHandoff({
         sessionId: asString(args.sessionId),
         project: asString(args.project),
-        target: args.target === "opencode" || args.target === "codex" || args.target === "clipboard" || args.target === "file" ? args.target : "manual",
+        target:
+          args.target === "opencode" ||
+          args.target === "codex" ||
+          args.target === "clipboard" ||
+          args.target === "file"
+            ? args.target
+            : "manual",
         subtask: asString(args.subtask),
       });
     case "ai_mark_subtask_done": {
@@ -447,7 +477,9 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
     }
     case "ai_get_recent_lessons": {
       const project = args.project ? asString(args.project) : "";
-      return project ? store.listProjectLessons(project, asNumber(args.limit, 10)) : store.listRecentLessons(asNumber(args.limit, 10));
+      return project
+        ? store.listProjectLessons(project, asNumber(args.limit, 10))
+        : store.listRecentLessons(asNumber(args.limit, 10));
     }
     case "ai_reflect_session": {
       const sessionId = asString(args.sessionId);
@@ -463,8 +495,8 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
         createEvent(
           "session.reflected",
           { sessionId, projectId: session.projectId, queuedJobId: job.id, source: "mcp" },
-          { sessionId, projectId: session.projectId, agent: "mcp" },
-        ),
+          { sessionId, projectId: session.projectId, agent: "mcp" }
+        )
       );
       return {
         queued: true,
@@ -474,7 +506,9 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
       };
     }
     case "ai_list_sessions":
-      return args.project ? store.listProjectSessions(asString(args.project), asNumber(args.limit, 20)) : store.listSessions(asNumber(args.limit, 20));
+      return args.project
+        ? store.listProjectSessions(asString(args.project), asNumber(args.limit, 20))
+        : store.listSessions(asNumber(args.limit, 20));
     case "ai_get_session_trace": {
       const sessionId = asString(args.sessionId);
       const session = store.getSession(sessionId);
@@ -492,7 +526,9 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
       const memoryEntries = projectId
         ? store.memory.listEntries(projectId, undefined, 200)
         : store.memory.listEntries(null, undefined, 200);
-      const facts = projectId ? store.memory.listFacts(projectId, 200) : store.memory.listFacts(null, 200);
+      const facts = projectId
+        ? store.memory.listFacts(projectId, 200)
+        : store.memory.listFacts(null, 200);
       const rules = projectId ? store.memory.listProjectRules(projectId, 200) : [];
       const skills = store.skills.listSkills(undefined, 200);
       const reviews = projectId ? store.listReviews(projectId, 200) : store.listReviews(null, 200);
@@ -562,37 +598,55 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
     case "ai_list_memory_candidates": {
       const projectId = args.project ? asString(args.project) : null;
       const statusValue = args.status;
-      const statusFilter = statusValue === "pending" || statusValue === "accepted" || statusValue === "rejected"
-        ? statusValue
-        : undefined;
+      const statusFilter =
+        statusValue === "pending" || statusValue === "accepted" || statusValue === "rejected"
+          ? statusValue
+          : undefined;
       return store.memory.listCandidates(statusFilter, projectId, asNumber(args.limit, 50));
     }
     case "ai_accept_memory_candidate": {
       const candidateId = asString(args.candidateId);
-      const before = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId);
+      const before = store.memory
+        .listCandidates(undefined, undefined, 1000)
+        .find((entry) => entry.id === candidateId);
       if (!before) {
         throw new Error(`Unknown memory candidate: ${candidateId}`);
       }
       if (before.status !== "pending") {
-        return { entry: null, candidate: before, note: `Candidate already ${before.status}; no change.` };
+        return {
+          entry: null,
+          candidate: before,
+          note: `Candidate already ${before.status}; no change.`,
+        };
       }
       const notes = args.notes ? asString(args.notes) : null;
       const entry = store.memory.acceptCandidate(candidateId, notes);
-      const after = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId) ?? before;
+      const after =
+        store.memory
+          .listCandidates(undefined, undefined, 1000)
+          .find((entry) => entry.id === candidateId) ?? before;
       store.appendEvent(
-        createEvent("lesson.created", { kind: "memory", source: "mcp", candidateId }, {
-          sessionId: before.sessionId,
-          projectId: before.projectId,
-          agent: "mcp",
-        }),
+        createEvent(
+          "lesson.created",
+          { kind: "memory", source: "mcp", candidateId },
+          {
+            sessionId: before.sessionId,
+            projectId: before.projectId,
+            agent: "mcp",
+          }
+        )
       );
       return { entry, candidate: after };
     }
     case "ai_list_skill_candidates": {
       const statusValue = args.status;
-      const statusFilter = statusValue === "pending" || statusValue === "active" || statusValue === "rejected" || statusValue === "deprecated"
-        ? statusValue
-        : "pending";
+      const statusFilter =
+        statusValue === "pending" ||
+        statusValue === "active" ||
+        statusValue === "rejected" ||
+        statusValue === "deprecated"
+          ? statusValue
+          : "pending";
       return store.skills.listCandidates(statusFilter, asNumber(args.limit, 50));
     }
     case "ai_accept_skill_candidate": {
@@ -606,17 +660,23 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
       const allCandidates = store.skills.listCandidates(undefined, 1000);
       const after = allCandidates.find((entry) => entry.id === candidateId) ?? before;
       store.appendEvent(
-        createEvent("lesson.created", { kind: "skill", source: "mcp", candidateId }, {
-          projectId: before.projectId,
-          agent: "mcp",
-        }),
+        createEvent(
+          "lesson.created",
+          { kind: "skill", source: "mcp", candidateId },
+          {
+            projectId: before.projectId,
+            agent: "mcp",
+          }
+        )
       );
       return { skill, candidate: after };
     }
     case "ai_reject_memory_candidate": {
       const candidateId = asString(args.candidateId);
       const reason = args.reason ? asString(args.reason) : null;
-      const before = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId);
+      const before = store.memory
+        .listCandidates(undefined, undefined, 1000)
+        .find((entry) => entry.id === candidateId);
       if (!before) {
         throw new Error(`Unknown memory candidate: ${candidateId}`);
       }
@@ -624,13 +684,20 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
         return { candidate: before, note: `Candidate already ${before.status}; no change.` };
       }
       store.memory.reviewCandidate(candidateId, "rejected", reason);
-      const after = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId) ?? before;
+      const after =
+        store.memory
+          .listCandidates(undefined, undefined, 1000)
+          .find((entry) => entry.id === candidateId) ?? before;
       store.appendEvent(
-        createEvent("lesson.created", { kind: "memory_rejected", source: "mcp", candidateId, reason }, {
-          sessionId: before.sessionId,
-          projectId: before.projectId,
-          agent: "mcp",
-        }),
+        createEvent(
+          "lesson.created",
+          { kind: "memory_rejected", source: "mcp", candidateId, reason },
+          {
+            sessionId: before.sessionId,
+            projectId: before.projectId,
+            agent: "mcp",
+          }
+        )
       );
       return { candidate: after };
     }
@@ -644,10 +711,14 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
       }
       const updated = store.skills.reviewCandidate(candidateId, "rejected");
       store.appendEvent(
-        createEvent("lesson.created", { kind: "skill_rejected", source: "mcp", candidateId, reason }, {
-          projectId: candidate.projectId,
-          agent: "mcp",
-        }),
+        createEvent(
+          "lesson.created",
+          { kind: "skill_rejected", source: "mcp", candidateId, reason },
+          {
+            projectId: candidate.projectId,
+            agent: "mcp",
+          }
+        )
       );
       return { candidate: updated };
     }
@@ -675,16 +746,21 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
     case "ai_record_feedback": {
       const retrievalQueryId = asString(args.retrievalQueryId);
       const ratingInput = asString(args.rating);
-      const rating = ratingInput === "good" || ratingInput === "bad" || ratingInput === "missed"
-        ? ratingInput
-        : null;
+      const rating =
+        ratingInput === "good" || ratingInput === "bad" || ratingInput === "missed"
+          ? ratingInput
+          : null;
       if (!rating) {
         throw new Error(`Invalid rating: must be 'good', 'bad', or 'missed'`);
       }
-      const chunkId = typeof args.chunkId === "string" && args.chunkId.length > 0 ? args.chunkId : null;
-      const missedPath = typeof args.missedPath === "string" && args.missedPath.length > 0 ? args.missedPath : null;
+      const chunkId =
+        typeof args.chunkId === "string" && args.chunkId.length > 0 ? args.chunkId : null;
+      const missedPath =
+        typeof args.missedPath === "string" && args.missedPath.length > 0 ? args.missedPath : null;
       if (rating !== "missed" && !chunkId) {
-        throw new Error(`'good' and 'bad' feedback require a chunkId; 'missed' requires a missedPath`);
+        throw new Error(
+          `'good' and 'bad' feedback require a chunkId; 'missed' requires a missedPath`
+        );
       }
       if (rating === "missed" && !missedPath) {
         throw new Error(`'missed' feedback requires a missedPath`);
@@ -707,7 +783,7 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
         ? pathBoosts.find((b) => {
             const chunkRow = store.db
               .prepare(
-                "SELECT d.path AS path FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.id = ?",
+                "SELECT d.path AS path FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.id = ?"
               )
               .get(chunkId) as { path: string | null } | undefined;
             return chunkRow?.path === b.path;
@@ -719,8 +795,8 @@ async function handleTool(store: Store, config: ConfigSnapshot, name: string, ar
         createEvent(
           "lesson.created",
           { kind: "retrieval_feedback", source: "mcp", retrievalQueryId, rating },
-          { projectId: query.projectId, sessionId: query.sessionId, agent: "mcp" },
-        ),
+          { projectId: query.projectId, sessionId: query.sessionId, agent: "mcp" }
+        )
       );
       return {
         feedback,
@@ -736,7 +812,11 @@ export function getToolDescriptors(): ToolDescriptor[] {
   return toolDescriptors();
 }
 
-export async function handleMcpRequest(store: Store, config: ConfigSnapshot, request: JsonRpcRequest): Promise<JsonRpcResponse | null> {
+export async function handleMcpRequest(
+  store: Store,
+  config: ConfigSnapshot,
+  request: JsonRpcRequest
+): Promise<JsonRpcResponse | null> {
   if (request.method === "initialize") {
     return ok(request.id ?? null, {
       protocolVersion: "2024-11-05",
@@ -750,7 +830,11 @@ export async function handleMcpRequest(store: Store, config: ConfigSnapshot, req
     });
   }
 
-  if (request.method === "initialized" || request.method === "notifications/initialized" || request.method === "ping") {
+  if (
+    request.method === "initialized" ||
+    request.method === "notifications/initialized" ||
+    request.method === "ping"
+  ) {
     return request.id == null ? null : ok(request.id, {});
   }
 
@@ -767,7 +851,11 @@ export async function handleMcpRequest(store: Store, config: ConfigSnapshot, req
       logMcpCall(store, {
         toolName,
         sessionId: args.sessionId ? asString(args.sessionId) : null,
-        projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
+        projectId: args.project
+          ? asString(args.project)
+          : args.projectId
+            ? asString(args.projectId)
+            : null,
         payload: args,
         blocked: true,
         output: { error: `Unknown tool: ${toolName}` },
@@ -779,16 +867,28 @@ export async function handleMcpRequest(store: Store, config: ConfigSnapshot, req
       logMcpCall(store, {
         toolName,
         sessionId: args.sessionId ? asString(args.sessionId) : null,
-        projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
+        projectId: args.project
+          ? asString(args.project)
+          : args.projectId
+            ? asString(args.projectId)
+            : null,
         payload: args,
         output,
       });
       store.appendEvent(
-        createEvent("tool.completed", { tool: toolName, args }, {
-          sessionId: args.sessionId ? asString(args.sessionId) : null,
-          projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
-          agent: "mcp",
-        }),
+        createEvent(
+          "tool.completed",
+          { tool: toolName, args },
+          {
+            sessionId: args.sessionId ? asString(args.sessionId) : null,
+            projectId: args.project
+              ? asString(args.project)
+              : args.projectId
+                ? asString(args.projectId)
+                : null,
+            agent: "mcp",
+          }
+        )
       );
       return ok(request.id ?? null, textResult(output));
     } catch (error) {
@@ -796,18 +896,30 @@ export async function handleMcpRequest(store: Store, config: ConfigSnapshot, req
       logMcpCall(store, {
         toolName,
         sessionId: args.sessionId ? asString(args.sessionId) : null,
-        projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
+        projectId: args.project
+          ? asString(args.project)
+          : args.projectId
+            ? asString(args.projectId)
+            : null,
         payload: args,
         blocked: true,
         output: { error: message },
       });
       store.appendEvent(
-        createEvent("tool.failed", { tool: toolName, error: message }, {
-          sessionId: args.sessionId ? asString(args.sessionId) : null,
-          projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
-          agent: "mcp",
-          level: "error",
-        }),
+        createEvent(
+          "tool.failed",
+          { tool: toolName, error: message },
+          {
+            sessionId: args.sessionId ? asString(args.sessionId) : null,
+            projectId: args.project
+              ? asString(args.project)
+              : args.projectId
+                ? asString(args.projectId)
+                : null,
+            agent: "mcp",
+            level: "error",
+          }
+        )
       );
       return err(request.id ?? null, -32000, message);
     }

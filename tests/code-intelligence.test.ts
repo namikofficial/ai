@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractCodeIntelligence, linkSymbolsToChunks } from "../packages/code-intelligence/src/index.ts";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import test from "node:test";
+import {
+  extractCodeIntelligence,
+  linkSymbolsToChunks,
+} from "../packages/code-intelligence/src/index.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import { indexProject } from "../packages/indexer/src/index.ts";
 import { searchProjectChunks } from "../packages/retrieval-engine/src/search.ts";
 
@@ -29,8 +32,12 @@ test("code-intelligence: extracts TypeScript symbols and links them to chunks", 
     ].join("\n"),
   });
 
-  assert.ok(result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService"));
-  assert.ok(result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handleLogin"));
+  assert.ok(
+    result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService")
+  );
+  assert.ok(
+    result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handleLogin")
+  );
   assert.ok(result.symbols.some((symbol) => symbol.kind === "import"));
 
   const chunks = [
@@ -40,7 +47,11 @@ test("code-intelligence: extracts TypeScript symbols and links them to chunks", 
   const links = linkSymbolsToChunks(result.symbols, chunks);
   assert.ok(links.links.length > 0);
   assert.ok(links.metadataByChunkId.has("c1") || links.metadataByChunkId.has("c2"));
-  assert.ok(Array.from(links.metadataByChunkId.values()).flat().every((entry) => entry.confidence > 0));
+  assert.ok(
+    Array.from(links.metadataByChunkId.values())
+      .flat()
+      .every((entry) => entry.confidence > 0)
+  );
 });
 
 test("code-intelligence: extracts Python symbols with fallback parsing", () => {
@@ -61,8 +72,12 @@ test("code-intelligence: extracts Python symbols with fallback parsing", () => {
     ].join("\n"),
   });
 
-  assert.ok(result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService"));
-  assert.ok(result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handle_login"));
+  assert.ok(
+    result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService")
+  );
+  assert.ok(
+    result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handle_login")
+  );
   assert.ok(result.symbols.some((symbol) => symbol.kind === "import"));
 });
 
@@ -77,44 +92,42 @@ test("code-intelligence: indexing reuses changed-file ids and refreshes symbol r
       codeIntelligence: {
         enabled: true,
       },
-    }),
+    })
   );
   await writeFile(
     join(repo, "src", "auth.ts"),
-    [
-      "export function handleLogin() {",
-      "  return { ok: true };",
-      "}",
-    ].join("\n"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n")
   );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "repo" });
   await store.indexProject(project.id);
 
-  const firstSymbols = store.db.prepare(
-    "SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC",
-  ).all(project.id, "src/auth.ts") as Array<{ name: string; kind: string; path: string }>;
+  const firstSymbols = store.db
+    .prepare(
+      "SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC"
+    )
+    .all(project.id, "src/auth.ts") as Array<{ name: string; kind: string; path: string }>;
   assert.equal(firstSymbols.filter((row) => row.kind === "function").length, 1);
   assert.equal(firstSymbols.find((row) => row.kind === "function")?.name, "handleLogin");
 
   await writeFile(
     join(repo, "src", "auth.ts"),
-    [
-      "export function handleLoginV2() {",
-      "  return { ok: true, version: 2 };",
-      "}",
-    ].join("\n"),
+    ["export function handleLoginV2() {", "  return { ok: true, version: 2 };", "}"].join("\n")
   );
   await store.indexProject(project.id);
 
-  const secondSymbols = store.db.prepare(
-    "SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC",
-  ).all(project.id, "src/auth.ts") as Array<{ name: string; kind: string; path: string }>;
+  const secondSymbols = store.db
+    .prepare(
+      "SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC"
+    )
+    .all(project.id, "src/auth.ts") as Array<{ name: string; kind: string; path: string }>;
   assert.equal(secondSymbols.filter((row) => row.kind === "function").length, 1);
   assert.equal(secondSymbols.find((row) => row.kind === "function")?.name, "handleLoginV2");
 
-  const graphRow = store.db.prepare("SELECT summary_json FROM project_context_graphs WHERE project_id = ?").get(project.id) as { summary_json: string } | undefined;
+  const graphRow = store.db
+    .prepare("SELECT summary_json FROM project_context_graphs WHERE project_id = ?")
+    .get(project.id) as { summary_json: string } | undefined;
   assert.ok(graphRow);
   const graph = JSON.parse(graphRow!.summary_json) as { routeFiles: string[]; hotPaths: string[] };
   assert.ok(Array.isArray(graph.hotPaths));
@@ -129,11 +142,7 @@ test("code-intelligence: indexer continues when symbol extraction fails", async 
   await mkdir(join(repo, "src"), { recursive: true });
   await writeFile(
     join(repo, "src", "auth.ts"),
-    [
-      "export function handleLogin() {",
-      "  return { ok: true };",
-      "}",
-    ].join("\n"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n")
   );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
@@ -151,7 +160,12 @@ test("code-intelligence: indexer continues when symbol extraction fails", async 
       models: { answer: null, embedding: null },
     },
     qdrant: null,
-    embedBatch: async () => ({ embeddings: [[0, 0, 0]], dimensions: 3, modelName: "mock", providerId: "mock" }),
+    embedBatch: async () => ({
+      embeddings: [[0, 0, 0]],
+      dimensions: 3,
+      modelName: "mock",
+      providerId: "mock",
+    }),
     embeddingModel: "mock",
     embeddingProvider: "mock",
     embeddingDimension: 3,
@@ -163,7 +177,9 @@ test("code-intelligence: indexer continues when symbol extraction fails", async 
 
   assert.equal(result.filesIndexed, 1);
   assert.equal(result.chunksIndexed, 1);
-  const symbolCount = store.db.prepare("SELECT COUNT(*) AS count FROM code_symbols WHERE project_id = ?").get(project.id) as { count: number };
+  const symbolCount = store.db
+    .prepare("SELECT COUNT(*) AS count FROM code_symbols WHERE project_id = ?")
+    .get(project.id) as { count: number };
   assert.equal(symbolCount.count, 0);
 
   store.db.close();
@@ -181,15 +197,11 @@ test("code-intelligence: retrieval uses symbol and graph signals", async () => {
       codeIntelligence: {
         enabled: true,
       },
-    }),
+    })
   );
   await writeFile(
     join(repo, "src", "auth.ts"),
-    [
-      "export function handleLogin() {",
-      "  return { ok: true };",
-      "}",
-    ].join("\n"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n")
   );
   await writeFile(
     join(repo, "src", "router.ts"),
@@ -201,7 +213,7 @@ test("code-intelligence: retrieval uses symbol and graph signals", async () => {
       "    return handleLogin();",
       "  }",
       "};",
-    ].join("\n"),
+    ].join("\n")
   );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
@@ -217,8 +229,14 @@ test("code-intelligence: retrieval uses symbol and graph signals", async () => {
   });
 
   assert.ok(chunks.length > 0);
-  assert.ok(chunks.some((chunk) => Array.isArray(chunk.metadata.codeSymbols) && chunk.metadata.codeSymbols.length > 0));
-  assert.ok(chunks.some((chunk) => chunk.path === "src/router.ts" && chunk.metadata.graphExpansion));
+  assert.ok(
+    chunks.some(
+      (chunk) => Array.isArray(chunk.metadata.codeSymbols) && chunk.metadata.codeSymbols.length > 0
+    )
+  );
+  assert.ok(
+    chunks.some((chunk) => chunk.path === "src/router.ts" && chunk.metadata.graphExpansion)
+  );
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -233,15 +251,15 @@ test("code-intelligence: deleted file symbols removed on reindex", async () => {
     JSON.stringify({
       include: ["src/**"],
       codeIntelligence: { enabled: true },
-    }),
+    })
   );
   await writeFile(
     join(repo, "src", "auth.ts"),
-    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n")
   );
   await writeFile(
     join(repo, "src", "router.ts"),
-    ["export function route() {", "  return { ok: true };", "}"].join("\n"),
+    ["export function route() {", "  return { ok: true };", "}"].join("\n")
   );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
@@ -260,8 +278,14 @@ test("code-intelligence: deleted file symbols removed on reindex", async () => {
   const symbolsAfter = store.db
     .prepare("SELECT path FROM code_symbols WHERE project_id = ?")
     .all(project.id) as Array<{ path: string }>;
-  assert.ok(!symbolsAfter.some((row) => row.path === "src/auth.ts"), "deleted file symbols should be removed");
-  assert.ok(symbolsAfter.some((row) => row.path === "src/router.ts"), "surviving file symbols remain");
+  assert.ok(
+    !symbolsAfter.some((row) => row.path === "src/auth.ts"),
+    "deleted file symbols should be removed"
+  );
+  assert.ok(
+    symbolsAfter.some((row) => row.path === "src/router.ts"),
+    "surviving file symbols remain"
+  );
 
   const chunks = searchProjectChunks({
     db: store.db,
@@ -270,7 +294,10 @@ test("code-intelligence: deleted file symbols removed on reindex", async () => {
     limit: 8,
     qdrantSettings: null,
   });
-  assert.ok(!chunks.some((chunk) => chunk.path === "src/auth.ts"), "deleted file should not appear in retrieval results");
+  assert.ok(
+    !chunks.some((chunk) => chunk.path === "src/auth.ts"),
+    "deleted file should not appear in retrieval results"
+  );
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

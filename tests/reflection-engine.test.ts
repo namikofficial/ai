@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { reflect, buildSkillCandidateRecord } from "../packages/reflection-engine/src/index.ts";
+import { buildSkillCandidateRecord, reflect } from "../packages/reflection-engine/src/index.ts";
 
 const baseSession = {
   id: "sess_1",
@@ -25,7 +25,20 @@ test("reflection-engine: emits memory candidate from user preference and a succe
   const output = reflect({
     session: baseSession,
     conversation: [
-      { id: "m1", sessionId: "sess_1", projectId: "p1", role: "user", agent: null, content: "I prefer TypeScript strict mode for all files", contentHash: "h1", metaJson: "{}", tokenCount: 10, parentMessageId: null, ts: "2024-01-01T00:00:00Z", createdAt: "2024-01-01T00:00:00Z" },
+      {
+        id: "m1",
+        sessionId: "sess_1",
+        projectId: "p1",
+        role: "user",
+        agent: null,
+        content: "I prefer TypeScript strict mode for all files",
+        contentHash: "h1",
+        metaJson: "{}",
+        tokenCount: 10,
+        parentMessageId: null,
+        ts: "2024-01-01T00:00:00Z",
+        createdAt: "2024-01-01T00:00:00Z",
+      },
     ],
     retrievals: [],
     retrievalResults: new Map(),
@@ -38,7 +51,14 @@ test("reflection-engine: emits memory candidate from user preference and a succe
     checks: [],
     reviews: [],
     answerEvaluations: [],
-    outcome: { id: "out_1", sessionId: "sess_1", outcome: "success", score: 0.9, notes: "all good", createdAt: "2024-01-01T00:05:00Z" },
+    outcome: {
+      id: "out_1",
+      sessionId: "sess_1",
+      outcome: "success",
+      score: 0.9,
+      notes: "all good",
+      createdAt: "2024-01-01T00:05:00Z",
+    },
     existingFacts: [],
     existingRules: [],
     existingSkills: [],
@@ -69,7 +89,20 @@ test("reflection-engine: emits stale fact when last_verified_at is older than tt
     answerEvaluations: [],
     outcome: null,
     existingFacts: [
-      { id: "f1", projectId: "p1", key: "runtime", value: "node22", kind: "runtime", confidence: 0.9, sourceKind: "extraction", status: "fresh", lastVerifiedAt: old, expiresAt: null, createdAt: old, updatedAt: old },
+      {
+        id: "f1",
+        projectId: "p1",
+        key: "runtime",
+        value: "node22",
+        kind: "runtime",
+        confidence: 0.9,
+        sourceKind: "extraction",
+        status: "fresh",
+        lastVerifiedAt: old,
+        expiresAt: null,
+        createdAt: old,
+        updatedAt: old,
+      },
     ],
     existingRules: [],
     existingSkills: [],
@@ -92,7 +125,19 @@ test("reflection-engine: emits skill candidate when a check is repeatedly run", 
     agentRuns: [],
     modelCalls: [],
     checks: [
-      { id: "c1", name: "typecheck", status: "completed", command: "pnpm typecheck", output: "ok", errorOutput: null, exitCode: 0, startedAt: "2024-01-01T00:00:00Z", finishedAt: "2024-01-01T00:01:00Z", createdAt: "2024-01-01T00:00:00Z", updatedAt: "2024-01-01T00:01:00Z" },
+      {
+        id: "c1",
+        name: "typecheck",
+        status: "completed",
+        command: "pnpm typecheck",
+        output: "ok",
+        errorOutput: null,
+        exitCode: 0,
+        startedAt: "2024-01-01T00:00:00Z",
+        finishedAt: "2024-01-01T00:01:00Z",
+        createdAt: "2024-01-01T00:00:00Z",
+        updatedAt: "2024-01-01T00:01:00Z",
+      },
     ],
     reviews: [],
     answerEvaluations: [],
@@ -120,7 +165,7 @@ test("reflection-engine: buildSkillCandidateRecord maps to a skill candidate rec
       exampleSessionId: "sess_1",
       evidence: [],
     },
-    "p1",
+    "p1"
   );
   assert.equal(record.status, "pending");
   assert.equal(record.applicableProjects[0], "p1");

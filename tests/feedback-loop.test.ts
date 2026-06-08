@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("ask flow + recordFeedback: a positively-rated path ranks higher on the next ask", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-feedback-loop-"));
@@ -12,7 +12,7 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
   for (let i = 0; i < 4; i++) {
     await writeFile(
       join(repo, "src", `noise-${i}.ts`),
-      `export function noise${i}() { return "noise ${i}"; }\n`,
+      `export function noise${i}() { return "noise ${i}"; }\n`
     );
   }
   await writeFile(
@@ -23,7 +23,7 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
       "}",
       "",
       "export const authNote = 'auth is handled in the auth router';",
-    ].join("\n"),
+    ].join("\n")
   );
   await writeFile(
     join(repo, "src", "billing.ts"),
@@ -33,7 +33,7 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
       "}",
       "",
       "export const billingNote = 'billing is handled in the billing router';",
-    ].join("\n"),
+    ].join("\n")
   );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
@@ -76,10 +76,12 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
   assert.ok(billingResultSecond, "billing.ts should appear in the second ask's results");
   assert.ok(
     authResultSecond!.finalScore >= billingResultSecond!.finalScore,
-    `auth (${authResultSecond!.finalScore}) should be ranked at or above billing (${billingResultSecond!.finalScore}) after the boost`,
+    `auth (${authResultSecond!.finalScore}) should be ranked at or above billing (${billingResultSecond!.finalScore}) after the boost`
   );
 
-  const authBoostAfter = store.retrieval.listPathBoosts(project.id, 50).find((b) => b.path === "src/auth.ts");
+  const authBoostAfter = store.retrieval
+    .listPathBoosts(project.id, 50)
+    .find((b) => b.path === "src/auth.ts");
   assert.ok(authBoostAfter, "auth.ts should still be in chunk_path_boosts after the second ask");
 
   store.db.close();
@@ -92,11 +94,11 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
   await mkdir(join(repo, "src"), { recursive: true });
   await writeFile(
     join(repo, "src", "alpha.ts"),
-    "export const alpha = 'shared term appears here for search';\n",
+    "export const alpha = 'shared term appears here for search';\n"
   );
   await writeFile(
     join(repo, "src", "beta.ts"),
-    "export const beta = 'shared term appears here for search';\n",
+    "export const beta = 'shared term appears here for search';\n"
   );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
@@ -124,8 +126,15 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
   const alphaBoost = boosts.find((b) => b.path === "src/alpha.ts");
   const betaBoost = boosts.find((b) => b.path === "src/beta.ts");
   assert.ok(alphaBoost);
-  assert.equal(betaBoost, undefined, "beta should not have a boost since no feedback was recorded for it");
-  assert.ok(alphaBoost!.weight < 0.5, `bad feedback should produce weight below neutral (got ${alphaBoost!.weight})`);
+  assert.equal(
+    betaBoost,
+    undefined,
+    "beta should not have a boost since no feedback was recorded for it"
+  );
+  assert.ok(
+    alphaBoost!.weight < 0.5,
+    `bad feedback should produce weight below neutral (got ${alphaBoost!.weight})`
+  );
 
   const second = await store.ask({
     project: project.id,
@@ -141,7 +150,7 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
   assert.ok(betaResultSecond);
   assert.ok(
     alphaResultSecond!.finalScore <= betaResultSecond!.finalScore,
-    `bad-rated alpha (${alphaResultSecond!.finalScore}) should not rank above untouched beta (${betaResultSecond!.finalScore})`,
+    `bad-rated alpha (${alphaResultSecond!.finalScore}) should not rank above untouched beta (${betaResultSecond!.finalScore})`
   );
 
   store.db.close();

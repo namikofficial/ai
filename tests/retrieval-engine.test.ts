@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
-import type { RetrievalChunk } from "../packages/shared/src/index.ts";
+import test from "node:test";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import {
   analyzeQuery,
-  buildRetrievalPipelineInput,
   buildFtsQuery,
+  buildRetrievalPipelineInput,
   classifyIntent,
   embedQueryForQdrant,
   rankChunk,
@@ -16,6 +15,7 @@ import {
   searchProjectChunks,
   tokenize,
 } from "../packages/retrieval-engine/src/index.ts";
+import type { RetrievalChunk } from "../packages/shared/src/index.ts";
 
 test("retrieval-engine: analyzes and rewrites a query", () => {
   const analysis = analyzeQuery("where is src/auth.ts handled?");
@@ -34,14 +34,23 @@ test("retrieval-engine: builds FTS queries and ranks relevant chunks", () => {
   assert.equal(buildFtsQuery("auth login"), '"auth" AND "login"');
   assert.equal(classifyIntent("fix auth bug", "local"), "debug");
 
-  const score = rankChunk("where is auth handled?", "src/auth.ts", "export function auth() { return true; }", 1, 4);
+  const score = rankChunk(
+    "where is auth handled?",
+    "src/auth.ts",
+    "export function auth() { return true; }",
+    1,
+    4
+  );
   assert.ok(score > 0);
 });
 
 test("retrieval-engine: searchProjectChunks returns heuristic, FTS, and qdrant-safe results", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-search-pkg-"));
   await mkdir(join(workspace, "src"), { recursive: true });
-  await writeFile(join(workspace, "README.md"), "# Search Package\n\nThis project mentions README search.\n");
+  await writeFile(
+    join(workspace, "README.md"),
+    "# Search Package\n\nThis project mentions README search.\n"
+  );
   const dbPath = join(workspace, "ai.db");
   const store = createStore(initializeStore(dbPath));
   const project = store.createProject({ path: workspace, name: "search-pkg" });
@@ -95,7 +104,11 @@ test("retrieval-engine: searchProjectChunks works when no symbols exist", async 
   });
 
   assert.ok(results.length > 0);
-  assert.ok(results.every((chunk) => !("symbolMatch" in chunk.metadata) || chunk.metadata.symbolMatch == null));
+  assert.ok(
+    results.every(
+      (chunk) => !("symbolMatch" in chunk.metadata) || chunk.metadata.symbolMatch == null
+    )
+  );
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -112,7 +125,7 @@ test("retrieval-engine: searchProjectChunks still works when code intelligence i
       codeIntelligence: {
         enabled: false,
       },
-    }),
+    })
   );
   await writeFile(join(repo, "src", "auth.ts"), "export function handleLogin() { return true; }\n");
   const store = createStore(initializeStore(join(workspace, "ai.db")));
@@ -132,7 +145,7 @@ test("retrieval-engine: searchProjectChunks still works when code intelligence i
     results.every((chunk) => {
       const codeSymbols = chunk.metadata.codeSymbols;
       return !Array.isArray(codeSymbols) || codeSymbols.length === 0;
-    }),
+    })
   );
 
   store.db.close();
@@ -150,15 +163,11 @@ test("retrieval-engine: searchProjectChunks gives a symbol-match boost when code
       codeIntelligence: {
         enabled: true,
       },
-    }),
+    })
   );
   await writeFile(
     join(repo, "src", "auth.ts"),
-    [
-      "export function handleLogin() {",
-      "  return { ok: true };",
-      "}",
-    ].join("\n"),
+    ["export function handleLogin() {", "  return { ok: true };", "}"].join("\n")
   );
   await writeFile(join(repo, "src", "misc.ts"), "export const misc = 1;\n");
 
@@ -175,7 +184,13 @@ test("retrieval-engine: searchProjectChunks gives a symbol-match boost when code
   });
 
   assert.ok(results.length > 0);
-  assert.ok(results.some((chunk) => (chunk.metadata as { symbolMatch?: { reason?: string } }).symbolMatch?.reason === "symbol-match"));
+  assert.ok(
+    results.some(
+      (chunk) =>
+        (chunk.metadata as { symbolMatch?: { reason?: string } }).symbolMatch?.reason ===
+        "symbol-match"
+    )
+  );
   assert.equal(results[0]?.path, "src/auth.ts");
 
   store.db.close();
@@ -203,7 +218,12 @@ test("retrieval-engine: buildRetrievalPipelineInput keeps lexical and vector can
       assert.ok(options.limit > 0);
       return query.length > 0 ? [chunk] : [];
     },
-    searchChunksWithVector(projectId: string, query: string, queryVector: number[], options: { limit: number }) {
+    searchChunksWithVector(
+      projectId: string,
+      query: string,
+      queryVector: number[],
+      options: { limit: number }
+    ) {
       calls.push("vector");
       assert.equal(projectId, "project-1");
       assert.equal(query, "alpha");

@@ -7,7 +7,7 @@ import type {
   AgentRunRecord,
   AgentStatus,
 } from "../../../shared/src/index.ts";
-import { asNumber, asString, asStringOrNull, now, newId, safeParseJson } from "./_shared.ts";
+import { asNumber, asString, asStringOrNull, newId, now, safeParseJson } from "./_shared.ts";
 
 interface AgentRunRow {
   id: string;
@@ -118,7 +118,7 @@ export function createAgentsRepo(db: DatabaseSync) {
         `INSERT INTO agent_runs (
           id, session_id, task_id, project_id, agent, role, status, input_json, output_json,
           model_role, risk, started_at, finished_at, duration_ms, error, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId ?? null,
@@ -136,7 +136,7 @@ export function createAgentsRepo(db: DatabaseSync) {
         null,
         null,
         ts,
-        ts,
+        ts
       );
       return {
         id,
@@ -158,23 +158,33 @@ export function createAgentsRepo(db: DatabaseSync) {
         updatedAt: ts,
       };
     },
-    updateRun(id: string, patch: Partial<Pick<AgentRunRecord, "status" | "output" | "error" | "finishedAt" | "durationMs">>): AgentRunRecord {
-      const current = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as AgentRunRow | undefined;
+    updateRun(
+      id: string,
+      patch: Partial<
+        Pick<AgentRunRecord, "status" | "output" | "error" | "finishedAt" | "durationMs">
+      >
+    ): AgentRunRecord {
+      const current = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as
+        | AgentRunRow
+        | undefined;
       if (!current) throw new Error(`unknown agent run: ${id}`);
       const nextStatus = patch.status ?? (current.status as AgentStatus);
-      const nextOutput = patch.output !== undefined ? JSON.stringify(patch.output) : current.output_json;
+      const nextOutput =
+        patch.output !== undefined ? JSON.stringify(patch.output) : current.output_json;
       const nextError = patch.error !== undefined ? patch.error : current.error;
       const nextFinished = patch.finishedAt !== undefined ? patch.finishedAt : current.finished_at;
       const nextDuration = patch.durationMs !== undefined ? patch.durationMs : current.duration_ms;
       const ts = now();
       db.prepare(
-        `UPDATE agent_runs SET status = ?, output_json = ?, error = ?, finished_at = ?, duration_ms = ?, updated_at = ? WHERE id = ?`,
+        `UPDATE agent_runs SET status = ?, output_json = ?, error = ?, finished_at = ?, duration_ms = ?, updated_at = ? WHERE id = ?`
       ).run(nextStatus, nextOutput, nextError, nextFinished, nextDuration, ts, id);
       const updated = db.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id) as AgentRunRow;
       return rowToRun(updated);
     },
     getRun(id: string): AgentRunRecord | null {
-      const row = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as AgentRunRow | undefined;
+      const row = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as
+        | AgentRunRow
+        | undefined;
       return row ? rowToRun(row) : null;
     },
     listRuns(sessionId: string, limit = 200): AgentRunRecord[] {
@@ -195,7 +205,7 @@ export function createAgentsRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO agent_messages (
           id, agent_run_id, direction, role, content, meta_json, ts, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.agentRunId,
@@ -204,7 +214,7 @@ export function createAgentsRepo(db: DatabaseSync) {
         input.content,
         JSON.stringify(input.meta ?? {}),
         ts,
-        ts,
+        ts
       );
       return {
         id,
@@ -236,7 +246,7 @@ export function createAgentsRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO agent_handoffs (
           id, from_agent_run_id, to_agent, payload_json, context_pack_id, session_id, task_id, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.fromAgentRunId ?? null,
@@ -245,7 +255,7 @@ export function createAgentsRepo(db: DatabaseSync) {
         input.contextPackId ?? null,
         input.sessionId ?? null,
         input.taskId ?? null,
-        ts,
+        ts
       );
       return {
         id,
@@ -260,7 +270,9 @@ export function createAgentsRepo(db: DatabaseSync) {
     },
     listHandoffs(sessionId: string, limit = 50): AgentHandoffRecord[] {
       const rows = db
-        .prepare("SELECT * FROM agent_handoffs WHERE session_id = ? ORDER BY created_at ASC LIMIT ?")
+        .prepare(
+          "SELECT * FROM agent_handoffs WHERE session_id = ? ORDER BY created_at ASC LIMIT ?"
+        )
         .all(sessionId, limit) as AgentHandoffRow[];
       return rows.map(rowToHandoff);
     },

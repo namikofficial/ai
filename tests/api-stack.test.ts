@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
 import { resolveConfig } from "../packages/config/src/index.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import { createModelRuntime } from "../packages/model-runtime/src/index.ts";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
 
 test("startWorkbenchServer wires the intelligence stack by default", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-api-stack-"));
@@ -36,7 +36,7 @@ test("API /retrieval/explain uses the full pipeline", async () => {
   await mkdir(join(repo, "src"), { recursive: true });
   await writeFile(
     join(repo, "src", "auth.ts"),
-    "export function handleLogin() { return { route: '/api/auth/login' }; }\n",
+    "export function handleLogin() { return { route: '/api/auth/login' }; }\n"
   );
 
   const config = resolveConfig({
@@ -56,16 +56,25 @@ test("API /retrieval/explain uses the full pipeline", async () => {
       method: "POST",
       url: "/retrieval/explain",
       headers: { "content-type": "application/json", accept: "application/json" },
-      body: { project: project.id, query: "how does login work", mode: "local", depth: "standard", limit: 8 },
+      body: {
+        project: project.id,
+        query: "how does login work",
+        mode: "local",
+        depth: "standard",
+        limit: 8,
+      },
     });
     assert.equal(inject.statusCode, 200);
-    const body = JSON.parse(inject.body) as { status: string; data: { query: string; ranked: unknown[]; selected: unknown[]; confidence: number } };
+    const body = JSON.parse(inject.body) as {
+      status: string;
+      data: { query: string; ranked: unknown[]; selected: unknown[]; confidence: number };
+    };
     assert.equal(body.status, "ok");
     assert.equal(body.data.query, "how does login work");
     assert.ok(Array.isArray(body.data.ranked));
     assert.ok(Array.isArray(body.data.selected));
     assert.ok(body.data.confidence >= 0 && body.data.confidence <= 1);
-    assert.ok((body.data.ranked as unknown[]).length >= 1, "expected at least one ranked chunk");
+    assert.ok(body.data.ranked.length >= 1, "expected at least one ranked chunk");
   } finally {
     await handle.close();
   }
@@ -125,10 +134,18 @@ test("API POST /reviews enqueues a review.reflect worker job", async () => {
       method: "POST",
       url: "/reviews",
       headers: { "content-type": "application/json", accept: "application/json" },
-      body: { project: project.id, title: "First review", notes: "Test", checks: "typecheck,tests" },
+      body: {
+        project: project.id,
+        title: "First review",
+        notes: "Test",
+        checks: "typecheck,tests",
+      },
     });
     assert.equal(inject.statusCode, 200);
-    const body = JSON.parse(inject.body) as { status: string; data: { result: { id: string }; jobId: string } };
+    const body = JSON.parse(inject.body) as {
+      status: string;
+      data: { result: { id: string }; jobId: string };
+    };
     assert.equal(body.status, "ok");
     assert.ok(body.data.result.id);
     assert.ok(body.data.jobId, "API should return a jobId for the queued review.reflect job");
@@ -137,7 +154,9 @@ test("API POST /reviews enqueues a review.reflect worker job", async () => {
     try {
       const job = verifyingStore.db
         .prepare("SELECT * FROM jobs WHERE id = ?")
-        .get(body.data.jobId) as { id: string; type: string; status: string; payload_json: string } | undefined;
+        .get(body.data.jobId) as
+        | { id: string; type: string; status: string; payload_json: string }
+        | undefined;
       assert.ok(job);
       assert.equal(job!.type, "review.reflect");
       assert.equal(job!.status, "queued");

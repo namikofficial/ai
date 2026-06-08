@@ -10,7 +10,7 @@
 // It never executes raw shell from the LLM output and never lets a check
 // command touch paths the execution engine did not resolve.
 
-import type { ExecutionEvent, ExecutionEventKind, EventLevel } from "../../shared/src/index.ts";
+import type { EventLevel, ExecutionEvent, ExecutionEventKind } from "../../shared/src/index.ts";
 import { createId } from "../../shared/src/index.ts";
 import {
   applyEdit,
@@ -24,14 +24,14 @@ import {
   writeProjectFile,
 } from "./files.ts";
 import {
+  checksAllPassed,
+  isCommandSafe,
+  listBuiltinCommands,
+  readProjectChecksConfig,
   renderCommand,
   resolveCheckCommand,
   runAllowedChecks,
   runAllowedCommand,
-  isCommandSafe,
-  listBuiltinCommands,
-  readProjectChecksConfig,
-  checksAllPassed,
 } from "./shell.ts";
 import {
   applyWorkspaceToOriginal,
@@ -53,9 +53,18 @@ export interface ExecutionEventEmitter {
   emit(event: ExecutionEvent): void;
 }
 
-export function createEventEmitter(meta: { runId: string; sessionId: string; projectId: string }): ExecutionEventEmitter {
+export function createEventEmitter(meta: {
+  runId: string;
+  sessionId: string;
+  projectId: string;
+}): ExecutionEventEmitter {
   return {
-    emit(input: { kind: ExecutionEventKind; level?: EventLevel; message: string; data?: Record<string, unknown> }): void {
+    emit(input: {
+      kind: ExecutionEventKind;
+      level?: EventLevel;
+      message: string;
+      data?: Record<string, unknown>;
+    }): void {
       const event: ExecutionEvent = {
         id: createId("exec"),
         runId: meta.runId,

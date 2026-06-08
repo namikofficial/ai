@@ -68,7 +68,10 @@ declare module "node:fs/promises" {
     destination: string,
     options?: { recursive?: boolean; force?: boolean }
   ): Promise<void>;
-  export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>;
+  export function mkdir(
+    path: string,
+    options?: { recursive?: boolean }
+  ): Promise<string | undefined>;
   export function mkdtemp(prefix: string): Promise<string>;
   export function readFile(
     path: string | URL,
@@ -84,7 +87,10 @@ declare module "node:fs/promises" {
     size: number;
     mtimeMs: number;
   }>;
-  export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+  export function rm(
+    path: string,
+    options?: { recursive?: boolean; force?: boolean }
+  ): Promise<void>;
   export function unlink(path: string): Promise<void>;
   export function writeFile(
     path: string,
@@ -118,7 +124,7 @@ declare module "node:test" {
 declare module "node:fs" {
   export function readFileSync(
     path: string,
-    options?: { encoding?: BufferEncoding } | BufferEncoding,
+    options?: { encoding?: BufferEncoding } | BufferEncoding
   ): string;
   export function writeFileSync(
     path: string,
@@ -151,11 +157,15 @@ declare module "node:child_process" {
     args?: string[],
     options?: { cwd?: string; env?: Record<string, string | undefined> }
   ): Promise<{ stdout: string; stderr: string }>;
-  export function spawn(command: string, args?: string[], options?: {
-    cwd?: string;
-    env?: Record<string, string | undefined>;
-    stdio?: Array<"pipe" | "ignore" | "inherit">;
-  }): ChildProcessLike;
+  export function spawn(
+    command: string,
+    args?: string[],
+    options?: {
+      cwd?: string;
+      env?: Record<string, string | undefined>;
+      stdio?: Array<"pipe" | "ignore" | "inherit">;
+    }
+  ): ChildProcessLike;
 }
 
 declare module "node:http" {

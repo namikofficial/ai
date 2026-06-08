@@ -1,7 +1,6 @@
 import { mkdir } from "node:fs/promises";
-import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
-import { initializeStore, createStore } from "../../../packages/db/src/store.ts";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
+import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
 import { handleMcpRequest } from "./tools.ts";
 
 type ProcessLike = {
@@ -79,7 +78,12 @@ export async function startMcpServer(): Promise<void> {
       const parsed = parseMessages(buffer);
       buffer = parsed.rest;
       for (const message of parsed.messages) {
-        const request = message as { jsonrpc?: string; id?: string | number | null; method?: string; params?: Record<string, unknown> };
+        const request = message as {
+          jsonrpc?: string;
+          id?: string | number | null;
+          method?: string;
+          params?: Record<string, unknown>;
+        };
         if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
           continue;
         }

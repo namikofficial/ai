@@ -1,8 +1,8 @@
 import type {
   AgentRunRecord,
   CompiledPromptRecord,
-  ConversationMessageRecord,
   ContextPackRecord,
+  ConversationMessageRecord,
   EventEnvelope,
   ModelCallRecord,
   RetrievalQueryRecord,
@@ -86,14 +86,26 @@ function createFallbackId(prefix: string, index: number): string {
 }
 
 export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionTimelineResponse {
-  const messages = (input.messages ?? []).filter((item): item is ConversationMessageRecord => Boolean(item));
+  const messages = (input.messages ?? []).filter((item): item is ConversationMessageRecord =>
+    Boolean(item)
+  );
   const events = (input.events ?? []).filter((item): item is EventEnvelope => Boolean(item));
   const agentRuns = (input.agentRuns ?? []).filter((item): item is AgentRunRecord => Boolean(item));
-  const modelCalls = (input.modelCalls ?? []).filter((item): item is ModelCallRecord => Boolean(item));
-  const compiledPrompts = (input.compiledPrompts ?? []).filter((item): item is CompiledPromptRecord => Boolean(item));
-  const retrievalQueries = (input.retrievalQueries ?? []).filter((item): item is RetrievalQueryRecord => Boolean(item));
-  const contextPacks = (input.contextPacks ?? []).filter((item): item is ContextPackRecord => Boolean(item));
-  const outcomes = (input.outcomes ?? []).filter((item): item is SessionOutcomeRecord => Boolean(item));
+  const modelCalls = (input.modelCalls ?? []).filter((item): item is ModelCallRecord =>
+    Boolean(item)
+  );
+  const compiledPrompts = (input.compiledPrompts ?? []).filter(
+    (item): item is CompiledPromptRecord => Boolean(item)
+  );
+  const retrievalQueries = (input.retrievalQueries ?? []).filter(
+    (item): item is RetrievalQueryRecord => Boolean(item)
+  );
+  const contextPacks = (input.contextPacks ?? []).filter((item): item is ContextPackRecord =>
+    Boolean(item)
+  );
+  const outcomes = (input.outcomes ?? []).filter((item): item is SessionOutcomeRecord =>
+    Boolean(item)
+  );
 
   const contextPackByQueryId = new Map<string, ContextPackRecord>();
   for (const pack of contextPacks) {
@@ -118,7 +130,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           taskId: event.taskId,
           projectId: event.projectId,
         },
-      }),
+      })
     );
   });
 
@@ -137,7 +149,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           projectId: message.projectId,
           parentMessageId: message.parentMessageId,
         },
-      }),
+      })
     );
   });
 
@@ -158,7 +170,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           projectId: run.projectId,
           runId: run.id,
         },
-      }),
+      })
     );
   });
 
@@ -190,7 +202,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           profileId: call.profileId,
           callId: call.id,
         },
-      }),
+      })
     );
   });
 
@@ -229,7 +241,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           contextPackId: prompt.contextPackId,
           promptId: prompt.id,
         },
-      }),
+      })
     );
   });
 
@@ -238,9 +250,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
     const rewrittenQuery = asString(query.rewrittenQuery, "");
     const analysisNotes = Array.isArray(analysis.notes) ? analysis.notes.length : 0;
     const pathHints = Array.isArray(analysis.pathHints) ? analysis.pathHints.length : 0;
-    const queryRecord = query as unknown as Record<string, unknown>;
-    const confidence = asNumber(analysis.confidence) ?? asNumber(queryRecord.confidence);
-    const misses = Array.isArray(queryRecord.misses) ? queryRecord.misses.length : null;
+    const confidence = asNumber(analysis.confidence);
     const contextPack = contextPackByQueryId.get(query.id);
     items.push(
       createTimelineItem({
@@ -251,7 +261,6 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
         summary: [
           rewrittenQuery ? `rewritten=${rewrittenQuery}` : null,
           confidence == null ? null : `confidence=${confidence.toFixed(2)}`,
-          misses == null ? null : `misses=${misses}`,
           `pathHints=${pathHints}`,
           `notes=${analysisNotes}`,
         ]
@@ -263,7 +272,6 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           contextPackId: contextPack?.id ?? null,
           selectedContextPackId: contextPack?.id ?? null,
           confidence,
-          misses,
         },
         refs: {
           sessionId: query.sessionId,
@@ -273,7 +281,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           queryId: query.id,
           contextPackId: contextPack?.id ?? null,
         },
-      }),
+      })
     );
   });
 
@@ -304,7 +312,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
           contextPackId: pack.id,
           packId: pack.id,
         },
-      }),
+      })
     );
   });
 
@@ -315,14 +323,19 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
         ts: normalizeTimestamp(outcome.createdAt, input.session.startedAt),
         kind: "eval",
         title: asString(outcome.outcome, "eval"),
-        summary: [`score=${outcome.score.toFixed(2)}`, outcome.notes ? `notes=${outcome.notes}` : null].filter(Boolean).join(" · "),
+        summary: [
+          `score=${outcome.score.toFixed(2)}`,
+          outcome.notes ? `notes=${outcome.notes}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · "),
         payload: outcome,
         status: outcome.outcome,
         refs: {
           sessionId: outcome.sessionId,
           outcomeId: outcome.id,
         },
-      }),
+      })
     );
   });
 

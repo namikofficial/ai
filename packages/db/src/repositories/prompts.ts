@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { CompiledPromptRecord } from "../../../shared/src/index.ts";
-import { asNumber, asString, asStringOrNull, now, newId } from "./_shared.ts";
+import { asNumber, asString, asStringOrNull, newId, now } from "./_shared.ts";
 
 interface CompiledPromptRow {
   id: string;
@@ -40,7 +40,9 @@ function rowToCompiledPrompt(row: CompiledPromptRow): CompiledPromptRecord {
 
 export function createPromptRepo(db: DatabaseSync) {
   return {
-    recordCompiledPrompt(input: Omit<CompiledPromptRecord, "id" | "createdAt"> & { id?: string; createdAt?: string }): CompiledPromptRecord {
+    recordCompiledPrompt(
+      input: Omit<CompiledPromptRecord, "id" | "createdAt"> & { id?: string; createdAt?: string }
+    ): CompiledPromptRecord {
       const id = input.id ?? newId("pp");
       const ts = input.createdAt ?? now();
       db.prepare(
@@ -48,7 +50,7 @@ export function createPromptRepo(db: DatabaseSync) {
           id, session_id, task_id, retrieval_query_id, context_pack_id,
           mode, role, messages_json, estimated_tokens, included_context_json,
           omitted_context_json, safety_notes_json, output_schema_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId ?? null,
@@ -63,7 +65,7 @@ export function createPromptRepo(db: DatabaseSync) {
         input.omittedContextJson,
         input.safetyNotesJson,
         input.outputSchemaJson ?? null,
-        ts,
+        ts
       );
       return {
         ...input,
@@ -72,13 +74,21 @@ export function createPromptRepo(db: DatabaseSync) {
       };
     },
     getCompiledPrompt(id: string): CompiledPromptRecord | null {
-      const row = db.prepare("SELECT * FROM compiled_prompts WHERE id = ? LIMIT 1").get(id) as CompiledPromptRow | undefined;
+      const row = db.prepare("SELECT * FROM compiled_prompts WHERE id = ? LIMIT 1").get(id) as
+        | CompiledPromptRow
+        | undefined;
       return row ? rowToCompiledPrompt(row) : null;
     },
     listCompiledPrompts(sessionId?: string | null, limit = 50): CompiledPromptRecord[] {
       const rows = sessionId
-        ? (db.prepare("SELECT * FROM compiled_prompts WHERE session_id = ? ORDER BY created_at DESC LIMIT ?").all(sessionId, limit) as CompiledPromptRow[])
-        : (db.prepare("SELECT * FROM compiled_prompts ORDER BY created_at DESC LIMIT ?").all(limit) as CompiledPromptRow[]);
+        ? (db
+            .prepare(
+              "SELECT * FROM compiled_prompts WHERE session_id = ? ORDER BY created_at DESC LIMIT ?"
+            )
+            .all(sessionId, limit) as CompiledPromptRow[])
+        : (db
+            .prepare("SELECT * FROM compiled_prompts ORDER BY created_at DESC LIMIT ?")
+            .all(limit) as CompiledPromptRow[]);
       return rows.map(rowToCompiledPrompt);
     },
   };

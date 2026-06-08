@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
-import { AGENT_REGISTRY, getAgent, isToolAllowed, listAgents, agentsWithTool } from "../packages/agent-protocol/src/index.ts";
+import { join } from "node:path";
+import test from "node:test";
+import {
+  AGENT_REGISTRY,
+  agentsWithTool,
+  getAgent,
+  isToolAllowed,
+  listAgents,
+} from "../packages/agent-protocol/src/index.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("observability: ask() populates retrieval, conversation, agent, context, memory, eval tables", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-obs-"));
@@ -18,7 +24,7 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
       "}",
       "",
       "export const authNote = 'auth is handled in the auth router';",
-    ].join("\n"),
+    ].join("\n")
   );
   await writeFile(join(repo, "README.md"), "# Sample\n\nAuth is in src/auth.ts.");
 
@@ -79,7 +85,14 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
   assert.ok(modelRoutes.some((route) => route.taskPattern === "ask"));
 
   const usageDaily = store.models.listUsageDaily(10);
-  assert.ok(usageDaily.some((entry) => entry.modelName === "ask-fast-local" || entry.modelName === "ask-deep-local" || entry.modelName === "ask-extended-local"));
+  assert.ok(
+    usageDaily.some(
+      (entry) =>
+        entry.modelName === "ask-fast-local" ||
+        entry.modelName === "ask-deep-local" ||
+        entry.modelName === "ask-extended-local"
+    )
+  );
 
   const contextPacks = store.context.listPacksForSession(answer.sessionId);
   assert.ok(contextPacks.length > 0);
@@ -160,11 +173,22 @@ test("observability: createHandoff records agent handoff and context pack", asyn
   });
   assert.ok(handoff.prompt.includes("explain the main file"));
 
-  const handoffCalls = store.models.listCalls(answer.sessionId, 100).filter((call) => call.role === "coder_handoff");
-  assert.equal(handoffCalls.length, 1, "handoff should record exactly one runtime-backed model call");
+  const handoffCalls = store.models
+    .listCalls(answer.sessionId, 100)
+    .filter((call) => call.role === "coder_handoff");
+  assert.equal(
+    handoffCalls.length,
+    1,
+    "handoff should record exactly one runtime-backed model call"
+  );
   const handoffRequest = handoffCalls[0]!.request as {
     metadata?: {
-      compiledPrompt?: { id?: string; mode?: string; contextPackId?: string | null; messages?: Array<{ role: string; content: string }> };
+      compiledPrompt?: {
+        id?: string;
+        mode?: string;
+        contextPackId?: string | null;
+        messages?: Array<{ role: string; content: string }>;
+      };
       responseTrace?: { handoffId?: string };
     } | null;
   };
@@ -210,16 +234,31 @@ test("observability: indexProject records an indexer agent run", async () => {
   assert.ok(output && typeof output === "object");
   assert.ok("filesIndexed" in (output as Record<string, unknown>));
 
-  const embeddingCalls = store.models.listCalls(result.session.id, 100).filter((call) => call.role === "embedding");
+  const embeddingCalls = store.models
+    .listCalls(result.session.id, 100)
+    .filter((call) => call.role === "embedding");
   assert.ok(embeddingCalls.length >= 1, "indexing should record runtime-backed embedding calls");
-  const embeddingResponse = embeddingCalls[0]!.response as { modelName?: string; dimensions?: number; providerId?: string; embeddingCount?: number };
+  const embeddingResponse = embeddingCalls[0]!.response as {
+    modelName?: string;
+    dimensions?: number;
+    providerId?: string;
+    embeddingCount?: number;
+  };
   assert.ok(embeddingResponse.modelName);
   assert.ok((embeddingResponse.dimensions ?? 0) > 0);
   assert.ok(embeddingResponse.providerId);
 
   const chunk = store.db
-    .prepare("SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1")
-    .get(project.id) as { embedding_model: string | null; embedding_dim: number | null; embedding_provider: string | null } | undefined;
+    .prepare(
+      "SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1"
+    )
+    .get(project.id) as
+    | {
+        embedding_model: string | null;
+        embedding_dim: number | null;
+        embedding_provider: string | null;
+      }
+    | undefined;
   assert.ok(chunk);
   assert.equal(chunk!.embedding_model, embeddingResponse.modelName);
   assert.equal(chunk!.embedding_dim, embeddingResponse.dimensions);
@@ -240,11 +279,15 @@ test("observability: reindex skips unchanged files and avoids extra embedding ca
   const project = store.createProject({ path: repo, name: "repo" });
 
   const first = await store.indexProject(project.id);
-  const firstEmbeddingCalls = store.models.listCalls(first.session.id, 100).filter((call) => call.role === "embedding");
+  const firstEmbeddingCalls = store.models
+    .listCalls(first.session.id, 100)
+    .filter((call) => call.role === "embedding");
   assert.ok(firstEmbeddingCalls.length >= 1, "initial index should embed files");
 
   const second = await store.indexProject(project.id);
-  const secondEmbeddingCalls = store.models.listCalls(second.session.id, 100).filter((call) => call.role === "embedding");
+  const secondEmbeddingCalls = store.models
+    .listCalls(second.session.id, 100)
+    .filter((call) => call.role === "embedding");
   assert.equal(secondEmbeddingCalls.length, 0, "unchanged reindex should skip embeddings");
   assert.equal(second.filesIndexed, first.filesIndexed);
   assert.equal(second.chunksIndexed, 0, "unchanged reindex should not write new chunks");

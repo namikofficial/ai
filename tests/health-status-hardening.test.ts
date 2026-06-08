@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
-import { rmSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
 
 test("api: health and status are read-only and redacted", async () => {
   const tmpRuntime = join(process.cwd(), "tmp-api-test");
@@ -14,14 +14,14 @@ test("api: health and status are read-only and redacted", async () => {
       runtimeDir: tmpRuntime,
       databasePath: join(tmpRuntime, "test.db"),
       apiPort: 0, // dynamic
-    }
+    },
   });
 
   try {
     // Health check
     const healthRes = await handle.inject({ method: "GET", url: "/health" });
     if (healthRes.statusCode !== 200) {
-      console.log('API ERROR BODY:', healthRes.body);
+      console.log("API ERROR BODY:", healthRes.body);
     }
     assert.equal(healthRes.statusCode, 200);
     const health = JSON.parse(healthRes.body);
@@ -39,7 +39,6 @@ test("api: health and status are read-only and redacted", async () => {
 
     // Verify no mutation (basic check: project count should be 0)
     assert.equal(health.data.projectCount, 0);
-    
   } finally {
     await handle.close();
     rmSync(tmpRuntime, { recursive: true, force: true });

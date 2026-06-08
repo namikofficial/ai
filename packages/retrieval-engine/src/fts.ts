@@ -37,7 +37,7 @@ function safeParseJson(value: string): Record<string, unknown> {
 export function tryEnableSearchIndex(db: DatabaseSync): boolean {
   try {
     db.exec(
-      "CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(chunk_id UNINDEXED, project_id UNINDEXED, path, content)",
+      "CREATE VIRTUAL TABLE IF NOT EXISTS rag_chunks_fts USING fts5(chunk_id UNINDEXED, project_id UNINDEXED, path, content)"
     );
     return true;
   } catch {
@@ -49,12 +49,12 @@ export function syncSearchIndexForFile(
   db: DatabaseSync,
   projectId: string,
   path: string,
-  chunks: Array<{ id: string; content: string }>,
+  chunks: Array<{ id: string; content: string }>
 ): void {
   try {
     db.prepare("DELETE FROM rag_chunks_fts WHERE project_id = ? AND path = ?").run(projectId, path);
     const insertSearchRow = db.prepare(
-      "INSERT INTO rag_chunks_fts (chunk_id, project_id, path, content) VALUES (?, ?, ?, ?)",
+      "INSERT INTO rag_chunks_fts (chunk_id, project_id, path, content) VALUES (?, ?, ?, ?)"
     );
     for (const chunk of chunks) {
       insertSearchRow.run(chunk.id, projectId, path, chunk.content);
@@ -69,7 +69,13 @@ export function ftsSearch(
   projectId: string,
   ftsQuery: string,
   limit: number,
-  heuristicRanker: (query: string, path: string, content: string, startLine: number, endLine: number) => number = rankChunk,
+  heuristicRanker: (
+    query: string,
+    path: string,
+    content: string,
+    startLine: number,
+    endLine: number
+  ) => number = rankChunk
 ): RetrievalChunk[] {
   try {
     const rows = db
@@ -81,7 +87,7 @@ export function ftsSearch(
          JOIN rag_chunks c ON c.id = rag_chunks_fts.chunk_id
          WHERE rag_chunks_fts MATCH ? AND c.project_id = ?
          ORDER BY bm25(rag_chunks_fts) ASC
-         LIMIT ?`,
+         LIMIT ?`
       )
       .all(ftsQuery, projectId, limit * 3) as Row[];
     return rows
@@ -89,7 +95,13 @@ export function ftsSearch(
         const content = asString(row.content);
         const metadata = safeParseJson(asString(row.metadata_json));
         const path = asString(row.path) || asString(metadata.path);
-        const heuristicScore = heuristicRanker(ftsQuery, path, content, toNumber(row.start_line), toNumber(row.end_line));
+        const heuristicScore = heuristicRanker(
+          ftsQuery,
+          path,
+          content,
+          toNumber(row.start_line),
+          toNumber(row.end_line)
+        );
         const ftsScore = toNumber(row.fts_score);
         return {
           id: asString(row.id),

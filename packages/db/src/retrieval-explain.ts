@@ -1,9 +1,8 @@
-import { buildRetrievalPipelineInput as buildRetrievalPipelineInputFromEngine, runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
-import type {
-  RetrievalDepth,
-  RetrievalIntentKind,
-  RetrievalMode,
-} from "../../shared/src/index.ts";
+import {
+  buildRetrievalPipelineInput as buildRetrievalPipelineInputFromEngine,
+  runRetrievalPipeline,
+} from "../../retrieval-engine/src/index.ts";
+import type { RetrievalDepth, RetrievalIntentKind, RetrievalMode } from "../../shared/src/index.ts";
 import type { createStore } from "./store.ts";
 
 type Store = ReturnType<typeof createStore>;
@@ -26,7 +25,13 @@ export interface RetrievalExplainOutput {
   usedTokens: number;
   boost: { good: number; missed: number; bad: number };
   miss: { path: string; notes: string } | null;
-  ranked: Array<{ chunkId: string; path: string; finalScore: number; rerankReason: string; boosters: string[] }>;
+  ranked: Array<{
+    chunkId: string;
+    path: string;
+    finalScore: number;
+    rerankReason: string;
+    boosters: string[];
+  }>;
   selected: Array<{ chunkId: string; path: string; excerpt: string; finalScore: number }>;
   dropped: Array<{ chunkId: string; path: string; finalScore: number; reason: string }>;
 }
@@ -49,12 +54,15 @@ export interface BuildRetrievalPipelineInputArgs {
 
 export function buildRetrievalPipelineInput(
   store: Store,
-  args: BuildRetrievalPipelineInputArgs,
+  args: BuildRetrievalPipelineInputArgs
 ): Parameters<typeof runRetrievalPipeline>[0] {
   return buildRetrievalPipelineInputFromEngine(store, args);
 }
 
-export function runRetrievalExplain(store: Store, input: RetrievalExplainInput): RetrievalExplainOutput {
+export function runRetrievalExplain(
+  store: Store,
+  input: RetrievalExplainInput
+): RetrievalExplainOutput {
   const pipelineInput = buildRetrievalPipelineInput(store, {
     projectId: input.projectId,
     query: input.query,

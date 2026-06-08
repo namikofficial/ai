@@ -1,31 +1,53 @@
+import { buildContextPack } from "../../context-engine/src/index.ts";
+import type {
+  ModelInvokeOptions,
+  ModelInvokeRequest,
+  ModelInvokeResult,
+  ModelRuntime,
+} from "../../model-runtime/src/index.ts";
+import {
+  buildAnswerFromCompiledPrompt,
+  type CompiledPrompt,
+  type CompilePromptInput,
+  type ContextPackItemForPrompt,
+  compilePrompt,
+} from "../../prompt-compiler/src/index.ts";
+import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
+import {
+  analyzeQuery,
+  classifyIntent,
+  rewriteQuery,
+  runRetrievalPipeline,
+} from "../../retrieval-engine/src/index.ts";
+import {
+  buildRetrievalPipelineInput,
+  type RetrievalPipelineSource,
+} from "../../retrieval-engine/src/pipeline.ts";
 import type {
   AskRequest,
   AskResponse,
   CompiledPromptRecord,
   ConversationMessageRecord,
-  RetrievalFeedbackRecord,
+  EventEnvelope,
   FactRecord,
   MemoryEntryRecord,
-  EventEnvelope,
+  ModelCallRecord,
+  ModelProfileRecord,
+  ModelRole,
+  ModelRouteRecord,
   ProjectRuleRecord,
   ProjectSummary,
   RetrievalChunk,
+  RetrievalFeedbackRecord,
+  RetrievalIntentKind,
   RetrievalMissRecord,
   RetrievalQueryRecord,
   RetrievalResultRecord,
   RetrievalSelectedContextRecord,
-  RetrievalIntentKind,
   SessionRecord,
-  TaskRecord,
   SkillRecord,
+  TaskRecord,
 } from "../../shared/src/index.ts";
-import { buildAnswerFromCompiledPrompt, compilePrompt, type CompiledPrompt, type CompilePromptInput, type ContextPackItemForPrompt } from "../../prompt-compiler/src/index.ts";
-import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
-import { analyzeQuery, classifyIntent, rewriteQuery, runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
-import { buildRetrievalPipelineInput, type RetrievalPipelineSource } from "../../retrieval-engine/src/pipeline.ts";
-import { buildContextPack } from "../../context-engine/src/index.ts";
-import type { ModelInvokeOptions, ModelInvokeRequest, ModelInvokeResult, ModelRuntime } from "../../model-runtime/src/index.ts";
-import type { ModelProfileRecord, ModelRouteRecord, ModelCallRecord, ModelRole } from "../../shared/src/index.ts";
 import { createEvent, createId } from "../../shared/src/index.ts";
 import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
 
@@ -37,7 +59,9 @@ export interface BuildAskQueryRewritePromptInput {
   analysis: unknown;
 }
 
-export function buildAskQueryRewritePrompt(input: BuildAskQueryRewritePromptInput): CompilePromptInput {
+export function buildAskQueryRewritePrompt(
+  input: BuildAskQueryRewritePromptInput
+): CompilePromptInput {
   return {
     mode: "query_rewrite",
     role: "query_rewrite",
@@ -73,7 +97,9 @@ export interface BuildAskRetrievalJudgePromptInput {
   droppedCount: number;
 }
 
-export function buildAskRetrievalJudgePrompt(input: BuildAskRetrievalJudgePromptInput): CompilePromptInput {
+export function buildAskRetrievalJudgePrompt(
+  input: BuildAskRetrievalJudgePromptInput
+): CompilePromptInput {
   return {
     mode: "retrieval_judge",
     role: "retrieval_judge",
@@ -234,13 +260,18 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
   getProject(identifier: string): ProjectSummary | null;
   getSession(sessionId: string): SessionRecord | null;
   searchChunks(projectId: string, query: string, options?: { limit?: number }): RetrievalChunk[];
-  searchChunksWithVector?: (projectId: string, query: string, queryVector: number[], options?: { limit?: number }) => RetrievalChunk[];
+  searchChunksWithVector?: (
+    projectId: string,
+    query: string,
+    queryVector: number[],
+    options?: { limit?: number }
+  ) => RetrievalChunk[];
   listProjectFiles(projectId: string, limit: number): Array<{ path: string }>;
   createSession(input: {
     projectId: string | null;
     title: string;
     userGoal: string;
-    mode: AskRequest["mode"] | "index" | "plan" | "handoff" | "check" | "reflect";
+    mode: AskRequest["mode"] | "index" | "plan" | "handoff" | "check" | "reflect" | "dev";
     source: string;
     modelProfile?: string | null;
   }): SessionRecord;
@@ -307,25 +338,36 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
       symbolHints: string[];
       score: number;
     }): void;
-    recordResults(retrievalQueryId: string, rows: Array<{
-      chunkId: string;
-      path: string;
-      startLine: number;
-      endLine: number;
-      source: RetrievalResultRecord["source"];
-      baseScore: number;
-      finalScore: number;
-      included?: boolean;
-      rerankScore?: number;
-      reason?: string | null;
-    }>): void;
-    recordSelectedContext(retrievalQueryId: string, rows: Array<{
-      chunkId: string;
-      rank: number;
-      tokenCount: number;
-      excerpt: string;
-    }>): void;
-    recordMiss(input: { retrievalQueryId: string; missedPath: string; confidence: number; notes?: string | null }): void;
+    recordResults(
+      retrievalQueryId: string,
+      rows: Array<{
+        chunkId: string;
+        path: string;
+        startLine: number;
+        endLine: number;
+        source: RetrievalResultRecord["source"];
+        baseScore: number;
+        finalScore: number;
+        included?: boolean;
+        rerankScore?: number;
+        reason?: string | null;
+      }>
+    ): void;
+    recordSelectedContext(
+      retrievalQueryId: string,
+      rows: Array<{
+        chunkId: string;
+        rank: number;
+        tokenCount: number;
+        excerpt: string;
+      }>
+    ): void;
+    recordMiss(input: {
+      retrievalQueryId: string;
+      missedPath: string;
+      confidence: number;
+      notes?: string | null;
+    }): void;
     listQueriesForSession(sessionId: string, limit?: number): RetrievalQueryRecord[];
     listQueriesForProject(projectId: string, limit?: number): RetrievalQueryRecord[];
     listPathBoosts(projectId: string, limit?: number): Array<{ path: string; weight: number }>;
@@ -356,8 +398,19 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
         reason: string;
       }>;
     }): { id: string; budgetTokens: number; usedTokens: number };
-    listPacksForSession(sessionId: string, limit?: number): Array<{ id: string; reason: string | null }>;
-    listItems(packId: string): Array<{ kind: string; rank: number; tokenCount: number; excerpt: string; sourceId: string | null; included: boolean; omissionReason: string | null }>;
+    listPacksForSession(
+      sessionId: string,
+      limit?: number
+    ): Array<{ id: string; reason: string | null }>;
+    listItems(packId: string): Array<{
+      kind: string;
+      rank: number;
+      tokenCount: number;
+      excerpt: string;
+      sourceId: string | null;
+      included: boolean;
+      omissionReason: string | null;
+    }>;
     listBudgetEvents(packId: string): Array<{ reason: string; deltaTokens: number }>;
   };
   memory: {
@@ -429,8 +482,16 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
       notes?: string | null;
     }): void;
   };
-  invokeModel(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
-  enqueueJob(input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }): { id: string };
+  invokeModel(
+    profileId: string,
+    request: ModelInvokeRequest,
+    options?: ModelInvokeOptions
+  ): Promise<ModelInvokeResult>;
+  enqueueJob(input: {
+    type: string;
+    payload: Record<string, unknown>;
+    availableAt?: string | null;
+  }): { id: string };
   listEvents(sessionId?: string, limit?: number): EventEnvelope[];
 }
 
@@ -546,7 +607,8 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     risk: "low",
     input: { question: input.input.question, retrievalQueryId: retrievalQuery.id, intent, mode },
   });
-  const queryRewriteProfileId = input.store.models.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
+  const queryRewriteProfileId =
+    input.store.models.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
   const queryRewritePrompt = compilePrompt(
     buildAskQueryRewritePrompt({
       question: input.input.question,
@@ -554,7 +616,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       intent: retrievalQuery.intent,
       mode,
       analysis,
-    }),
+    })
   );
   input.store.recordCompiledPrompt({
     compiledPrompt: queryRewritePrompt,
@@ -562,19 +624,31 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     retrievalQueryId: retrievalQuery.id,
   });
   let queryRewriteCallId: string | null = null;
-  let queryRewriteParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
+  let queryRewriteParseStatus: "parsed" | "repaired" | "deterministic_fallback" =
+    "deterministic_fallback";
   let rewriteVariants = [rewritten.variant];
   let rewritePathHints = [...rewritten.pathHints];
   let rewriteSymbolHints = [...rewritten.symbolHints];
   try {
-    input.store.appendEvent(createEvent("model.called", { role: "query_rewrite", profileId: queryRewriteProfileId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+    input.store.appendEvent(
+      createEvent(
+        "model.called",
+        {
+          role: "query_rewrite",
+          profileId: queryRewriteProfileId,
+          compiledId: queryRewritePrompt.id,
+        },
+        { sessionId: session.id, projectId: project.id, agent: "retriever" }
+      )
+    );
     const queryRewriteResult = await input.store.invokeModel(
       queryRewriteProfileId,
       {
         role: "query_rewrite",
         messages: queryRewritePrompt.messages,
         temperature: 0,
-        maxOutputTokens: input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
+        maxOutputTokens:
+          input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
         metadata: {
           compiledPrompt: queryRewritePrompt,
           retrievalQueryId: retrievalQuery.id,
@@ -584,7 +658,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       {
         sessionId: session.id,
         retrievalQueryId: retrievalQuery.id,
-      },
+      }
     );
     const parseQueryRewriteResult = (text: string): ReturnType<typeof parseQueryRewriteOutput> => {
       try {
@@ -604,10 +678,14 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
           messages: [
             ...queryRewritePrompt.messages,
             { role: "assistant", content: queryRewriteResult.text },
-            { role: "user", content: "Return ONLY valid JSON matching the output schema. No markdown fences." },
+            {
+              role: "user",
+              content: "Return ONLY valid JSON matching the output schema. No markdown fences.",
+            },
           ],
           temperature: 0,
-          maxOutputTokens: input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
+          maxOutputTokens:
+            input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
           metadata: {
             compiledPrompt: queryRewritePrompt,
             retrievalQueryId: retrievalQuery.id,
@@ -617,7 +695,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         {
           sessionId: session.id,
           retrievalQueryId: retrievalQuery.id,
-        },
+        }
       );
       parsedRewrite = parseQueryRewriteResult(repaired.text);
       if (parsedRewrite) {
@@ -631,15 +709,20 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       if (normalized.length > 0) {
         rewriteVariants = normalized.slice(0, 6);
       }
-      rewritePathHints = parsedRewrite.pathHints.length > 0 ? parsedRewrite.pathHints : rewritePathHints;
-      rewriteSymbolHints = parsedRewrite.symbolHints.length > 0 ? parsedRewrite.symbolHints : rewriteSymbolHints;
+      rewritePathHints =
+        parsedRewrite.pathHints.length > 0 ? parsedRewrite.pathHints : rewritePathHints;
+      rewriteSymbolHints =
+        parsedRewrite.symbolHints.length > 0 ? parsedRewrite.symbolHints : rewriteSymbolHints;
     }
     const selectedRewrite = rewriteVariants[0] ?? rewritten.variant;
     if (selectedRewrite !== rewritten.variant || selectedRewrite !== input.input.question.trim()) {
       input.store.retrieval.updateRewrittenQuery(retrievalQuery.id, selectedRewrite);
     }
     for (const [index, variant] of rewriteVariants.entries()) {
-      const terms = variant.toLowerCase().split(/[^a-z0-9_]+/g).filter((term) => term.length >= 2);
+      const terms = variant
+        .toLowerCase()
+        .split(/[^a-z0-9_]+/g)
+        .filter((term) => term.length >= 2);
       input.store.retrieval.createRewrite({
         retrievalQueryId: retrievalQuery.id,
         variant,
@@ -649,17 +732,36 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         score: Math.max(0.1, 1 - index * 0.1),
       });
     }
-    queryRewriteCallId = input.store.models.listCalls(session.id, 200)
-      .filter((call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id)
-      .at(-1)?.id ?? null;
-    input.store.appendEvent(createEvent("model.completed", { role: "query_rewrite", profileId: queryRewriteProfileId, requestId: queryRewriteCallId, compiledId: queryRewritePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+    queryRewriteCallId =
+      input.store.models
+        .listCalls(session.id, 200)
+        .filter(
+          (call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id
+        )
+        .at(-1)?.id ?? null;
+    input.store.appendEvent(
+      createEvent(
+        "model.completed",
+        {
+          role: "query_rewrite",
+          profileId: queryRewriteProfileId,
+          requestId: queryRewriteCallId,
+          compiledId: queryRewritePrompt.id,
+        },
+        { sessionId: session.id, projectId: project.id, agent: "retriever" }
+      )
+    );
   } catch (error) {
     input.store.appendEvent(
       createEvent(
         "model.failed",
-        { role: "query_rewrite", error: error instanceof Error ? error.message : String(error), compiledId: queryRewritePrompt.id },
-        { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" },
-      ),
+        {
+          role: "query_rewrite",
+          error: error instanceof Error ? error.message : String(error),
+          compiledId: queryRewritePrompt.id,
+        },
+        { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" }
+      )
     );
     input.store.retrieval.createRewrite({
       retrievalQueryId: retrievalQuery.id,
@@ -678,7 +780,13 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     role: "retrieval-pipeline",
     modelRole: "retrieval_judge",
     risk: "low",
-    input: { question: input.input.question, rewrittenQuery: selectedRewriteVariant, projectId: project.id, mode, depth },
+    input: {
+      question: input.input.question,
+      rewrittenQuery: selectedRewriteVariant,
+      projectId: project.id,
+      mode,
+      depth,
+    },
   });
   input.store.agents.updateRun(queryRewriterAgentRun.id, {
     status: "completed",
@@ -699,11 +807,16 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     meta: { retrievalQueryId: retrievalQuery.id },
   });
 
-  const retrievalStarted = createEvent("retrieval.started", { question: input.input.question }, { sessionId: session.id, projectId: project.id, agent: "retriever" });
+  const retrievalStarted = createEvent(
+    "retrieval.started",
+    { question: input.input.question },
+    { sessionId: session.id, projectId: project.id, agent: "retriever" }
+  );
   input.store.appendEvent(retrievalStarted);
 
   const ftsLimit = input.input.depth === "deep" ? 12 : input.input.depth === "shallow" ? 4 : 8;
-  const embeddingProfileId = input.store.models.getProfile("embedding-local")?.id ?? "embedding-local";
+  const embeddingProfileId =
+    input.store.models.getProfile("embedding-local")?.id ?? "embedding-local";
   const embeddingProfile = input.store.models.getProfile(embeddingProfileId);
   const queryEmbedding = await input.runtime.embed(
     embeddingProfileId,
@@ -718,7 +831,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       recordCall: (call) => {
         input.store.models.recordCall(call);
       },
-    },
+    }
   );
   const queryVector = queryEmbedding.embeddings[0] ?? [];
   const pipelineInput = buildRetrievalPipelineInput(input.store, {
@@ -750,7 +863,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       finalScore: entry.finalScore,
       included: selected.some((s) => s.chunk.id === entry.chunk.id),
       reason: entry.rerankReason,
-    })),
+    }))
   );
   input.store.retrieval.recordSelectedContext(
     retrievalQuery.id,
@@ -759,7 +872,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       rank: index,
       tokenCount: entry.chunk.tokenCount,
       excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
-    })),
+    }))
   );
   const memoryEntries = input.store.memory.listEntries(project.id, undefined, 20);
   const facts = input.store.memory.listFacts(project.id, 20);
@@ -840,8 +953,10 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   let resolvedMiss: { path: string; notes: string | null } | null = pipelineOutput.miss
     ? { path: pipelineOutput.miss.path, notes: pipelineOutput.miss.notes }
     : null;
-  let retrievalJudgeParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
-  const retrievalJudgeProfileId = input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
+  let retrievalJudgeParseStatus: "parsed" | "repaired" | "deterministic_fallback" =
+    "deterministic_fallback";
+  const retrievalJudgeProfileId =
+    input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
   const retrievalJudgePrompt = compilePrompt(
     buildAskRetrievalJudgePrompt({
       question: input.input.question,
@@ -854,7 +969,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       rankedCount: ranked.length,
       selectedCount: selected.length,
       droppedCount: dropped.length,
-    }),
+    })
   );
   input.store.recordCompiledPrompt({
     compiledPrompt: retrievalJudgePrompt,
@@ -875,14 +990,25 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   };
   let retrievalJudgeCallId: string | null = null;
   try {
-    input.store.appendEvent(createEvent("model.called", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+    input.store.appendEvent(
+      createEvent(
+        "model.called",
+        {
+          role: "retrieval_judge",
+          profileId: retrievalJudgeProfileId,
+          compiledId: retrievalJudgePrompt.id,
+        },
+        { sessionId: session.id, projectId: project.id, agent: "retriever" }
+      )
+    );
     const retrievalJudgeResult = await input.store.invokeModel(
       retrievalJudgeProfileId,
       {
         role: "retrieval_judge",
         messages: retrievalJudgePrompt.messages,
         temperature: 0,
-        maxOutputTokens: input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
+        maxOutputTokens:
+          input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
         metadata: {
           compiledPrompt: retrievalJudgePrompt,
           retrievalQueryId: retrievalQuery.id,
@@ -894,9 +1020,11 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         sessionId: session.id,
         taskId: retrievalAgentRun.id,
         retrievalQueryId: retrievalQuery.id,
-      },
+      }
     );
-    const parseRetrievalJudgeResult = (text: string): ReturnType<typeof parseRetrievalJudgeOutput> => {
+    const parseRetrievalJudgeResult = (
+      text: string
+    ): ReturnType<typeof parseRetrievalJudgeOutput> => {
       try {
         return parseRetrievalJudgeOutput(parseJsonFragment(text));
       } catch {
@@ -914,10 +1042,14 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
           messages: [
             ...retrievalJudgePrompt.messages,
             { role: "assistant", content: retrievalJudgeResult.text },
-            { role: "user", content: "Return ONLY valid JSON matching the output schema. No markdown fences." },
+            {
+              role: "user",
+              content: "Return ONLY valid JSON matching the output schema. No markdown fences.",
+            },
           ],
           temperature: 0,
-          maxOutputTokens: input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
+          maxOutputTokens:
+            input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
           metadata: {
             compiledPrompt: retrievalJudgePrompt,
             retrievalQueryId: retrievalQuery.id,
@@ -929,7 +1061,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
           sessionId: session.id,
           taskId: retrievalAgentRun.id,
           retrievalQueryId: retrievalQuery.id,
-        },
+        }
       );
       parsedJudge = parseRetrievalJudgeResult(repaired.text);
       if (parsedJudge) {
@@ -945,24 +1077,47 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         resolvedMiss = null;
       }
     }
-    retrievalJudgeCallId = input.store.models.listCalls(session.id, 200)
-      .filter((call) => call.role === "retrieval_judge" && call.taskId === retrievalAgentRun.id && call.retrievalQueryId === retrievalQuery.id)
-      .at(-1)?.id ?? null;
-    input.store.appendEvent(createEvent("model.completed", { role: "retrieval_judge", profileId: retrievalJudgeProfileId, requestId: retrievalJudgeCallId, compiledId: retrievalJudgePrompt.id }, { sessionId: session.id, projectId: project.id, agent: "retriever" }));
+    retrievalJudgeCallId =
+      input.store.models
+        .listCalls(session.id, 200)
+        .filter(
+          (call) =>
+            call.role === "retrieval_judge" &&
+            call.taskId === retrievalAgentRun.id &&
+            call.retrievalQueryId === retrievalQuery.id
+        )
+        .at(-1)?.id ?? null;
+    input.store.appendEvent(
+      createEvent(
+        "model.completed",
+        {
+          role: "retrieval_judge",
+          profileId: retrievalJudgeProfileId,
+          requestId: retrievalJudgeCallId,
+          compiledId: retrievalJudgePrompt.id,
+        },
+        { sessionId: session.id, projectId: project.id, agent: "retriever" }
+      )
+    );
   } catch (error) {
     input.store.appendEvent(
       createEvent(
         "model.failed",
-        { role: "retrieval_judge", error: error instanceof Error ? error.message : String(error), compiledId: retrievalJudgePrompt.id },
-        { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" },
-      ),
+        {
+          role: "retrieval_judge",
+          error: error instanceof Error ? error.message : String(error),
+          compiledId: retrievalJudgePrompt.id,
+        },
+        { sessionId: session.id, projectId: project.id, agent: "retriever", level: "warn" }
+      )
     );
   }
-  const insufficientReason = selected.length === 0
-    ? "No matching chunks were found in the selected project."
-    : confidence < 0.35
-    ? (resolvedMiss?.notes ?? "retrieval confidence is low")
-    : null;
+  const insufficientReason =
+    selected.length === 0
+      ? "No matching chunks were found in the selected project."
+      : confidence < 0.35
+        ? (resolvedMiss?.notes ?? "retrieval confidence is low")
+        : null;
   if (resolvedMiss) {
     input.store.retrieval.recordMiss({
       retrievalQueryId: retrievalQuery.id,
@@ -1000,7 +1155,11 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     role: "answer-synthesizer",
     modelRole: "answer",
     risk: "low",
-    input: { question: input.input.question, retrievalQueryId: retrievalQuery.id, contextPackId: contextPack.id },
+    input: {
+      question: input.input.question,
+      retrievalQueryId: retrievalQuery.id,
+      contextPackId: contextPack.id,
+    },
   });
   const answerProfileId = session.modelProfile ?? selectedAnswerProfile;
   const compiledAnswer = compilePrompt(
@@ -1014,20 +1173,23 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       memoryEntries,
       facts,
       retrievalChunks: chunks,
-      contextPackItems: input.store.context.listItems(contextPack.id)
+      contextPackItems: input.store.context
+        .listItems(contextPack.id)
         .filter((item) => item.included)
-        .map((item): ContextPackItemForPrompt => ({
-          kind: item.kind as ContextPackItemForPrompt["kind"],
-          rank: item.rank,
-          tokenCount: item.tokenCount,
-          excerpt: item.excerpt,
-          sourceId: item.sourceId,
-        })),
+        .map(
+          (item): ContextPackItemForPrompt => ({
+            kind: item.kind as ContextPackItemForPrompt["kind"],
+            rank: item.rank,
+            tokenCount: item.tokenCount,
+            excerpt: item.excerpt,
+            sourceId: item.sourceId,
+          })
+        ),
       previousMessages,
       sessionId: session.id,
       retrievalQueryId: retrievalQuery.id,
       tokenBudget: 4096,
-    }),
+    })
   );
   input.store.recordCompiledPrompt({
     compiledPrompt: compiledAnswer,
@@ -1044,12 +1206,18 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       createEvent(
         "answer.fallback",
         { reason: insufficientReason, question: input.input.question, confidence },
-        { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "info" },
-      ),
+        { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "info" }
+      )
     );
   } else {
     try {
-      input.store.appendEvent(createEvent("model.called", { role: "answer", profileId: answerProfileId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
+      input.store.appendEvent(
+        createEvent(
+          "model.called",
+          { role: "answer", profileId: answerProfileId, compiledId: compiledAnswer.id },
+          { sessionId: session.id, projectId: project.id, agent: "answer_agent" }
+        )
+      );
       const result = await input.store.invokeModel(
         answerProfileId,
         {
@@ -1069,24 +1237,42 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
           sessionId: session.id,
           taskId: answerAgentRun.id,
           retrievalQueryId: retrievalQuery.id,
-        },
+        }
       );
-      const matchingCalls = input.store.models.listCalls(session.id, 200).filter((call) =>
-        call.role === "answer" &&
-        call.taskId === answerAgentRun.id &&
-        call.retrievalQueryId === retrievalQuery.id
-      );
+      const matchingCalls = input.store.models
+        .listCalls(session.id, 200)
+        .filter(
+          (call) =>
+            call.role === "answer" &&
+            call.taskId === answerAgentRun.id &&
+            call.retrievalQueryId === retrievalQuery.id
+        );
       answerCallId = matchingCalls.at(-1)?.id ?? null;
       answer = buildAnswerFromCompiledPrompt(compiledAnswer, result.text, citations, confidence);
-      input.store.appendEvent(createEvent("model.completed", { role: "answer", profileId: answerProfileId, requestId: answerCallId, compiledId: compiledAnswer.id }, { sessionId: session.id, projectId: project.id, agent: "answer_agent" }));
+      input.store.appendEvent(
+        createEvent(
+          "model.completed",
+          {
+            role: "answer",
+            profileId: answerProfileId,
+            requestId: answerCallId,
+            compiledId: compiledAnswer.id,
+          },
+          { sessionId: session.id, projectId: project.id, agent: "answer_agent" }
+        )
+      );
     } catch (error) {
       answer = buildAskSynthesisFailure(input.input.question);
       input.store.appendEvent(
         createEvent(
           "model.failed",
-          { role: "answer", error: error instanceof Error ? error.message : String(error), compiledId: compiledAnswer.id },
-          { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "warn" },
-        ),
+          {
+            role: "answer",
+            error: error instanceof Error ? error.message : String(error),
+            compiledId: compiledAnswer.id,
+          },
+          { sessionId: session.id, projectId: project.id, agent: "answer_agent", level: "warn" }
+        )
       );
     }
   }
@@ -1099,8 +1285,8 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         chunkCount: chunks.length,
         confidence,
       },
-      { sessionId: session.id, projectId: project.id, agent: "retriever" },
-    ),
+      { sessionId: session.id, projectId: project.id, agent: "retriever" }
+    )
   );
   input.store.appendEvent(
     createEvent(
@@ -1108,8 +1294,8 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       {
         summary: answer,
       },
-      { sessionId: session.id, projectId: project.id, agent: "orchestrator" },
-    ),
+      { sessionId: session.id, projectId: project.id, agent: "orchestrator" }
+    )
   );
   input.store.updateSession(session.id, {
     status: "completed",
@@ -1126,13 +1312,27 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     agent: "answer_agent",
     content: answer,
     parentMessageId: userMessage.id,
-    meta: { confidence, retrievalQueryId: retrievalQuery.id, citationCount: citations.length, contextPackId: contextPack.id, compiledId: compiledAnswer.id, modelCallId: answerCallId },
+    meta: {
+      confidence,
+      retrievalQueryId: retrievalQuery.id,
+      citationCount: citations.length,
+      contextPackId: contextPack.id,
+      compiledId: compiledAnswer.id,
+      modelCallId: answerCallId,
+    },
   });
   input.store.agents.updateRun(answerAgentRun.id, {
     status: "completed",
     finishedAt: new Date().toISOString(),
     durationMs: 0,
-    output: { answer, confidence, citations: citations.length, contextPackId: contextPack.id, compiledId: compiledAnswer.id, modelCallId: answerCallId },
+    output: {
+      answer,
+      confidence,
+      citations: citations.length,
+      contextPackId: contextPack.id,
+      compiledId: compiledAnswer.id,
+      modelCallId: answerCallId,
+    },
   });
 
   if (chunks.length > 0) {
@@ -1153,8 +1353,8 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
           tags: ["ask", "retrieval"],
           importance: Math.max(1, Math.round(confidence * 5)),
         },
-        { sessionId: session.id, projectId: project.id, agent: "learning" },
-      ),
+        { sessionId: session.id, projectId: project.id, agent: "learning" }
+      )
     );
   }
   input.store.evals.recordAnswerEvaluation({

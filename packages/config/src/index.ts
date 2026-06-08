@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { ConfigSnapshot } from "../../shared/src/index.ts";
 import { readEmbeddingConfig } from "../../indexer/src/index.ts";
+import type { ConfigSnapshot } from "../../shared/src/index.ts";
 
 export interface EmbeddingConfig {
   providerId: string;
@@ -37,7 +37,9 @@ function readString(value: unknown): string | null {
 }
 
 function readStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.map(readString).filter((item): item is string => item != null) : [];
+  return Array.isArray(value)
+    ? value.map(readString).filter((item): item is string => item != null)
+    : [];
 }
 
 function readBoolean(value: unknown, fallback = false): boolean {
@@ -45,23 +47,27 @@ function readBoolean(value: unknown, fallback = false): boolean {
 }
 
 function readNumber(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
 }
 
 function readJsonObject(path: string): Record<string, unknown> | null {
   try {
     const raw = readFileSync(path, { encoding: "utf8" });
-    const parsed = JSON.parse(raw) as unknown;
+    const parsed = JSON.parse(raw);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
       return null;
     }
-    return parsed as Record<string, unknown>;
+    return parsed;
   } catch {
     return null;
   }
 }
 
-function readProjectConfigObject(projectPath: string): { path: string; value: Record<string, unknown> } | null {
+function readProjectConfigObject(
+  projectPath: string
+): { path: string; value: Record<string, unknown> } | null {
   const candidates = [".ai-workbench.json", ".ai-workbench", ".aiconfig"];
   for (const name of candidates) {
     const filePath = join(projectPath, name);
@@ -136,7 +142,8 @@ export function resolveConfig(overrides: Partial<ConfigSnapshot> = {}): ConfigSn
     apiPort: overrides.apiPort ?? envApiPort ?? apiPort,
     cloudEnabled: overrides.cloudEnabled ?? envCloudEnabled,
     qdrantEnabled,
-    qdrantUrl: overrides.qdrantUrl ?? envQdrantUrl ?? (qdrantEnabled ? "http://127.0.0.1:6333" : null),
+    qdrantUrl:
+      overrides.qdrantUrl ?? envQdrantUrl ?? (qdrantEnabled ? "http://127.0.0.1:6333" : null),
     qdrantCollection: overrides.qdrantCollection ?? envQdrantCollection,
   };
 }
@@ -150,19 +157,45 @@ export function resolveProjectConfig(projectPath: string): ProjectConfig {
     ignore: hasConfig ? readStringArray(raw.ignore ?? ["dist/**", "coverage/**"]) : [],
     include: hasConfig ? readStringArray(raw.include ?? ["apps/**", "packages/**"]) : [],
     chunking: {
-      preferTreeSitter: hasConfig ? readBoolean((raw.chunking as Record<string, unknown> | undefined)?.preferTreeSitter, true) : true,
-      maxChunkTokens: hasConfig ? readNumber((raw.chunking as Record<string, unknown> | undefined)?.maxChunkTokens, 900) : 900,
+      preferTreeSitter: hasConfig
+        ? readBoolean((raw.chunking as Record<string, unknown> | undefined)?.preferTreeSitter, true)
+        : true,
+      maxChunkTokens: hasConfig
+        ? readNumber((raw.chunking as Record<string, unknown> | undefined)?.maxChunkTokens, 900)
+        : 900,
     },
     codeIntelligence: {
-      enabled: hasConfig ? readBoolean((raw.codeIntelligence as Record<string, unknown> | undefined)?.enabled, false) : false,
+      enabled: hasConfig
+        ? readBoolean((raw.codeIntelligence as Record<string, unknown> | undefined)?.enabled, false)
+        : false,
     },
     retrieval: {
-      boostPaths: hasConfig ? readStringArray((raw.retrieval as Record<string, unknown> | undefined)?.boostPaths ?? ["apps/api/**", "packages/**"]) : [],
-      authHints: hasConfig ? readStringArray((raw.retrieval as Record<string, unknown> | undefined)?.authHints ?? ["auth", "session", "jwt", "tenant"]) : [],
+      boostPaths: hasConfig
+        ? readStringArray(
+            (raw.retrieval as Record<string, unknown> | undefined)?.boostPaths ?? [
+              "apps/api/**",
+              "packages/**",
+            ]
+          )
+        : [],
+      authHints: hasConfig
+        ? readStringArray(
+            (raw.retrieval as Record<string, unknown> | undefined)?.authHints ?? [
+              "auth",
+              "session",
+              "jwt",
+              "tenant",
+            ]
+          )
+        : [],
     },
     models: {
-      answer: hasConfig ? readString((raw.models as Record<string, unknown> | undefined)?.answer) : null,
-      embedding: hasConfig ? readString((raw.models as Record<string, unknown> | undefined)?.embedding) : null,
+      answer: hasConfig
+        ? readString((raw.models as Record<string, unknown> | undefined)?.answer)
+        : null,
+      embedding: hasConfig
+        ? readString((raw.models as Record<string, unknown> | undefined)?.embedding)
+        : null,
     },
     raw,
   };
@@ -170,7 +203,8 @@ export function resolveProjectConfig(projectPath: string): ProjectConfig {
 
 export function projectPathMatchesConfig(path: string, config: ProjectConfig): boolean {
   const normalized = path.replaceAll("\\", "/").replace(/^\.?\//, "");
-  const matchesInclude = config.include.length === 0 || createGlobMatcher(config.include)(normalized);
+  const matchesInclude =
+    config.include.length === 0 || createGlobMatcher(config.include)(normalized);
   const matchesIgnore = config.ignore.length > 0 && createGlobMatcher(config.ignore)(normalized);
   return matchesInclude && !matchesIgnore;
 }

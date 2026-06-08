@@ -172,7 +172,17 @@ test("timeline builder sorts items chronologically and links related context", (
 
   assert.deepEqual(
     timeline.timeline.map((item) => item.kind),
-    ["event", "message", "event", "agent_run", "model_call", "compiled_prompt", "retrieval_query", "context_pack", "eval"],
+    [
+      "event",
+      "message",
+      "event",
+      "agent_run",
+      "model_call",
+      "compiled_prompt",
+      "retrieval_query",
+      "context_pack",
+      "eval",
+    ]
   );
   assert.equal(timeline.timeline[5]?.refs.contextPackId, "pack-1");
   assert.equal(timeline.timeline[4]?.summary.includes("profile=profile-1"), true);
@@ -221,7 +231,9 @@ test("timeline builder tolerates malformed prompt json", () => {
     ],
   });
 
-  const payload = timeline.timeline[0]?.payload as { messages?: unknown; safetyNotes?: unknown } | undefined;
+  const payload = timeline.timeline[0]?.payload as
+    | { messages?: unknown; safetyNotes?: unknown }
+    | undefined;
   assert.equal(timeline.timeline.length, 1);
   assert.equal(timeline.timeline[0]?.kind, "compiled_prompt");
   assert.equal(payload?.messages, "[not valid");

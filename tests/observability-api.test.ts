@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
 
 async function startTestServer(): Promise<{
   workspace: string;
-  request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>;
+  request: (
+    method: string,
+    url: string,
+    body?: unknown
+  ) => Promise<{ statusCode: number; body: string }>;
   close: () => Promise<void>;
 }> {
   const workspace = await mkdtemp(join(tmpdir(), "ai-obs-api-"));
@@ -15,7 +19,7 @@ async function startTestServer(): Promise<{
   await mkdir(join(repo, "src"), { recursive: true });
   await writeFile(
     join(repo, "src", "auth.ts"),
-    "export const authNote = 'auth is handled by handleLogin';\nexport function handleLogin() { return { route: '/login' }; }\n",
+    "export const authNote = 'auth is handled by handleLogin';\nexport function handleLogin() { return { route: '/login' }; }\n"
   );
   await writeFile(join(repo, "README.md"), "# Sample\n\nAuth is in src/auth.ts.");
 
@@ -31,7 +35,8 @@ async function startTestServer(): Promise<{
   });
   return {
     workspace,
-    request: async (method: string, url: string, body?: unknown) => handle.inject({ method, url, body }),
+    request: async (method: string, url: string, body?: unknown) =>
+      handle.inject({ method, url, body }),
     close: async () => {
       await handle.close();
       await rm(workspace, { recursive: true, force: true });
@@ -39,7 +44,14 @@ async function startTestServer(): Promise<{
   };
 }
 
-async function getJson<T>(request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>, url: string): Promise<T> {
+async function getJson<T>(
+  request: (
+    method: string,
+    url: string,
+    body?: unknown
+  ) => Promise<{ statusCode: number; body: string }>,
+  url: string
+): Promise<T> {
   const res = await request("GET", url);
   if (res.statusCode < 200 || res.statusCode >= 300) {
     throw new Error(`GET ${url} -> ${res.statusCode}`);
@@ -48,9 +60,13 @@ async function getJson<T>(request: (method: string, url: string, body?: unknown)
 }
 
 async function postJson<T>(
-  request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>,
+  request: (
+    method: string,
+    url: string,
+    body?: unknown
+  ) => Promise<{ statusCode: number; body: string }>,
   url: string,
-  body: unknown,
+  body: unknown
 ): Promise<T> {
   const res = await request("POST", url, body);
   if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -65,7 +81,7 @@ test("observability api: retrieval queries endpoints return populated data", asy
     const add = await postJson<{ status: "ok"; data: { id: string; name: string } }>(
       ctx.request,
       "/projects",
-      { path: join(ctx.workspace, "sample"), name: "sample" },
+      { path: join(ctx.workspace, "sample"), name: "sample" }
     );
     const projectId = add.data.id;
     await postJson(ctx.request, `/projects/${projectId}/index`, {});
@@ -143,7 +159,11 @@ test("observability api: retrieval queries endpoints return populated data", asy
     assert.equal(timeline.data.timeline.length, timeline.data.items.length);
     assert.ok(timeline.data.counts.messages >= 2);
     assert.ok(timeline.data.counts.modelCalls >= 1);
-    assert.ok(timeline.data.timeline.every((item) => typeof item.ts === "string" && typeof item.kind === "string"));
+    assert.ok(
+      timeline.data.timeline.every(
+        (item) => typeof item.ts === "string" && typeof item.kind === "string"
+      )
+    );
 
     const prompts = await getJson<{
       status: "ok";
@@ -257,7 +277,7 @@ test("observability api: conversations and agent runs expose full session trace"
 
     const handoffs = await getJson<{ status: "ok"; data: Array<unknown> }>(
       ctx.request,
-      `/agents/handoffs?sessionId=${ask.data.sessionId}`,
+      `/agents/handoffs?sessionId=${ask.data.sessionId}`
     );
     assert.equal(handoffs.data.length, 0);
 
@@ -270,7 +290,9 @@ test("observability api: conversations and agent runs expose full session trace"
       };
     }>(ctx.request, `/sessions/${ask.data.sessionId}/trace`);
     assert.equal(trace.data.messages.length, 2);
-    assert.ok(trace.data.retrievalQueries.some((query) => query.originalQuery === "where is auth handled?"));
+    assert.ok(
+      trace.data.retrievalQueries.some((query) => query.originalQuery === "where is auth handled?")
+    );
     assert.ok(trace.data.modelCalls.some((call) => call.role === "retrieval_judge"));
   } finally {
     await ctx.close();
@@ -304,26 +326,28 @@ test("observability api: memory candidate accept/reject lifecycle via HTTP", asy
     const accepted = await postJson<{ status: "ok"; data: { candidateId: string } }>(
       ctx.request,
       `/memory/candidates/${target.id}/accept`,
-      { notes: "looks good" },
+      { notes: "looks good" }
     );
     assert.equal(accepted.data.candidateId, target.id);
 
     const entries = await getJson<{ status: "ok"; data: Array<{ candidateId: string }> }>(
       ctx.request,
-      "/memory/entries",
+      "/memory/entries"
     );
     assert.ok(entries.data.some((e) => e.candidateId === target.id));
 
     // Reject a new candidate.
-    const rejectTarget = (await getJson<{
-      status: "ok";
-      data: Array<{ id: string }>;
-    }>(ctx.request, `/memory/candidates?status=pending&projectId=${projectId}`)).data[0];
+    const rejectTarget = (
+      await getJson<{
+        status: "ok";
+        data: Array<{ id: string }>;
+      }>(ctx.request, `/memory/candidates?status=pending&projectId=${projectId}`)
+    ).data[0];
     if (rejectTarget) {
       const rejected = await postJson<{ status: "ok"; data: { status: string } }>(
         ctx.request,
         `/memory/candidates/${rejectTarget.id}/reject`,
-        { reason: "not actionable" },
+        { reason: "not actionable" }
       );
       assert.equal(rejected.data.status, "rejected");
     }
@@ -335,29 +359,35 @@ test("observability api: memory candidate accept/reject lifecycle via HTTP", asy
 test("observability api: models, skills, context, eval endpoints respond cleanly", async () => {
   const ctx = await startTestServer();
   try {
-    const providers = await getJson<{ status: "ok"; data: { providers: unknown[]; profiles: unknown[] } }>(
-      ctx.request,
-      "/models/providers",
-    );
+    const providers = await getJson<{
+      status: "ok";
+      data: { providers: unknown[]; profiles: unknown[] };
+    }>(ctx.request, "/models/providers");
     assert.ok(Array.isArray(providers.data.providers));
     assert.ok(Array.isArray(providers.data.profiles));
 
-    const health = await getJson<{ status: "ok"; data: { providers: unknown[]; recentCalls: unknown[] } }>(
-      ctx.request,
-      "/models/health",
-    );
+    const health = await getJson<{
+      status: "ok";
+      data: { providers: unknown[]; recentCalls: unknown[] };
+    }>(ctx.request, "/models/health");
     assert.ok(Array.isArray(health.data.providers));
     assert.ok(Array.isArray(health.data.recentCalls));
 
-    const routed = await postJson<{ status: "ok"; data: { route: { taskPattern: string }; profile: { id: string } | null } }>(
-      ctx.request,
-      "/models/route",
-      { taskPattern: "ask", mode: "local", question: "where is auth handled?" },
-    );
+    const routed = await postJson<{
+      status: "ok";
+      data: { route: { taskPattern: string }; profile: { id: string } | null };
+    }>(ctx.request, "/models/route", {
+      taskPattern: "ask",
+      mode: "local",
+      question: "where is auth handled?",
+    });
     assert.equal(routed.data.route.taskPattern, "ask");
     assert.ok(routed.data.profile);
 
-    const routes = await getJson<{ status: "ok"; data: Array<{ taskPattern: string }> }>(ctx.request, "/models/routes");
+    const routes = await getJson<{ status: "ok"; data: Array<{ taskPattern: string }> }>(
+      ctx.request,
+      "/models/routes"
+    );
     assert.ok(routes.data.some((route) => route.taskPattern === "ask"));
 
     const skills = await getJson<{ status: "ok"; data: unknown[] }>(ctx.request, "/skills");
@@ -365,7 +395,7 @@ test("observability api: models, skills, context, eval endpoints respond cleanly
 
     const skillsPending = await getJson<{ status: "ok"; data: unknown[] }>(
       ctx.request,
-      "/skills/candidates?status=pending",
+      "/skills/candidates?status=pending"
     );
     assert.ok(Array.isArray(skillsPending.data));
 
@@ -383,7 +413,10 @@ test("observability api: models, skills, context, eval endpoints respond cleanly
     assert.ok(created.data.id);
     assert.equal(created.data.question, "what does handleLogin do?");
 
-    const outcomes = await getJson<{ status: "ok"; data: unknown[] }>(ctx.request, "/eval/outcomes");
+    const outcomes = await getJson<{ status: "ok"; data: unknown[] }>(
+      ctx.request,
+      "/eval/outcomes"
+    );
     assert.ok(Array.isArray(outcomes.data));
   } finally {
     await ctx.close();
@@ -405,17 +438,21 @@ test("observability api: handoff records context pack, agent run, and handoff ro
       depth: "shallow",
     });
 
-    const handoff = await postJson<{ status: "ok"; data: { id: string } }>(ctx.request, "/handoff", {
-      sessionId: ask.data.sessionId,
-      project: add.data.id,
-      target: "opencode",
-      subtask: "explain the auth file",
-    });
+    const handoff = await postJson<{ status: "ok"; data: { id: string } }>(
+      ctx.request,
+      "/handoff",
+      {
+        sessionId: ask.data.sessionId,
+        project: add.data.id,
+        target: "opencode",
+        subtask: "explain the auth file",
+      }
+    );
     assert.ok(handoff.data.id);
 
     const packs = await getJson<{ status: "ok"; data: Array<{ id: string; reason: string }> }>(
       ctx.request,
-      `/context/packs?sessionId=${ask.data.sessionId}`,
+      `/context/packs?sessionId=${ask.data.sessionId}`
     );
     assert.ok(packs.data.length >= 1);
     const handoffPack = packs.data.find((p) => p.reason === "handoff:opencode");
@@ -423,13 +460,13 @@ test("observability api: handoff records context pack, agent run, and handoff ro
 
     const packDetail = await getJson<{ status: "ok"; data: { items: Array<unknown> } }>(
       ctx.request,
-      `/context/packs/${handoffPack!.id}`,
+      `/context/packs/${handoffPack!.id}`
     );
     assert.ok(packDetail.data.items.length >= 1);
 
     const handoffs = await getJson<{ status: "ok"; data: Array<{ toAgent: string }> }>(
       ctx.request,
-      `/agents/handoffs?sessionId=${ask.data.sessionId}`,
+      `/agents/handoffs?sessionId=${ask.data.sessionId}`
     );
     assert.equal(handoffs.data.length, 1);
     assert.equal(handoffs.data[0].toAgent, "opencode");

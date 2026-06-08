@@ -37,11 +37,7 @@ export function StatCard({
   );
 }
 
-export function KeyValueList({
-  items,
-}: {
-  items: Array<[string, ReactNode]>;
-}): ReactNode {
+export function KeyValueList({ items }: { items: Array<[string, ReactNode]> }): ReactNode {
   return (
     <div className="list">
       {items.map(([label, value]) => (
@@ -71,7 +67,9 @@ export function EmptyState({
       <div className="tiny">{body}</div>
       {actionLabel && onAction ? (
         <div className="row" style={{ marginTop: "0.4rem" }}>
-          <button type="button" onClick={onAction}>{actionLabel}</button>
+          <button type="button" onClick={onAction}>
+            {actionLabel}
+          </button>
         </div>
       ) : null}
     </div>

@@ -42,8 +42,22 @@ const profiles = [
 ];
 
 const providers = [
-  { id: "provider_local", kind: "local_openai_compat" as const, displayName: "Local", baseUrl: "http://127.0.0.1:11434", apiKeyEnv: null, enabled: true },
-  { id: "provider_cloud", kind: "cloud_openai_compat" as const, displayName: "Cloud", baseUrl: "http://127.0.0.1:11434", apiKeyEnv: null, enabled: true },
+  {
+    id: "provider_local",
+    kind: "local_openai_compat" as const,
+    displayName: "Local",
+    baseUrl: "http://127.0.0.1:11434",
+    apiKeyEnv: null,
+    enabled: true,
+  },
+  {
+    id: "provider_cloud",
+    kind: "cloud_openai_compat" as const,
+    displayName: "Cloud",
+    baseUrl: "http://127.0.0.1:11434",
+    apiKeyEnv: null,
+    enabled: true,
+  },
 ];
 
 test("model-runtime: invoke falls back to local heuristic when cloud blocked and records a call", async () => {
@@ -67,8 +81,8 @@ test("model-runtime: invoke falls back to local heuristic when cloud blocked and
     calls.some(
       (c) =>
         c.profileId === "ask-fast-local" &&
-        (c.status === "ok" || c.status === "fallback" || c.status === "failed"),
-    ),
+        (c.status === "ok" || c.status === "fallback" || c.status === "failed")
+    )
   );
 });
 
@@ -79,11 +93,19 @@ test("model-runtime: embed falls back to hash embedding when provider fails", as
     profiles,
     cloudEnabled: true,
   });
-  const result = await runtime.embed("ask-fast-local", { input: "hello world" }, {
-    recordCall: (payload) => {
-      recorded.push({ role: payload.role, status: payload.status, completionTokens: payload.completionTokens });
-    },
-  });
+  const result = await runtime.embed(
+    "ask-fast-local",
+    { input: "hello world" },
+    {
+      recordCall: (payload) => {
+        recorded.push({
+          role: payload.role,
+          status: payload.status,
+          completionTokens: payload.completionTokens,
+        });
+      },
+    }
+  );
   assert.equal(result.embeddings.length, 1);
   assert.ok(result.dimensions > 0);
   assert.ok(recorded.some((entry) => entry.role === "embedding" && entry.completionTokens > 0));
@@ -148,14 +170,14 @@ test("model-runtime: invoke with failing cloud falls back to local profile and m
   assert.equal(result.profileId, "ask-fast-local");
   assert.ok(
     calls.some(
-      (c) => c.profileId === "ask-cloud-router" && (c.status === "failed" || c.status === "blocked"),
-    ),
+      (c) => c.profileId === "ask-cloud-router" && (c.status === "failed" || c.status === "blocked")
+    )
   );
   assert.ok(
     calls.some(
       (c) =>
         c.profileId === "ask-fast-local" &&
-        (c.status === "ok" || c.status === "fallback" || c.status === "failed"),
-    ),
+        (c.status === "ok" || c.status === "fallback" || c.status === "failed")
+    )
   );
 });

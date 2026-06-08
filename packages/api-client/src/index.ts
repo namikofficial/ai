@@ -1,33 +1,33 @@
+import type { ProjectContextGraph } from "../../code-intelligence/src/index.ts";
 import type {
   AskRequest,
   AskResponse,
   CheckRunSummary,
   CodeEdgeRecord,
   CodeSymbolRecord,
-  ConfigSnapshot,
   CompiledPromptRecord,
+  ConfigSnapshot,
   EventEnvelope,
   HandoffRequest,
   HandoffResponse,
   PlanRequest,
   PlanResponse,
-  ReviewRequest,
-  ReviewResponse,
   ProjectCreateInput,
   ProjectSummary,
+  PromptLabResultRecord,
+  PromptLabRunRecord,
+  PromptLabRunRequest,
   RetrievalChunk,
   ReviewRecord,
-  PromptLabRunRequest,
-  PromptLabRunRecord,
-  PromptLabResultRecord,
+  ReviewRequest,
+  ReviewResponse,
+  SessionRecord,
   SessionReplayRequest,
   SessionReplayResponse,
   SessionTimelineResponse,
-  TaskRecord,
-  SessionRecord,
   SettingsSnapshot,
+  TaskRecord,
 } from "../../shared/src/index.ts";
-import type { ProjectContextGraph } from "../../code-intelligence/src/index.ts";
 
 export interface ApiClientOptions {
   baseUrl: string;
@@ -99,14 +99,40 @@ export function createApiClient(options: ApiClientOptions) {
     }> {
       return requestJson(options.baseUrl, `/projects/${projectId}/graph`);
     },
-    listProjectSymbols(projectId: string, input?: { query?: string | null; limit?: number }): Promise<{ status: "ok"; data: { project: ProjectSummary; symbols: CodeSymbolRecord[]; query: string | null; limit: number; total: number } }> {
+    listProjectSymbols(
+      projectId: string,
+      input?: { query?: string | null; limit?: number }
+    ): Promise<{
+      status: "ok";
+      data: {
+        project: ProjectSummary;
+        symbols: CodeSymbolRecord[];
+        query: string | null;
+        limit: number;
+        total: number;
+      };
+    }> {
       const params = new URLSearchParams();
       if (input?.query !== undefined && input?.query !== null) params.set("query", input.query);
-      if (input?.limit !== undefined && input?.limit !== null) params.set("limit", String(input.limit));
+      if (input?.limit !== undefined && input?.limit !== null)
+        params.set("limit", String(input.limit));
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/projects/${projectId}/symbols${suffix}`);
     },
-    getCodeSymbol(symbolId: string): Promise<{ status: "ok"; data: { projectId: string; filePath: string; projectPath: string | null; symbolPath: string; project: { id: string; path: string; name: string } | null; symbol: CodeSymbolRecord; chunks: Array<Record<string, unknown>>; edges: CodeEdgeRecord[]; relatedSymbols: CodeSymbolRecord[] } }> {
+    getCodeSymbol(symbolId: string): Promise<{
+      status: "ok";
+      data: {
+        projectId: string;
+        filePath: string;
+        projectPath: string | null;
+        symbolPath: string;
+        project: { id: string; path: string; name: string } | null;
+        symbol: CodeSymbolRecord;
+        chunks: Array<Record<string, unknown>>;
+        edges: CodeEdgeRecord[];
+        relatedSymbols: CodeSymbolRecord[];
+      };
+    }> {
       return requestJson(options.baseUrl, `/symbols/${encodeURIComponent(symbolId)}`);
     },
     createProject(input: ProjectCreateInput): Promise<{ status: "ok"; data: ProjectSummary }> {
@@ -116,13 +142,25 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    indexProject(projectId: string): Promise<{ status: "ok"; data: { session: SessionRecord; events: EventEnvelope[] } }> {
+    indexProject(
+      projectId: string
+    ): Promise<{ status: "ok"; data: { session: SessionRecord; events: EventEnvelope[] } }> {
       return requestJson(options.baseUrl, `/projects/${projectId}/index`, { method: "POST" });
     },
-    getProjectMemory(projectId: string): Promise<{ status: "ok"; data: { lessons: Array<Record<string, unknown>>; rules: Array<Record<string, unknown>>; memory: Array<Record<string, unknown>> } }> {
+    getProjectMemory(projectId: string): Promise<{
+      status: "ok";
+      data: {
+        lessons: Array<Record<string, unknown>>;
+        rules: Array<Record<string, unknown>>;
+        memory: Array<Record<string, unknown>>;
+      };
+    }> {
       return requestJson(options.baseUrl, `/projects/${projectId}/memory`);
     },
-    getProjectRetrieval(projectId: string, query = ""): Promise<{ status: "ok"; data: { chunks: RetrievalChunk[]; query: string } }> {
+    getProjectRetrieval(
+      projectId: string,
+      query = ""
+    ): Promise<{ status: "ok"; data: { chunks: RetrievalChunk[]; query: string } }> {
       const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
       return requestJson(options.baseUrl, `/projects/${projectId}/retrieval${suffix}`);
     },
@@ -135,10 +173,15 @@ export function createApiClient(options: ApiClientOptions) {
     getSessionEvents(sessionId: string): Promise<{ status: "ok"; data: EventEnvelope[] }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/events`);
     },
-    getSessionTimeline(sessionId: string): Promise<{ status: "ok"; data: SessionTimelineResponse }> {
+    getSessionTimeline(
+      sessionId: string
+    ): Promise<{ status: "ok"; data: SessionTimelineResponse }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/timeline`);
     },
-    replaySession(sessionId: string, input: SessionReplayRequest): Promise<{ status: "ok"; data: SessionReplayResponse }> {
+    replaySession(
+      sessionId: string,
+      input: SessionReplayRequest
+    ): Promise<{ status: "ok"; data: SessionReplayResponse }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/replay`, {
         method: "POST",
         body: JSON.stringify(input),
@@ -165,7 +208,19 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    research(input: { project: string; topic: string; mode?: "local" | "web" | "hybrid" }): Promise<{ status: "ok"; data: { summary: string; sources: Array<{ path: string; score: number; excerpt: string }>; contradictions: string[]; brief: string } }> {
+    research(input: {
+      project: string;
+      topic: string;
+      mode?: "local" | "web" | "hybrid";
+    }): Promise<{
+      status: "ok";
+      data: {
+        summary: string;
+        sources: Array<{ path: string; score: number; excerpt: string }>;
+        contradictions: string[];
+        brief: string;
+      };
+    }> {
       return requestJson(options.baseUrl, "/research", {
         method: "POST",
         body: JSON.stringify(input),
@@ -182,21 +237,34 @@ export function createApiClient(options: ApiClientOptions) {
     listChecks(): Promise<{ status: "ok"; data: CheckRunSummary[] }> {
       return requestJson(options.baseUrl, "/checks");
     },
-    runCheck(input: { name: string; projectId?: string | null }): Promise<{ status: "ok"; data: CheckRunSummary }> {
+    runCheck(input: {
+      name: string;
+      projectId?: string | null;
+    }): Promise<{ status: "ok"; data: CheckRunSummary }> {
       return requestJson(options.baseUrl, "/checks/run", {
         method: "POST",
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },
       });
     },
-    searchRetrieval(input: { project: string; query: string; limit?: number }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    searchRetrieval(input: {
+      project: string;
+      query: string;
+      limit?: number;
+    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, "/retrieval/search", {
         method: "POST",
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },
       });
     },
-    explainContext(input: { project: string; query: string; mode?: "local" | "cloud" | "hybrid"; depth?: "shallow" | "standard" | "deep"; limit?: number }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    explainContext(input: {
+      project: string;
+      query: string;
+      mode?: "local" | "cloud" | "hybrid";
+      depth?: "shallow" | "standard" | "deep";
+      limit?: number;
+    }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, "/context/explain", {
         method: "POST",
         body: JSON.stringify(input),
@@ -222,17 +290,42 @@ export function createApiClient(options: ApiClientOptions) {
     listPromptLabRuns(): Promise<{ status: "ok"; data: PromptLabRunRecord[] }> {
       return requestJson(options.baseUrl, "/prompt-lab/runs");
     },
-    getPromptLabRun(runId: string): Promise<{ status: "ok"; data: { run: PromptLabRunRecord; prompt: Record<string, unknown> | null; results: PromptLabResultRecord[] } }> {
+    getPromptLabRun(runId: string): Promise<{
+      status: "ok";
+      data: {
+        run: PromptLabRunRecord;
+        prompt: Record<string, unknown> | null;
+        results: PromptLabResultRecord[];
+      };
+    }> {
       return requestJson(options.baseUrl, `/prompt-lab/runs/${encodeURIComponent(runId)}`);
     },
-    runPromptLab(input: PromptLabRunRequest): Promise<{ status: "ok"; data: { run: PromptLabRunRecord; prompt: Record<string, unknown> | null; results: PromptLabResultRecord[] } }> {
+    runPromptLab(input: PromptLabRunRequest): Promise<{
+      status: "ok";
+      data: {
+        run: PromptLabRunRecord;
+        prompt: Record<string, unknown> | null;
+        results: PromptLabResultRecord[];
+      };
+    }> {
       return requestJson(options.baseUrl, "/prompt-lab/run", {
         method: "POST",
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },
       });
     },
-    getModels(): Promise<{ status: "ok"; data: { usage: Array<{ day: string; modelName: string; promptTokens: number; completionTokens: number; requests: number }> } }> {
+    getModels(): Promise<{
+      status: "ok";
+      data: {
+        usage: Array<{
+          day: string;
+          modelName: string;
+          promptTokens: number;
+          completionTokens: number;
+          requests: number;
+        }>;
+      };
+    }> {
       return requestJson(options.baseUrl, "/models");
     },
     getMcpOverview(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
@@ -244,7 +337,11 @@ export function createApiClient(options: ApiClientOptions) {
     getMcpCall(callId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
       return requestJson(options.baseUrl, `/mcp/calls/${callId}`);
     },
-    listRetrievalQueries(input: { sessionId?: string; projectId?: string; limit?: number }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listRetrievalQueries(input: {
+      sessionId?: string;
+      projectId?: string;
+      limit?: number;
+    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const params = new URLSearchParams();
       if (input.sessionId) params.set("sessionId", input.sessionId);
       if (input.projectId) params.set("projectId", input.projectId);
@@ -255,41 +352,65 @@ export function createApiClient(options: ApiClientOptions) {
     getRetrievalQuery(id: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/retrieval/queries/${id}`);
     },
-    listMemoryCandidates(input: { status?: "pending" | "accepted" | "rejected"; projectId?: string }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listMemoryCandidates(input: {
+      status?: "pending" | "accepted" | "rejected";
+      projectId?: string;
+    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const params = new URLSearchParams();
       if (input.status) params.set("status", input.status);
       if (input.projectId) params.set("projectId", input.projectId);
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/memory/candidates${suffix}`);
     },
-    acceptMemoryCandidate(id: string, notes?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    acceptMemoryCandidate(
+      id: string,
+      notes?: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/memory/candidates/${id}/accept`, {
         method: "POST",
         body: JSON.stringify({ notes: notes ?? null }),
         headers: { "content-type": "application/json" },
       });
     },
-    rejectMemoryCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    rejectMemoryCandidate(
+      id: string,
+      reason?: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/memory/candidates/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
         headers: { "content-type": "application/json" },
       });
     },
-    listMemoryEntries(input?: { projectId?: string; scope?: "global" | "project" | "repo" | "path" }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listMemoryEntries(input?: {
+      projectId?: string;
+      scope?: "global" | "project" | "repo" | "path";
+    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const params = new URLSearchParams();
       if (input?.projectId) params.set("projectId", input.projectId);
       if (input?.scope) params.set("scope", input.scope);
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/memory/entries${suffix}`);
     },
-    listMemoryFacts(projectId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(options.baseUrl, `/memory/facts?projectId=${encodeURIComponent(projectId)}`);
+    listMemoryFacts(
+      projectId: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(
+        options.baseUrl,
+        `/memory/facts?projectId=${encodeURIComponent(projectId)}`
+      );
     },
-    listProjectRules(projectId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(options.baseUrl, `/memory/rules?projectId=${encodeURIComponent(projectId)}`);
+    listProjectRules(
+      projectId: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(
+        options.baseUrl,
+        `/memory/rules?projectId=${encodeURIComponent(projectId)}`
+      );
     },
-    listSkillCandidates(input?: { status?: "pending" | "active" | "deprecated" | "rejected" }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listSkillCandidates(input?: {
+      status?: "pending" | "active" | "deprecated" | "rejected";
+    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const params = new URLSearchParams();
       if (input?.status) params.set("status", input.status);
       const suffix = params.toString() ? `?${params.toString()}` : "";
@@ -298,7 +419,10 @@ export function createApiClient(options: ApiClientOptions) {
     acceptSkillCandidate(id: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/skills/candidates/${id}/accept`, { method: "POST" });
     },
-    rejectSkillCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    rejectSkillCandidate(
+      id: string,
+      reason?: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/skills/candidates/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
@@ -308,7 +432,10 @@ export function createApiClient(options: ApiClientOptions) {
     listSkills(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/skills`);
     },
-    getModelProviders(): Promise<{ status: "ok"; data: { providers: Array<Record<string, unknown>>; profiles: Array<Record<string, unknown>> } }> {
+    getModelProviders(): Promise<{
+      status: "ok";
+      data: { providers: Array<Record<string, unknown>>; profiles: Array<Record<string, unknown>> };
+    }> {
       return requestJson(options.baseUrl, `/models/providers`);
     },
     getModelRoutes(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
@@ -323,7 +450,10 @@ export function createApiClient(options: ApiClientOptions) {
       goal?: string;
       fallbackProfileId?: string | null;
       reason?: string | null;
-    }): Promise<{ status: "ok"; data: { route: Record<string, unknown>; profile: Record<string, unknown> | null } }> {
+    }): Promise<{
+      status: "ok";
+      data: { route: Record<string, unknown>; profile: Record<string, unknown> | null };
+    }> {
       return requestJson(options.baseUrl, `/models/route`, {
         method: "POST",
         body: JSON.stringify(input),
@@ -333,7 +463,13 @@ export function createApiClient(options: ApiClientOptions) {
     getModelCalls(limit = 50): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/models/calls?limit=${limit}`);
     },
-    getModelHealth(): Promise<{ status: "ok"; data: { providers: Array<Record<string, unknown>>; recentCalls: Array<Record<string, unknown>> } }> {
+    getModelHealth(): Promise<{
+      status: "ok";
+      data: {
+        providers: Array<Record<string, unknown>>;
+        recentCalls: Array<Record<string, unknown>>;
+      };
+    }> {
       return requestJson(options.baseUrl, `/models/health`);
     },
     checkModelHealth(input: {
@@ -349,29 +485,46 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    listAgentRuns(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(options.baseUrl, `/agents/runs?sessionId=${encodeURIComponent(sessionId)}`);
+    listAgentRuns(
+      sessionId: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(
+        options.baseUrl,
+        `/agents/runs?sessionId=${encodeURIComponent(sessionId)}`
+      );
     },
     getAgentRun(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/agents/runs/${runId}`);
     },
-    listAgentHandoffs(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listAgentHandoffs(
+      sessionId?: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
       return requestJson(options.baseUrl, `/agents/handoffs${suffix}`);
     },
-    listContextPacks(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(options.baseUrl, `/context/packs?sessionId=${encodeURIComponent(sessionId)}`);
+    listContextPacks(
+      sessionId: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(
+        options.baseUrl,
+        `/context/packs?sessionId=${encodeURIComponent(sessionId)}`
+      );
     },
     getContextPack(packId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/context/packs/${packId}`);
     },
-    listConversationMessages(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listConversationMessages(
+      sessionId: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/conversations/${encodeURIComponent(sessionId)}`);
     },
     getSessionTrace(sessionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/trace`);
     },
-    listCompiledPrompts(input?: { sessionId?: string; limit?: number }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listCompiledPrompts(input?: {
+      sessionId?: string;
+      limit?: number;
+    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const params = new URLSearchParams();
       if (input?.sessionId) params.set("sessionId", input.sessionId);
       if (input?.limit) params.set("limit", String(input.limit));
@@ -381,11 +534,19 @@ export function createApiClient(options: ApiClientOptions) {
     getCompiledPrompt(promptId: string): Promise<{ status: "ok"; data: CompiledPromptRecord }> {
       return requestJson(options.baseUrl, `/prompts/${encodeURIComponent(promptId)}`);
     },
-    listEvalCases(projectId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listEvalCases(
+      projectId?: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
       return requestJson(options.baseUrl, `/eval/cases${suffix}`);
     },
-    addEvalCase(input: { projectId?: string; question: string; expectedAnswerContains?: string; expectedFiles?: string[]; tags?: string[] }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    addEvalCase(input: {
+      projectId?: string;
+      question: string;
+      expectedAnswerContains?: string;
+      expectedFiles?: string[];
+      tags?: string[];
+    }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/eval/cases`, {
         method: "POST",
         body: JSON.stringify(input),
@@ -395,38 +556,40 @@ export function createApiClient(options: ApiClientOptions) {
     listAnswerEvaluations(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/eval/answers`);
     },
-    listSessionOutcomes(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listSessionOutcomes(
+      sessionId?: string
+    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
       return requestJson(options.baseUrl, `/eval/outcomes${suffix}`);
     },
     streamEvents(onEvent: (event: EventEnvelope) => void): () => void {
       const controller = new AbortController();
-      fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(async (response) => {
-        if (!response.body) {
-          return;
-        }
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
+      fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(
+        async (response) => {
+          if (!response.body) {
+            return;
+          }
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
 
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          let boundary = buffer.indexOf("\n\n");
-          while (boundary !== -1) {
-            const raw = buffer.slice(0, boundary).trim();
-            buffer = buffer.slice(boundary + 2);
-            boundary = buffer.indexOf("\n\n");
-            const dataLine = raw
-              .split("\n")
-              .find((line) => line.startsWith("data: "));
-            if (dataLine) {
-              onEvent(JSON.parse(dataLine.slice(6)) as EventEnvelope);
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary = buffer.indexOf("\n\n");
+            while (boundary !== -1) {
+              const raw = buffer.slice(0, boundary).trim();
+              buffer = buffer.slice(boundary + 2);
+              boundary = buffer.indexOf("\n\n");
+              const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
+              if (dataLine) {
+                onEvent(JSON.parse(dataLine.slice(6)) as EventEnvelope);
+              }
             }
           }
         }
-      });
+      );
 
       return () => controller.abort();
     },

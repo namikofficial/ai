@@ -1,7 +1,18 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type { ConversationMessageRecord, ConversationMessageRole } from "../../../shared/src/index.ts";
-import { asBool, asNumber, asString, asStringOrNull, now, newId, safeParseJson } from "./_shared.ts";
+import type {
+  ConversationMessageRecord,
+  ConversationMessageRole,
+} from "../../../shared/src/index.ts";
+import {
+  asBool,
+  asNumber,
+  asString,
+  asStringOrNull,
+  newId,
+  now,
+  safeParseJson,
+} from "./_shared.ts";
 
 interface ConversationRow {
   id: string;
@@ -61,7 +72,7 @@ export function createConversationRepo(db: DatabaseSync) {
         `INSERT INTO conversation_messages (
           id, session_id, project_id, role, agent, content, content_hash,
           meta_json, token_count, parent_message_id, ts, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId,
@@ -74,7 +85,7 @@ export function createConversationRepo(db: DatabaseSync) {
         tokenCount,
         input.parentMessageId ?? null,
         ts,
-        ts,
+        ts
       );
       return {
         id,
@@ -104,7 +115,9 @@ export function createConversationRepo(db: DatabaseSync) {
       return rows.map(rowToConversationMessage).reverse();
     },
     getMessage(id: string): ConversationMessageRecord | null {
-      const row = db.prepare("SELECT * FROM conversation_messages WHERE id = ? LIMIT 1").get(id) as ConversationRow | undefined;
+      const row = db.prepare("SELECT * FROM conversation_messages WHERE id = ? LIMIT 1").get(id) as
+        | ConversationRow
+        | undefined;
       if (!row) return null;
       return rowToConversationMessage(row);
     },

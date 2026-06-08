@@ -1,5 +1,12 @@
-import type { ModelInvokeRequest, ModelInvokeResult, EmbeddingRequest, EmbeddingResult, RerankRequest, RerankResult } from "../index.ts";
-import type { ModelProviderAdapter, ModelHealthResult } from "./types.ts";
+import type {
+  EmbeddingRequest,
+  EmbeddingResult,
+  ModelInvokeRequest,
+  ModelInvokeResult,
+  RerankRequest,
+  RerankResult,
+} from "../index.ts";
+import type { ModelHealthResult, ModelProviderAdapter } from "./types.ts";
 
 function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
@@ -7,7 +14,10 @@ function estimateTokens(text: string): number {
 
 function hashEmbedding(input: string, dim: number): number[] {
   const vector = Array.from({ length: dim }, () => 0);
-  const terms = input.toLowerCase().split(/[^a-z0-9]+/g).filter((term) => term.length >= 2);
+  const terms = input
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((term) => term.length >= 2);
   for (const term of terms) {
     let hash = 2166136261;
     for (let index = 0; index < term.length; index += 1) {
@@ -38,10 +48,13 @@ export class HeuristicAdapter implements ModelProviderAdapter {
   }
 
   async invoke(request: ModelInvokeRequest): Promise<ModelInvokeResult> {
-    const prompt = request.messages.map((message) => `${message.role}: ${message.content}`).join("\n");
-    const lastUserMessage = request.messages.filter((m) => m.role === "user").at(-1)?.content ?? prompt;
+    const prompt = request.messages
+      .map((message) => `${message.role}: ${message.content}`)
+      .join("\n");
+    const lastUserMessage =
+      request.messages.filter((m) => m.role === "user").at(-1)?.content ?? prompt;
     let text: string;
-    
+
     switch (request.role) {
       case "summarizer":
         text = `Summary: ${lastUserMessage}`.slice(0, 800);

@@ -35,7 +35,11 @@ test("parses ask input", () => {
 });
 
 test("creates and parses an event envelope", () => {
-  const event = createEvent("task.started", { message: "started" }, { sessionId: "sess_1", projectId: "proj_1" });
+  const event = createEvent(
+    "task.started",
+    { message: "started" },
+    { sessionId: "sess_1", projectId: "proj_1" }
+  );
   const parsed = parseEventEnvelope(event);
 
   assert.equal(parsed.type, "task.started");

@@ -1,3 +1,4 @@
+import { redactSecrets } from "../../safety/src/index.ts";
 import type {
   AgentRunRecord,
   AnswerEvaluationRecord,
@@ -18,10 +19,18 @@ import type {
   SkillCandidateRecord,
   SkillRecord,
 } from "../../shared/src/index.ts";
-import { redactSecrets } from "../../safety/src/index.ts";
 
 export interface ReflectionEvidence {
-  kind: "session" | "query" | "context" | "conversation" | "agent_run" | "model_call" | "check" | "review" | "outcome";
+  kind:
+    | "session"
+    | "query"
+    | "context"
+    | "conversation"
+    | "agent_run"
+    | "model_call"
+    | "check"
+    | "review"
+    | "outcome";
   refId: string;
   excerpt: string;
   meta?: Record<string, unknown>;
@@ -83,7 +92,12 @@ export interface ReflectInput {
   retrievalSelectedContext: Map<string, RetrievalSelectedContextRecord[]>;
   retrievalFeedback: RetrievalFeedbackRecord[];
   retrievalMisses: RetrievalMissRecord[];
-  contextPacks: Array<{ id: string; usedTokens: number; budgetTokens: number; retrievalQueryId: string | null }>;
+  contextPacks: Array<{
+    id: string;
+    usedTokens: number;
+    budgetTokens: number;
+    retrievalQueryId: string | null;
+  }>;
   agentRuns: AgentRunRecord[];
   modelCalls: ModelCallRecord[];
   checks: CheckRunSummary[];
@@ -116,12 +130,23 @@ function buildEvidence(parts: Array<ReflectionEvidence | null>): ReflectionEvide
   return parts.filter((entry): entry is ReflectionEvidence => entry != null);
 }
 
-function extractUserPreference(conversation: ConversationMessageRecord[]): MemoryCandidateProposal | null {
+function extractUserPreference(
+  conversation: ConversationMessageRecord[]
+): MemoryCandidateProposal | null {
   const userMessages = conversation.filter((entry) => entry.role === "user");
   if (userMessages.length === 0) return null;
   const last = userMessages.at(-1)!;
   const lowered = last.content.toLowerCase();
-  const preferenceTokens = ["prefer", "like", "always", "never", "use ", "avoid", "i want", "we use"];
+  const preferenceTokens = [
+    "prefer",
+    "like",
+    "always",
+    "never",
+    "use ",
+    "avoid",
+    "i want",
+    "we use",
+  ];
   if (!preferenceTokens.some((token) => lowered.includes(token))) return null;
   return {
     kind: "user_preference",
@@ -140,8 +165,12 @@ function extractUserPreference(conversation: ConversationMessageRecord[]): Memor
   };
 }
 
-function extractStyleRule(conversation: ConversationMessageRecord[]): MemoryCandidateProposal | null {
-  const assistant = conversation.find((entry) => entry.role === "assistant" && entry.content.toLowerCase().includes("always"));
+function extractStyleRule(
+  conversation: ConversationMessageRecord[]
+): MemoryCandidateProposal | null {
+  const assistant = conversation.find(
+    (entry) => entry.role === "assistant" && entry.content.toLowerCase().includes("always")
+  );
   if (!assistant) return null;
   const match = assistant.content.match(/always [a-z][^.]{0,160}/i);
   if (!match) return null;
@@ -151,9 +180,7 @@ function extractStyleRule(conversation: ConversationMessageRecord[]): MemoryCand
     body: truncate(match[0], 240),
     confidence: 0.4,
     scope: "project",
-    evidence: [
-      { kind: "conversation", refId: assistant.id, excerpt: truncate(assistant.content) },
-    ],
+    evidence: [{ kind: "conversation", refId: assistant.id, excerpt: truncate(assistant.content) }],
   };
 }
 
@@ -169,13 +196,23 @@ function extractErrorFix(input: ReflectInput): MemoryCandidateProposal | null {
     confidence: 0.5,
     scope: "project",
     evidence: [
-      { kind: "check", refId: fixed.id, excerpt: truncate(fixed.errorOutput ?? ""), meta: { name: fixed.name } },
+      {
+        kind: "check",
+        refId: fixed.id,
+        excerpt: truncate(fixed.errorOutput ?? ""),
+        meta: { name: fixed.name },
+      },
     ],
   };
 }
 
-function extractAntiPattern(answerEvaluations: AnswerEvaluationRecord[], session: SessionRecord): MemoryCandidateProposal | null {
-  const weak = answerEvaluations.find((entry) => entry.groundedness < 0.4 || entry.contradiction > 0.5);
+function extractAntiPattern(
+  answerEvaluations: AnswerEvaluationRecord[],
+  session: SessionRecord
+): MemoryCandidateProposal | null {
+  const weak = answerEvaluations.find(
+    (entry) => entry.groundedness < 0.4 || entry.contradiction > 0.5
+  );
   if (!weak) return null;
   return {
     kind: "anti_pattern",
@@ -184,12 +221,19 @@ function extractAntiPattern(answerEvaluations: AnswerEvaluationRecord[], session
     confidence: 0.6,
     scope: "project",
     evidence: [
-      { kind: "review", refId: session.id, excerpt: truncate(weak.notes ?? "grounded answer warning") },
+      {
+        kind: "review",
+        refId: session.id,
+        excerpt: truncate(weak.notes ?? "grounded answer warning"),
+      },
     ],
   };
 }
 
-function extractRetrievalMiss(miss: RetrievalMissRecord, retrieval: RetrievalQueryRecord | undefined): MemoryCandidateProposal | null {
+function extractRetrievalMiss(
+  miss: RetrievalMissRecord,
+  retrieval: RetrievalQueryRecord | undefined
+): MemoryCandidateProposal | null {
   if (!retrieval) return null;
   return {
     kind: "retrieval_miss",
@@ -198,7 +242,12 @@ function extractRetrievalMiss(miss: RetrievalMissRecord, retrieval: RetrievalQue
     confidence: 0.7,
     scope: "project",
     evidence: [
-      { kind: "query", refId: retrieval.id, excerpt: truncate(retrieval.originalQuery), meta: { confidence: miss.confidence } },
+      {
+        kind: "query",
+        refId: retrieval.id,
+        excerpt: truncate(retrieval.originalQuery),
+        meta: { confidence: miss.confidence },
+      },
     ],
   };
 }
@@ -214,7 +263,11 @@ function extractArchitecturalFact(input: ReflectInput): FactProposal | null {
     confidence: 0.6,
     sourceKind: "reflection",
     sources: [
-      { kind: "session", ref: input.session.id, excerpt: `grounded answers in session: ${acceptedAnswers.length}` },
+      {
+        kind: "session",
+        ref: input.session.id,
+        excerpt: `grounded answers in session: ${acceptedAnswers.length}`,
+      },
     ],
     evidence: [
       { kind: "review", refId: input.session.id, excerpt: truncate(top.notes ?? "grounded", 240) },
@@ -240,9 +293,7 @@ function extractDependencyFact(input: ReflectInput): FactProposal | null {
     sources: [
       { kind: "session", ref: input.session.id, excerpt: `${top[0]} used ${top[1]} times` },
     ],
-    evidence: [
-      { kind: "model_call", refId: top[0], excerpt: `successful invocations: ${top[1]}` },
-    ],
+    evidence: [{ kind: "model_call", refId: top[0], excerpt: `successful invocations: ${top[1]}` }],
   };
 }
 
@@ -286,7 +337,9 @@ function detectStaleFacts(existing: FactRecord[], ttlDays: number): StaleFactPro
 }
 
 function proposeSkillFromChecks(input: ReflectInput): SkillCandidateProposal | null {
-  const successfulChecks = input.checks.filter((entry) => entry.status === "completed" && entry.command);
+  const successfulChecks = input.checks.filter(
+    (entry) => entry.status === "completed" && entry.command
+  );
   if (successfulChecks.length < 1) return null;
   const distinct = new Map<string, { command: string; count: number }>();
   for (const check of successfulChecks) {
@@ -313,7 +366,12 @@ function proposeSkillFromChecks(input: ReflectInput): SkillCandidateProposal | n
     sourceKind: "reflection",
     exampleSessionId: input.session.id,
     evidence: [
-      { kind: "check", refId: input.checks[0].id, excerpt: truncate(top.command), meta: { count: top.count } },
+      {
+        kind: "check",
+        refId: input.checks[0].id,
+        excerpt: truncate(top.command),
+        meta: { count: top.count },
+      },
     ],
   };
 }
@@ -336,9 +394,7 @@ function proposeSkillFromReviews(input: ReflectInput): SkillCandidateProposal | 
     confidence: 0.45,
     sourceKind: "reflection",
     exampleSessionId: input.session.id,
-    evidence: [
-      { kind: "review", refId: review.id, excerpt: truncate(review.summary, 240) },
-    ],
+    evidence: [{ kind: "review", refId: review.id, excerpt: truncate(review.summary, 240) }],
   };
 }
 
@@ -402,11 +458,19 @@ export function reflect(input: ReflectInput): ReflectionOutput {
     memoryCandidates.push({
       kind: "workflow_lesson",
       title: `Successful session ${input.session.id.slice(0, 8)}`,
-      body: truncate(input.session.finalSummary ?? `Outcome: ${input.outcome.outcome}, score=${input.outcome.score}`, 280),
+      body: truncate(
+        input.session.finalSummary ??
+          `Outcome: ${input.outcome.outcome}, score=${input.outcome.score}`,
+        280
+      ),
       confidence: 0.6,
       scope: "project",
       evidence: buildEvidence([
-        { kind: "outcome", refId: input.outcome.id, excerpt: truncate(input.outcome.notes ?? input.outcome.outcome) },
+        {
+          kind: "outcome",
+          refId: input.outcome.id,
+          excerpt: truncate(input.outcome.notes ?? input.outcome.outcome),
+        },
         { kind: "session", refId: input.session.id, excerpt: truncate(input.session.title) },
       ]),
     });
@@ -437,7 +501,10 @@ export function reflect(input: ReflectInput): ReflectionOutput {
   return { memoryCandidates, skillCandidates, facts, staleFacts, retrievalFeedback, notes };
 }
 
-export function buildSkillCandidateRecord(proposal: SkillCandidateProposal, projectId: string | null): SkillCandidateRecord {
+export function buildSkillCandidateRecord(
+  proposal: SkillCandidateProposal,
+  projectId: string | null
+): SkillCandidateRecord {
   const ts = new Date().toISOString();
   return {
     id: `sc_${Date.now()}_${proposal.title.slice(0, 16).replace(/[^a-z0-9]+/gi, "_")}`,

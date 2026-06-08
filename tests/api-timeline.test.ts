@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("api: session timeline endpoint", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-api-timeline-"));

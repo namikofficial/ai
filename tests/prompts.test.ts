@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("compiled prompt repo records, fetches, and lists prompts by session", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-prompts-"));
@@ -55,10 +55,7 @@ test("compiled prompt repo records, fetches, and lists prompts by session", asyn
     assert.equal(byId?.mode, "answer");
 
     const bySession = store.listCompiledPrompts(session.id, 10);
-    assert.deepEqual(
-      bySession.map((prompt) => prompt.id).sort(),
-      ["pp_first", "pp_second"],
-    );
+    assert.deepEqual(bySession.map((prompt) => prompt.id).sort(), ["pp_first", "pp_second"]);
   } finally {
     store.db.close();
     await rm(workspace, { recursive: true, force: true });

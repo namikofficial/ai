@@ -13,16 +13,31 @@ export class HeuristicModelRouter implements ModelRouter {
   }
 
   async route(input: ModelRouteInput): Promise<ModelRouteDecision> {
-    const candidates = this.profiles.filter((profile) => profile.role === input.role && profile.enabled);
+    const candidates = this.profiles.filter(
+      (profile) => profile.role === input.role && profile.enabled
+    );
     const localCandidates = candidates.filter((profile) => profile.localOnly);
     const cloudCandidates = candidates.filter((profile) => !profile.localOnly);
 
     const pickBest = (list: ModelProfileRecord[]): ModelProfileRecord | null =>
-      list.slice().sort((left, right) => this.scoreProfile(right, input) - this.scoreProfile(left, input))[0] ?? null;
+      list
+        .slice()
+        .sort(
+          (left, right) => this.scoreProfile(right, input) - this.scoreProfile(left, input)
+        )[0] ?? null;
 
     if (input.mode === "cloud" && !input.cloudEnabled) {
-      const fallback = input.fallbackProfileId ?? pickBest(localCandidates)?.id ?? pickBest(candidates)?.id ?? null;
-      return { profileId: null, fallbackProfileId: fallback, blocked: true, reason: "cloud disabled" };
+      const fallback =
+        input.fallbackProfileId ??
+        pickBest(localCandidates)?.id ??
+        pickBest(candidates)?.id ??
+        null;
+      return {
+        profileId: null,
+        fallbackProfileId: fallback,
+        blocked: true,
+        reason: "cloud disabled",
+      };
     }
 
     if (input.mode === "local") {
@@ -48,18 +63,25 @@ export class HeuristicModelRouter implements ModelRouter {
     const questionLength = input.details?.question?.trim().length ?? 0;
     const depth = input.details?.depth ?? "standard";
     const risk = input.details?.risk ?? "low";
-    const contextNeed = input.details?.contextTokens ?? Math.max(2048, Math.min(32_768, questionLength * 64));
-    
+    const contextNeed =
+      input.details?.contextTokens ?? Math.max(2048, Math.min(32_768, questionLength * 64));
+
     const contextWindow = profile.contextWindow ?? 0;
-    const contextFit = contextWindow <= 0 ? 0 : Math.max(0, Math.min(1, contextNeed / contextWindow));
+    const contextFit =
+      contextWindow <= 0 ? 0 : Math.max(0, Math.min(1, contextNeed / contextWindow));
     const contextBonus = contextWindow >= contextNeed ? 0.2 : -0.2 * (1 - contextFit);
-    
-    const depthBonus = depth === "deep" ? Math.min(0.2, contextWindow / 32_768) : depth === "shallow" ? -0.05 : 0;
-    const riskBonus = risk === "high" ? Math.min(0.15, profile.qualityScore * 0.15) : risk === "medium" ? 0.05 : 0;
-    
-    const roleBonus = (input.role === "planner" && profile.modelName.includes("planner")) ||
-                      (input.role === "answer" && profile.modelName.includes("ask")) ||
-                      (input.role === "embedding" && profile.modelName.includes("embedding")) ? 0.08 : 0;
+
+    const depthBonus =
+      depth === "deep" ? Math.min(0.2, contextWindow / 32_768) : depth === "shallow" ? -0.05 : 0;
+    const riskBonus =
+      risk === "high" ? Math.min(0.15, profile.qualityScore * 0.15) : risk === "medium" ? 0.05 : 0;
+
+    const roleBonus =
+      (input.role === "planner" && profile.modelName.includes("planner")) ||
+      (input.role === "answer" && profile.modelName.includes("ask")) ||
+      (input.role === "embedding" && profile.modelName.includes("embedding"))
+        ? 0.08
+        : 0;
 
     return (
       profile.qualityScore * 0.5 +

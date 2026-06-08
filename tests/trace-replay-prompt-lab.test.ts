@@ -1,14 +1,18 @@
 import assert from "node:assert/strict";
-import test from "node:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 async function startTestServer(): Promise<{
   workspace: string;
-  request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>;
+  request: (
+    method: string,
+    url: string,
+    body?: unknown
+  ) => Promise<{ statusCode: number; body: string }>;
   close: () => Promise<void>;
 }> {
   const workspace = await mkdtemp(join(tmpdir(), "ai-trace-lab-"));
@@ -22,7 +26,7 @@ async function startTestServer(): Promise<{
       "}",
       "",
       "export const authNote = 'auth is handled here';",
-    ].join("\n"),
+    ].join("\n")
   );
 
   const handle = await startWorkbenchServer({
@@ -38,7 +42,8 @@ async function startTestServer(): Promise<{
 
   return {
     workspace,
-    request: async (method: string, url: string, body?: unknown) => handle.inject({ method, url, body }),
+    request: async (method: string, url: string, body?: unknown) =>
+      handle.inject({ method, url, body }),
     close: async () => {
       await handle.close();
       await rm(workspace, { recursive: true, force: true });
@@ -49,7 +54,10 @@ async function startTestServer(): Promise<{
 test("timeline, replay, and prompt lab endpoints are replayable and local-first", async () => {
   const ctx = await startTestServer();
   try {
-    const projectRes = await ctx.request("POST", "/projects", { path: join(ctx.workspace, "repo"), name: "repo" });
+    const projectRes = await ctx.request("POST", "/projects", {
+      path: join(ctx.workspace, "repo"),
+      name: "repo",
+    });
     assert.equal(projectRes.statusCode, 200);
     const project = JSON.parse(projectRes.body) as { data: { id: string } };
 
@@ -83,7 +91,9 @@ test("timeline, replay, and prompt lab endpoints are replayable and local-first"
 
     const promptsRes = await ctx.request("GET", `/prompts?sessionId=${ask.data.sessionId}`);
     assert.equal(promptsRes.statusCode, 200);
-    const prompts = JSON.parse(promptsRes.body) as { data: Array<{ id: string; sessionId: string | null }> };
+    const prompts = JSON.parse(promptsRes.body) as {
+      data: Array<{ id: string; sessionId: string | null }>;
+    };
     assert.ok(prompts.data.length > 0);
 
     const replayRes = await ctx.request("POST", `/sessions/${ask.data.sessionId}/replay`, {
@@ -106,107 +116,139 @@ test("timeline, replay, and prompt lab endpoints are replayable and local-first"
     const verifier = createStore(initializeStore(join(ctx.workspace, "ai.db")));
     try {
       const row = verifier.db
-        .prepare("SELECT parent_session_id, child_session_id, source_session_id FROM session_replays WHERE child_session_id = ?")
-        .get(replay.data.childSession.id) as { parent_session_id: string; child_session_id: string; source_session_id: string | null } | undefined;
+        .prepare(
+          "SELECT parent_session_id, child_session_id, source_session_id FROM session_replays WHERE child_session_id = ?"
+        )
+        .get(replay.data.childSession.id) as
+        | { parent_session_id: string; child_session_id: string; source_session_id: string | null }
+        | undefined;
       assert.ok(row);
       assert.equal(row!.parent_session_id, ask.data.sessionId);
       assert.equal(row!.child_session_id, replay.data.childSession.id);
 
-    // 400: missing info
-    const promptLabBadRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      modelProfileIds: [],
-    });
-    assert.equal(promptLabBadRes.statusCode, 400);
+      // 400: missing info
+      const promptLabBadRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        modelProfileIds: [],
+      });
+      assert.equal(promptLabBadRes.statusCode, 400);
 
-    // 400: > 3 profiles
-    const promptLabTooManyRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      promptId: prompts.data[0].id,
-      modelProfileIds: ["1", "2", "3", "4"],
-    });
-    assert.equal(promptLabTooManyRes.statusCode, 400);
+      // 400: > 3 profiles
+      const promptLabTooManyRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        promptId: prompts.data[0].id,
+        modelProfileIds: ["1", "2", "3", "4"],
+      });
+      assert.equal(promptLabTooManyRes.statusCode, 400);
 
-    // 404: unknown project
-    const promptLabUnknownProjectRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: "unknown-proj-123",
-      promptId: prompts.data[0].id,
-      modelProfileIds: ["ask-fast-local"],
-    });
-    assert.equal(promptLabUnknownProjectRes.statusCode, 404);
+      // 404: unknown project
+      const promptLabUnknownProjectRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: "unknown-proj-123",
+        promptId: prompts.data[0].id,
+        modelProfileIds: ["ask-fast-local"],
+      });
+      assert.equal(promptLabUnknownProjectRes.statusCode, 404);
 
-    // 404: unknown prompt
-    const promptLabUnknownPromptRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      promptId: "unknown-prompt-123",
-      modelProfileIds: ["ask-fast-local"],
-    });
-    assert.equal(promptLabUnknownPromptRes.statusCode, 404);
+      // 404: unknown prompt
+      const promptLabUnknownPromptRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        promptId: "unknown-prompt-123",
+        modelProfileIds: ["ask-fast-local"],
+      });
+      assert.equal(promptLabUnknownPromptRes.statusCode, 404);
 
-    const promptLabRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      promptId: prompts.data[0].id,
-      modelProfileIds: ["ask-fast-local", "ask-cloud-router"],
-      notes: "compare local vs blocked cloud",
-    });
-    assert.equal(promptLabRes.statusCode, 200);
-    const promptLab = JSON.parse(promptLabRes.body) as {
-      data: {
-        run: { id: string; projectId: string; promptId: string; selectedProfiles: string[] };
-        results: Array<{ profileId: string; status: string; latencyMs: number; promptTokens: number }>;
+      const promptLabRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        promptId: prompts.data[0].id,
+        modelProfileIds: ["ask-fast-local", "ask-cloud-router"],
+        notes: "compare local vs blocked cloud",
+      });
+      assert.equal(promptLabRes.statusCode, 200);
+      const promptLab = JSON.parse(promptLabRes.body) as {
+        data: {
+          run: { id: string; projectId: string; promptId: string; selectedProfiles: string[] };
+          results: Array<{
+            profileId: string;
+            status: string;
+            latencyMs: number;
+            promptTokens: number;
+          }>;
+        };
       };
-    };
-    assert.equal(promptLab.data.run.projectId, project.data.id);
-    assert.ok(promptLab.data.results.length >= 2);
-    assert.ok(promptLab.data.results.some((result) => result.profileId === "ask-fast-local" && result.status === "ok"));
-    assert.ok(promptLab.data.results.some((result) => result.profileId === "ask-cloud-router" && result.status === "blocked"));
+      assert.equal(promptLab.data.run.projectId, project.data.id);
+      assert.ok(promptLab.data.results.length >= 2);
+      assert.ok(
+        promptLab.data.results.some(
+          (result) => result.profileId === "ask-fast-local" && result.status === "ok"
+        )
+      );
+      assert.ok(
+        promptLab.data.results.some(
+          (result) => result.profileId === "ask-cloud-router" && result.status === "blocked"
+        )
+      );
 
-    // 400: invalid messages_json (insert a bad prompt directly)
-    const badPromptId = "bad-prompt-json";
-    verifier.db.prepare(
-      "INSERT INTO compiled_prompts (id, session_id, mode, role, messages_json, estimated_tokens, included_context_json, omitted_context_json, safety_notes_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    ).run(badPromptId, ask.data.sessionId, "answer", "answer", "not valid json", 0, "[]", "[]", "{}", "2026-01-01");
-    const badJsonRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      promptId: badPromptId,
-      modelProfileIds: ["ask-fast-local"],
-    });
-    assert.equal(badJsonRes.statusCode, 400);
+      // 400: invalid messages_json (insert a bad prompt directly)
+      const badPromptId = "bad-prompt-json";
+      verifier.db
+        .prepare(
+          "INSERT INTO compiled_prompts (id, session_id, mode, role, messages_json, estimated_tokens, included_context_json, omitted_context_json, safety_notes_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .run(
+          badPromptId,
+          ask.data.sessionId,
+          "answer",
+          "answer",
+          "not valid json",
+          0,
+          "[]",
+          "[]",
+          "{}",
+          "2026-01-01"
+        );
+      const badJsonRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        promptId: badPromptId,
+        modelProfileIds: ["ask-fast-local"],
+      });
+      assert.equal(badJsonRes.statusCode, 400);
 
-    // 400: messages_json is not an array
-    verifier.db.prepare(
-      "UPDATE compiled_prompts SET messages_json = ? WHERE id = ?"
-    ).run('{"role":"user","content":"hi"}', badPromptId);
-    const notArrayRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      promptId: badPromptId,
-      modelProfileIds: ["ask-fast-local"],
-    });
-    assert.equal(notArrayRes.statusCode, 400);
+      // 400: messages_json is not an array
+      verifier.db
+        .prepare("UPDATE compiled_prompts SET messages_json = ? WHERE id = ?")
+        .run('{"role":"user","content":"hi"}', badPromptId);
+      const notArrayRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        promptId: badPromptId,
+        modelProfileIds: ["ask-fast-local"],
+      });
+      assert.equal(notArrayRes.statusCode, 400);
 
-    // 400: messages_json has invalid message
-    verifier.db.prepare(
-      "UPDATE compiled_prompts SET messages_json = ? WHERE id = ?"
-    ).run('[{"role":"invalid","content":"test"}]', badPromptId);
-    const badMsgRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      promptId: badPromptId,
-      modelProfileIds: ["ask-fast-local"],
-    });
-    assert.equal(badMsgRes.statusCode, 400);
+      // 400: messages_json has invalid message
+      verifier.db
+        .prepare("UPDATE compiled_prompts SET messages_json = ? WHERE id = ?")
+        .run('[{"role":"invalid","content":"test"}]', badPromptId);
+      const badMsgRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        promptId: badPromptId,
+        modelProfileIds: ["ask-fast-local"],
+      });
+      assert.equal(badMsgRes.statusCode, 400);
 
-    // Profile ID normalization: trimming and deduplication
-    const normRes = await ctx.request("POST", "/prompt-lab/run", {
-      projectId: project.data.id,
-      promptId: prompts.data[0].id,
-      modelProfileIds: ["  ask-fast-local  ", "ask-fast-local", "ask-cloud-router"],
-    });
-    assert.equal(normRes.statusCode, 200);
-    const normBody = JSON.parse(normRes.body) as { data: { results: Array<{ profileId: string }> } };
-    const normProfileIds = normBody.data.results.map((r) => r.profileId);
-    assert.equal(new Set(normProfileIds).size, normProfileIds.length, "deduped profile IDs");
-    assert.ok(normProfileIds.includes("ask-fast-local"), "trimmed and preserved");
-    assert.ok(normProfileIds.includes("ask-cloud-router"), "normal preserved");
+      // Profile ID normalization: trimming and deduplication
+      const normRes = await ctx.request("POST", "/prompt-lab/run", {
+        projectId: project.data.id,
+        promptId: prompts.data[0].id,
+        modelProfileIds: ["  ask-fast-local  ", "ask-fast-local", "ask-cloud-router"],
+      });
+      assert.equal(normRes.statusCode, 200);
+      const normBody = JSON.parse(normRes.body) as {
+        data: { results: Array<{ profileId: string }> };
+      };
+      const normProfileIds = normBody.data.results.map((r) => r.profileId);
+      assert.equal(new Set(normProfileIds).size, normProfileIds.length, "deduped profile IDs");
+      assert.ok(normProfileIds.includes("ask-fast-local"), "trimmed and preserved");
+      assert.ok(normProfileIds.includes("ask-cloud-router"), "normal preserved");
     } finally {
       verifier.db.close();
     }

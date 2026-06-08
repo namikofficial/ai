@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildAskAnswerPrompt, buildAskCitations, buildAskFallbackAnswer, buildAskQueryRewritePrompt, buildAskRetrievalJudgePrompt } from "../packages/ask-engine/src/index.ts";
+import {
+  buildAskAnswerPrompt,
+  buildAskCitations,
+  buildAskFallbackAnswer,
+  buildAskQueryRewritePrompt,
+  buildAskRetrievalJudgePrompt,
+} from "../packages/ask-engine/src/index.ts";
 
 test("ask-engine: builds query rewrite, retrieval judge, and answer prompt inputs", () => {
   const rewrite = buildAskQueryRewritePrompt({
@@ -73,5 +79,8 @@ test("ask-engine: citation and fallback helpers are deterministic", () => {
     },
   ]);
   assert.equal(citations[0]?.excerpt, "line1\nline2\nline3\nline4");
-  assert.equal(buildAskFallbackAnswer("repo", "where is auth handled?"), 'I could not find enough local context in repo to answer "where is auth handled?".');
+  assert.equal(
+    buildAskFallbackAnswer("repo", "where is auth handled?"),
+    'I could not find enough local context in repo to answer "where is auth handled?".'
+  );
 });

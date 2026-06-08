@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeFile, mkdir, rm } from "node:fs/promises";
-import { createStore } from "../packages/db/src/store.ts";
+import test from "node:test";
 import { initializeStore } from "../packages/db/src/index.ts";
-import { buildRetrievalPipelineInput, runRetrievalExplain } from "../packages/db/src/retrieval-explain.ts";
+import {
+  buildRetrievalPipelineInput,
+  runRetrievalExplain,
+} from "../packages/db/src/retrieval-explain.ts";
+import { createStore } from "../packages/db/src/store.ts";
 
 test("buildRetrievalPipelineInput loads FTS+heuristic+feedback+misses+memory+facts+rules+pathBoosts for a project", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-build-pipe-"));
@@ -31,11 +33,19 @@ test("buildRetrievalPipelineInput loads FTS+heuristic+feedback+misses+memory+fac
     mode: "local",
     depth: "standard",
     intent: "lookup",
-    analysis: { language: "ts", terms: ["alpha"], pathHints: ["src/alpha"], symbolHints: ["alpha"], isLikelyDefinition: true, isLikelyDebug: false, notes: [] },
+    analysis: {
+      language: "ts",
+      terms: ["alpha"],
+      pathHints: ["src/alpha"],
+      symbolHints: ["alpha"],
+      isLikelyDefinition: true,
+      isLikelyDebug: false,
+      notes: [],
+    },
   });
   const alphaChunk = store.db
     .prepare(
-      "SELECT c.id AS id FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.project_id = ? AND d.path = ? LIMIT 1",
+      "SELECT c.id AS id FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.project_id = ? AND d.path = ? LIMIT 1"
     )
     .get(project.id, "src/alpha.ts") as { id: string };
   store.retrieval.recordFeedback({
@@ -69,7 +79,11 @@ test("buildRetrievalPipelineInput loads FTS+heuristic+feedback+misses+memory+fac
   assert.equal(pipelineInput.query, "alpha");
   assert.equal(pipelineInput.intent, "lookup");
   assert.equal(pipelineInput.ftsChunks.length > 0, true, "FTS should find alpha.ts chunk");
-  assert.equal(pipelineInput.heuristicChunks.length > 0, true, "Heuristic should list recent files");
+  assert.equal(
+    pipelineInput.heuristicChunks.length > 0,
+    true,
+    "Heuristic should list recent files"
+  );
   assert.equal(pipelineInput.feedback.length, 1);
   assert.equal(pipelineInput.feedback[0]?.rating, "good");
   assert.equal(pipelineInput.missRecords.length, 1);
@@ -80,7 +94,10 @@ test("buildRetrievalPipelineInput loads FTS+heuristic+feedback+misses+memory+fac
   assert.equal(pipelineInput.pathBoosts.size, 1);
   const alphaWeight = pipelineInput.pathBoosts.get("src/alpha.ts");
   assert.ok(alphaWeight, "src/alpha.ts should be in pathBoosts");
-  assert.ok(alphaWeight! > 0.5, `good feedback should push weight above neutral (got ${alphaWeight})`);
+  assert.ok(
+    alphaWeight! > 0.5,
+    `good feedback should push weight above neutral (got ${alphaWeight})`
+  );
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

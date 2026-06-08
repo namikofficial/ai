@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import test from "node:test";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { initializeStore, createStore } from "../packages/db/src/store.ts";
+import { join } from "node:path";
+import test from "node:test";
+import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 test("indexes a repo and answers from the local retrieval store", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-api-"));
@@ -17,7 +17,7 @@ test("indexes a repo and answers from the local retrieval store", async () => {
       "}",
       "",
       "export const authNote = 'auth is handled in the auth router';",
-    ].join("\n"),
+    ].join("\n")
   );
   await writeFile(join(repo, "README.md"), "# Sample repo\n\nAuth is handled in src/auth.ts.");
 
@@ -43,7 +43,11 @@ test("indexes a repo and answers from the local retrieval store", async () => {
   assert.ok(store.listSessions(20).length >= 2);
 
   const sessionEvents = store.listEvents(answer.sessionId);
-  assert.ok(sessionEvents.some((event) => event.type === "retrieval.completed" || event.type === "retrieval.low_confidence"));
+  assert.ok(
+    sessionEvents.some(
+      (event) => event.type === "retrieval.completed" || event.type === "retrieval.low_confidence"
+    )
+  );
   assert.ok(sessionEvents.some((event) => event.type === "session.completed"));
 
   const plan = await store.createPlan({
@@ -53,8 +57,14 @@ test("indexes a repo and answers from the local retrieval store", async () => {
   });
   assert.equal(plan.response.projectId, project.id);
   assert.ok(plan.response.taskGraph.length > 0);
-  const plannerCalls = store.models.listCalls(plan.session.id, 100).filter((call) => call.role === "planner");
-  assert.equal(plannerCalls.length, 1, "plan should record exactly one runtime-backed planner model call");
+  const plannerCalls = store.models
+    .listCalls(plan.session.id, 100)
+    .filter((call) => call.role === "planner");
+  assert.equal(
+    plannerCalls.length,
+    1,
+    "plan should record exactly one runtime-backed planner model call"
+  );
   const plannerRequest = plannerCalls[0]!.request as {
     metadata?: {
       compiledPrompt?: { mode?: string; messages?: Array<{ role: string; content: string }> };
@@ -65,7 +75,10 @@ test("indexes a repo and answers from the local retrieval store", async () => {
   assert.ok(Array.isArray(plannerRequest.metadata?.compiledPrompt?.messages));
   assert.ok(Array.isArray(plannerRequest.metadata?.responseTrace?.taskGraph));
   assert.equal(store.listTasks(plan.session.id, 10).length, plan.response.taskGraph.length);
-  assert.equal(store.getTask(plan.response.taskGraph[0].id)?.title, plan.response.taskGraph[0].title);
+  assert.equal(
+    store.getTask(plan.response.taskGraph[0].id)?.title,
+    plan.response.taskGraph[0].title
+  );
   assert.equal(store.getTask(plan.response.taskGraph[0].id)?.status, "queued");
 
   const handoff = await store.createHandoff({

@@ -4,7 +4,7 @@
 // indexer needs. The DB layer does not call into node:fs directly anymore;
 // everything goes through this surface so it can be tested and swapped.
 
-import { readFile, readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 
 export const DEFAULT_IGNORE_DIRS = new Set([
@@ -77,7 +77,10 @@ export async function walkFiles(root: string, options: WalkOptions = {}): Promis
 }
 
 export function isProbablyTextFile(path: string): boolean {
-  return TEXT_EXTENSIONS.has(extname(path).toLowerCase()) || /(^|\/)(package\.json|Dockerfile)$/i.test(path);
+  return (
+    TEXT_EXTENSIONS.has(extname(path).toLowerCase()) ||
+    /(^|\/)(package\.json|Dockerfile)$/i.test(path)
+  );
 }
 
 export async function safeReadText(path: string): Promise<string | null> {

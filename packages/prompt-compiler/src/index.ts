@@ -1,3 +1,4 @@
+import type { ContextPackItem as ContextPackItemRecord } from "../../context-engine/src/index.ts";
 import type {
   ConversationMessageRecord,
   FactRecord,
@@ -5,7 +6,6 @@ import type {
   ProjectRuleRecord,
   RetrievalChunk,
 } from "../../shared/src/index.ts";
-import type { ContextPackItem as ContextPackItemRecord } from "../../context-engine/src/index.ts";
 
 export type PromptMode =
   | "answer"
@@ -131,7 +131,8 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
 
   messages.push({
     role: "system",
-    content: "You are a local-first engineering assistant. Follow project rules, preserve safety, and cite provided context.",
+    content:
+      "You are a local-first engineering assistant. Follow project rules, preserve safety, and cite provided context.",
   });
 
   if (input.globalSystemRules?.length) {
@@ -139,13 +140,18 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
   }
 
   if (input.projectRules?.length) {
-    messages.push({ role: "system", content: `Project Rules:\n${input.projectRules.map(normalizeRule).join("\n")}` });
+    messages.push({
+      role: "system",
+      content: `Project Rules:\n${input.projectRules.map(normalizeRule).join("\n")}`,
+    });
   }
 
   // Redact secrets from user request
   const redactedUserRequest = redactSecrets(input.userRequest);
   if (redactedUserRequest.redactions.length > 0) {
-    safetyNotes.push(`Redacted ${redactedUserRequest.redactions.length} secrets from user request.`);
+    safetyNotes.push(
+      `Redacted ${redactedUserRequest.redactions.length} secrets from user request.`
+    );
   }
   messages.push({ role: "user", content: redactedUserRequest.text });
 
@@ -154,31 +160,38 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
       ...input.previousMessages.map((message) => ({
         role: normalizeMessageRole(message.role),
         content: message.content,
-      })),
+      }))
     );
   }
 
   const acceptedMemory = input.acceptedMemory ?? input.memoryEntries ?? [];
   if (acceptedMemory.length) {
-    const memoryContent = acceptedMemory.map((memory) => {
-      const normalized = normalizeMemory(memory);
-      return `Title: ${normalized.title}\nBody: ${normalized.body}`;
-    }).join("\n\n");
+    const memoryContent = acceptedMemory
+      .map((memory) => {
+        const normalized = normalizeMemory(memory);
+        return `Title: ${normalized.title}\nBody: ${normalized.body}`;
+      })
+      .join("\n\n");
     messages.push({ role: "system", content: `Accepted Memory:\n${memoryContent}` });
   }
 
   const freshFacts = input.freshFacts ?? input.facts ?? [];
   if (freshFacts.length) {
-    const factsContent = freshFacts.map((fact) => {
-      const normalized = normalizeFact(fact);
-      return `${normalized.key}: ${normalized.value}`;
-    }).join("\n");
+    const factsContent = freshFacts
+      .map((fact) => {
+        const normalized = normalizeFact(fact);
+        return `${normalized.key}: ${normalized.value}`;
+      })
+      .join("\n");
     messages.push({ role: "system", content: `Fresh Facts:\n${factsContent}` });
   }
 
   if (input.retrievalCitations?.length) {
     const citationsContent = input.retrievalCitations
-      .map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}\n\`\`\`\n${citation.excerpt}\n\`\`\``)
+      .map(
+        (citation) =>
+          `- ${citation.path}:${citation.startLine}-${citation.endLine}\n\`\`\`\n${citation.excerpt}\n\`\`\``
+      )
       .join("\n\n");
     messages.push({ role: "system", content: `Retrieval Citations:\n${citationsContent}` });
   }
@@ -206,7 +219,7 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
         included: true,
         omissionReason: null,
         createdAt: new Date().toISOString(),
-      })),
+      }))
     );
   }
 
@@ -215,7 +228,9 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
       .map((item) => {
         const redacted = redactSecrets(item.excerpt);
         if (redacted.redactions.length > 0) {
-          safetyNotes.push(`Redacted secrets from context pack item ${item.kind} (source: ${item.sourceId})`);
+          safetyNotes.push(
+            `Redacted secrets from context pack item ${item.kind} (source: ${item.sourceId})`
+          );
         }
         return `Kind: ${item.kind}\nExcerpt:\n\`\`\`\n${redacted.text}\n\`\`\``;
       })
@@ -225,11 +240,17 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
   }
 
   if (input.taskConstraints?.length) {
-    messages.push({ role: "system", content: `Task Constraints:\n${input.taskConstraints.join("\n")}` });
+    messages.push({
+      role: "system",
+      content: `Task Constraints:\n${input.taskConstraints.join("\n")}`,
+    });
   }
 
   if (input.outputSchema) {
-    messages.push({ role: "system", content: `Output Schema:\n\`\`\`json\n${JSON.stringify(input.outputSchema, null, 2)}\n\`\`\`` });
+    messages.push({
+      role: "system",
+      content: `Output Schema:\n\`\`\`json\n${JSON.stringify(input.outputSchema, null, 2)}\n\`\`\``,
+    });
   }
 
   const estimatedTokens = estimatePromptTokens(messages);
@@ -252,11 +273,14 @@ export function buildAnswerFromCompiledPrompt(
   compiled: CompiledPrompt,
   answerText: string,
   citations: Array<{ path: string; startLine: number; endLine: number; score?: number }>,
-  confidence: number,
+  confidence: number
 ): string {
-  const citationLines = citations.length > 0
-    ? citations.map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}`).join("\n")
-    : "none";
+  const citationLines =
+    citations.length > 0
+      ? citations
+          .map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}`)
+          .join("\n")
+      : "none";
   return [
     answerText.trim(),
     "",
