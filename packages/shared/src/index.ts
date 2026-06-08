@@ -635,6 +635,9 @@ export interface RetrievalSelectedContextRecord {
   rank: number;
   tokenCount: number;
   excerpt: string;
+  path?: string;
+  startLine?: number;
+  endLine?: number;
   createdAt: string;
 }
 
@@ -1158,6 +1161,13 @@ export interface DevRun {
   repairAttempts: number;
   maxRepairs: number;
   errorMessage: string | null;
+  summary: string;
+  diffSummary: string;
+  diffText: string;
+  filesEdited: string[];
+  filesCreated: string[];
+  appliedAt: string | null;
+  appliedFiles: string[];
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;

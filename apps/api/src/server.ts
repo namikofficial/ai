@@ -29,6 +29,8 @@ import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 import { createModelRuntime, type ModelCallRecordedHook, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import { runAskWorkflow } from "../../../packages/ask-engine/src/index.ts";
 import { runPromptLab } from "../../../packages/prompt-lab-engine/src/index.ts";
+import { applyApprovedDevRun, approveDevRun, cancelDevRun, runDevWorkflow } from "../../../packages/dev-agent/src/index.ts";
+import { parseDevRequest } from "../../../packages/agent-protocol/src/dev.ts";
 import type { ModelProviderRecord, ModelProfileRecord } from "../../../packages/shared/src/index.ts";
 import { runExplainWithStore } from "./retrieval-explain.ts";
 import {
@@ -1880,6 +1882,163 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           sendJson(res, json("ok", result));
         }
         return;
+      }
+
+      if (path.startsWith("/dev/")) {
+        const tail = decodeURIComponent(path.slice("/dev/".length));
+        const [head, ...rest] = tail.split("/");
+        const trimmedRest = rest.join("/");
+
+        if (method === "POST" && head === "run") {
+          const body = (req.headers?.["content-type"]?.includes("application/json")
+            ? await readJsonBody(request, req)
+            : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))) as Record<string, unknown>;
+          const devRequest = parseDevRequest({
+            project: body.project ?? body.projectId ?? "",
+            goal: body.goal ?? "",
+            mode: body.mode,
+            approvalPolicy: body.approvalPolicy,
+            approveEdits: body.approveEdits,
+            checks: Array.isArray(body.checks) ? body.checks : undefined,
+            maxRepairs: typeof body.maxRepairs === "number" ? body.maxRepairs : undefined,
+          });
+          const projectId = String(body.projectId ?? devRequest.project);
+          const project = store.getProject(projectId);
+          if (!project) {
+            sendJson(res, json("error", undefined, { message: `unknown project: ${projectId}` }), 404);
+            return;
+          }
+          const session = store.createSession({
+            projectId: project.id,
+            title: devRequest.goal.slice(0, 80),
+            userGoal: devRequest.goal,
+            mode: "dev" as any,
+            source: "api",
+            modelProfile: "dev-editor-local",
+          });
+          const runtimeDir = config.runtimeDir;
+          await store.ensureRuntimeDirs(runtimeDir);
+          const devRuntime = createModelRuntime({
+            providers: store.models.listProviders().map((p) => ({
+              id: p.id,
+              kind: p.kind,
+              displayName: p.displayName,
+              baseUrl: p.baseUrl,
+              apiKeyEnv: p.apiKeyEnv,
+              enabled: p.enabled,
+            })),
+            profiles: store.models.listProfiles(),
+            cloudEnabled: config.cloudEnabled,
+          });
+          const result = await runDevWorkflow({
+            request: devRequest,
+            project: { id: project.id, name: project.name, path: project.path, config: resolveProjectConfig(project.path).raw },
+            runtime: {
+              devRuns: store.dev,
+              execution: store.execution,
+              retrieval: store.retrieval,
+              models: store.models,
+              conversation: store.conversation,
+              modelRuntime: devRuntime,
+            },
+            runtimeDir,
+            sessionId: session.id,
+            source: "api",
+          });
+          sendJson(res, json("ok", result.result));
+          return;
+        }
+
+        if (method === "GET" && head === "runs" && trimmedRest.length === 0) {
+          const projectId = url.searchParams.get("projectId");
+          const limit = Number(url.searchParams.get("limit") ?? "50") || 50;
+          const runs = store.dev.listRuns(projectId ? { projectId, limit } : { limit });
+          sendJson(res, json("ok", { runs }));
+          return;
+        }
+
+        if (method === "GET" && head === "runs" && trimmedRest.length > 0) {
+          const runId = trimmedRest.split("/")[0] ?? "";
+          const run = store.dev.getRunWithEdits(runId);
+          if (!run) {
+            sendJson(res, json("error", undefined, { message: "dev run not found" }), 404);
+            return;
+          }
+          const workspace = store.execution.getWorkspaceForRun(run.id);
+          const approvals = store.execution.listApprovals(run.id);
+          const patches = store.execution.listPatches(run.id);
+          sendJson(
+            res,
+            json("ok", {
+              run,
+              workspace,
+              approvals,
+              patches,
+            }),
+          );
+          return;
+        }
+
+        if (method === "GET" && head === "runs" && trimmedRest.endsWith("/diff")) {
+          const runId = trimmedRest.split("/")[0] ?? "";
+          const run = store.dev.getRun(runId);
+          if (!run) {
+            sendJson(res, json("error", undefined, { message: "dev run not found" }), 404);
+            return;
+          }
+          sendJson(res, json("ok", { runId: run.id, diff: run.workspace?.path ? "" : "", diffText: "", summary: run.summary }));
+          return;
+        }
+
+        if (method === "POST" && head === "runs" && trimmedRest.endsWith("/approve")) {
+          const runId = trimmedRest.split("/")[0] ?? "";
+          const body = (req.headers?.["content-type"]?.includes("application/json")
+            ? await readJsonBody(request, req)
+            : {}) as Record<string, unknown> | null;
+          const approval = await approveDevRun({
+            runId,
+            runtime: { devRuns: store.dev, execution: store.execution },
+            decidedBy: typeof body?.decidedBy === "string" ? body.decidedBy : "api",
+            notes: typeof body?.notes === "string" ? body.notes : undefined,
+          });
+          sendJson(res, approval.ok ? json("ok", approval.run) : json("error", undefined, { message: approval.error ?? "approval failed" }), approval.ok ? 200 : 400);
+          return;
+        }
+
+        if (method === "POST" && head === "runs" && trimmedRest.endsWith("/apply")) {
+          const runId = trimmedRest.split("/")[0] ?? "";
+          const run = store.dev.getRun(runId);
+          if (!run) {
+            sendJson(res, json("error", undefined, { message: "dev run not found" }), 404);
+            return;
+          }
+          const project = store.getProject(run.projectId);
+          if (!project) {
+            sendJson(res, json("error", undefined, { message: "project not found" }), 404);
+            return;
+          }
+          const outcome = await applyApprovedDevRun({
+            runId,
+            projectPath: project.path,
+            runtime: { devRuns: store.dev, execution: store.execution },
+          });
+          sendJson(res, outcome.ok ? json("ok", { run: outcome.run, applied: outcome.applied }) : json("error", undefined, { message: outcome.error ?? "apply failed" }), outcome.ok ? 200 : 400);
+          return;
+        }
+
+        if (method === "POST" && head === "runs" && trimmedRest.endsWith("/cancel")) {
+          const runId = trimmedRest.split("/")[0] ?? "";
+          const body = (req.headers?.["content-type"]?.includes("application/json")
+            ? await readJsonBody(request, req)
+            : {}) as Record<string, unknown> | null;
+          const outcome = await cancelDevRun({
+            runId,
+            runtime: { devRuns: store.dev, execution: store.execution },
+            reason: typeof body?.reason === "string" ? body.reason : undefined,
+          });
+          sendJson(res, outcome.ok ? json("ok", outcome.run) : json("error", undefined, { message: outcome.error ?? "cancel failed" }), outcome.ok ? 200 : 400);
+          return;
+        }
       }
 
       if (method === "POST" && path === "/checks/run") {

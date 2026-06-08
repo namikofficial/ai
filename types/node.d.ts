@@ -7,6 +7,11 @@ declare const process: {
   on(event: string, listener: (...args: any[]) => void): void;
 };
 
+declare namespace NodeJS {
+  type ProcessEnv = Record<string, string | undefined>;
+  type Signals = "SIGTERM" | "SIGINT" | "SIGKILL" | "SIGUSR1" | "SIGUSR2";
+}
+
 declare const Buffer: {
   from(data: string | ArrayBuffer | Uint8Array): Uint8Array;
   concat(chunks: Uint8Array[]): Uint8Array;
@@ -29,10 +34,23 @@ declare module "node:path" {
   export function normalize(path: string): string;
   export function resolve(...parts: string[]): string;
   export function relative(from: string, to: string): string;
+  export const sep: string;
 }
 
 declare module "node:os" {
   export function tmpdir(): string;
+}
+
+declare module "node:util" {
+  export function promisify<T>(
+    fn: (callback: (err?: Error | null, result?: T) => void) => void
+  ): () => Promise<T>;
+  export function promisify<T, A1>(
+    fn: (arg1: A1, callback: (err?: Error | null, result?: T) => void) => void
+  ): (arg1: A1) => Promise<T>;
+  export function promisify<T, A1, A2>(
+    fn: (arg1: A1, arg2: A2, callback: (err?: Error | null, result?: T) => void) => void
+  ): (arg1: A1, arg2: A2) => Promise<T>;
 }
 
 declare module "node:fs/promises" {
@@ -44,6 +62,12 @@ declare module "node:fs/promises" {
   }
 
   export function access(path: string): Promise<void>;
+  export function copyFile(src: string, dest: string, flags?: number): Promise<void>;
+  export function cp(
+    source: string,
+    destination: string,
+    options?: { recursive?: boolean; force?: boolean }
+  ): Promise<void>;
   export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>;
   export function mkdtemp(prefix: string): Promise<string>;
   export function readFile(
@@ -61,6 +85,7 @@ declare module "node:fs/promises" {
     mtimeMs: number;
   }>;
   export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
+  export function unlink(path: string): Promise<void>;
   export function writeFile(
     path: string,
     data: string | Uint8Array,
@@ -117,9 +142,15 @@ declare module "node:child_process" {
     } | null;
     exitCode: number | null;
     kill(signal?: NodeJS.Signals | number | string): boolean;
+    on(event: "error", listener: (error: Error) => void): void;
     once(event: "exit", listener: (...args: any[]) => void): void;
   }
 
+  export function execFile(
+    file: string,
+    args?: string[],
+    options?: { cwd?: string; env?: Record<string, string | undefined> }
+  ): Promise<{ stdout: string; stderr: string }>;
   export function spawn(command: string, args?: string[], options?: {
     cwd?: string;
     env?: Record<string, string | undefined>;

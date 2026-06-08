@@ -106,6 +106,9 @@ function rowToRun(row: DevRunRow): DevRun {
     : null;
   const plan = safeParseJson<DevPlan | null>(row.plan_json);
   const checks = safeParseJsonArray<DevCheckResult>(row.checks_json);
+  const filesEdited = safeParseJsonArray<string>(asString(row.files_edited_json ?? "[]"));
+  const filesCreated = safeParseJsonArray<string>(asString(row.files_created_json ?? "[]"));
+  const appliedFiles = safeParseJsonArray<string>(asString(row.applied_files_json ?? "[]"));
   return {
     id: asString(row.id),
     sessionId: asString(row.session_id),
@@ -122,6 +125,13 @@ function rowToRun(row: DevRunRow): DevRun {
     repairAttempts: asNumber(row.repair_attempts),
     maxRepairs: asNumber(row.max_repairs),
     errorMessage: asStringOrNull(row.error_message),
+    summary: asString(row.summary ?? ""),
+    diffSummary: asString(row.diff_summary ?? ""),
+    diffText: asString(row.diff_text ?? ""),
+    filesEdited,
+    filesCreated,
+    appliedAt: asStringOrNull(row.applied_at),
+    appliedFiles,
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
     finishedAt: asStringOrNull(row.finished_at),

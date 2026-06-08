@@ -64,6 +64,9 @@ interface RetrievalSelectedContextRow {
   rank: number;
   token_count: number;
   excerpt: string;
+  path: string;
+  start_line: number;
+  end_line: number;
   created_at: string;
 }
 
@@ -163,6 +166,9 @@ function rowToSelectedContext(row: RetrievalSelectedContextRow): RetrievalSelect
     rank: asNumber(row.rank),
     tokenCount: asNumber(row.token_count),
     excerpt: asString(row.excerpt),
+    path: asString(row.path),
+    startLine: asNumber(row.start_line),
+    endLine: asNumber(row.end_line),
     createdAt: asString(row.created_at),
   };
 }
@@ -415,7 +421,14 @@ export function createRetrievalRepo(db: DatabaseSync) {
     },
     listSelectedContext(queryId: string): RetrievalSelectedContextRecord[] {
       const rows = db
-        .prepare("SELECT * FROM retrieval_selected_context WHERE retrieval_query_id = ? ORDER BY rank ASC")
+        .prepare(
+          `SELECT c.*, d.path, r.start_line, r.end_line
+           FROM retrieval_selected_context c
+           JOIN rag_chunks r ON r.id = c.chunk_id
+           JOIN rag_documents d ON d.id = r.document_id
+           WHERE c.retrieval_query_id = ?
+           ORDER BY c.rank ASC`,
+        )
         .all(queryId) as RetrievalSelectedContextRow[];
       return rows.map(rowToSelectedContext);
     },
