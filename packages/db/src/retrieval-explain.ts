@@ -59,10 +59,7 @@ export function buildRetrievalPipelineInput(
   return buildRetrievalPipelineInputFromEngine(store, args);
 }
 
-export function runRetrievalExplain(
-  store: Store,
-  input: RetrievalExplainInput
-): RetrievalExplainOutput {
+export function runRetrievalExplain(store: Store, input: RetrievalExplainInput): RetrievalExplainOutput {
   const pipelineInput = buildRetrievalPipelineInput(store, {
     projectId: input.projectId,
     query: input.query,

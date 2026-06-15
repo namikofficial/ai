@@ -6,15 +6,7 @@ import type {
   SkillStatus,
   SkillUsageRecord,
 } from "../../../shared/src/index.ts";
-import {
-  asBool,
-  asNumber,
-  asString,
-  asStringOrNull,
-  newId,
-  now,
-  safeParseJsonArray,
-} from "./_shared.ts";
+import { asBool, asNumber, asString, asStringOrNull, newId, now, safeParseJsonArray } from "./_shared.ts";
 
 interface SkillCandidateRow {
   id: string;
@@ -184,9 +176,7 @@ export function createSkillsRepo(db: DatabaseSync) {
             )
             .all(status, limit) as SkillCandidateRow[])
         : (db
-            .prepare(
-              "SELECT * FROM skill_candidates ORDER BY confidence DESC, created_at DESC LIMIT ?"
-            )
+            .prepare("SELECT * FROM skill_candidates ORDER BY confidence DESC, created_at DESC LIMIT ?")
             .all(limit) as SkillCandidateRow[]);
       return rows.map(rowToCandidate);
     },
@@ -198,14 +188,8 @@ export function createSkillsRepo(db: DatabaseSync) {
     },
     reviewCandidate(id: string, status: SkillStatus): SkillCandidateRecord {
       const ts = now();
-      db.prepare("UPDATE skill_candidates SET status = ?, updated_at = ? WHERE id = ?").run(
-        status,
-        ts,
-        id
-      );
-      const row = db
-        .prepare("SELECT * FROM skill_candidates WHERE id = ?")
-        .get(id) as SkillCandidateRow;
+      db.prepare("UPDATE skill_candidates SET status = ?, updated_at = ? WHERE id = ?").run(status, ts, id);
+      const row = db.prepare("SELECT * FROM skill_candidates WHERE id = ?").get(id) as SkillCandidateRow;
       return rowToCandidate(row);
     },
     acceptCandidate(id: string): SkillRecord {
@@ -258,9 +242,7 @@ export function createSkillsRepo(db: DatabaseSync) {
     listSkills(status?: SkillStatus, limit = 50): SkillRecord[] {
       const rows = status
         ? (db
-            .prepare(
-              "SELECT * FROM skills WHERE status = ? ORDER BY use_count DESC, updated_at DESC LIMIT ?"
-            )
+            .prepare("SELECT * FROM skills WHERE status = ? ORDER BY use_count DESC, updated_at DESC LIMIT ?")
             .all(status, limit) as SkillRow[])
         : (db
             .prepare("SELECT * FROM skills ORDER BY use_count DESC, updated_at DESC LIMIT ?")
@@ -277,17 +259,12 @@ export function createSkillsRepo(db: DatabaseSync) {
       const ts = now();
       db.prepare(
         `INSERT INTO skill_usage (id, skill_id, session_id, applied, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)`
-      ).run(
-        id,
-        input.skillId,
-        input.sessionId ?? null,
-        input.applied ? 1 : 0,
-        input.notes ?? null,
-        ts
+      ).run(id, input.skillId, input.sessionId ?? null, input.applied ? 1 : 0, input.notes ?? null, ts);
+      db.prepare(`UPDATE skills SET use_count = use_count + 1, last_used_at = ?, updated_at = ? WHERE id = ?`).run(
+        ts,
+        ts,
+        input.skillId
       );
-      db.prepare(
-        `UPDATE skills SET use_count = use_count + 1, last_used_at = ?, updated_at = ? WHERE id = ?`
-      ).run(ts, ts, input.skillId);
       return {
         id,
         skillId: input.skillId,

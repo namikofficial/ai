@@ -198,11 +198,7 @@ function rowToTask(row: Row): TaskRecord {
 
 function enqueueReflectionJob(
   storeRef: {
-    enqueueJob: (input: {
-      type: string;
-      payload: Record<string, unknown>;
-      availableAt?: string | null;
-    }) => JobRecord;
+    enqueueJob: (input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }) => JobRecord;
   },
   sessionId: string,
   source: string,
@@ -296,9 +292,7 @@ export function createStore(db: DatabaseSync) {
 
   let intelligenceStack: {
     runtime: ModelRuntime;
-    providers: Array<
-      Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">
-    >;
+    providers: Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
     profiles: ModelProfileRecord[];
     runtimeOptions?: {
       sessionId?: string | null;
@@ -444,15 +438,12 @@ export function createStore(db: DatabaseSync) {
       };
     },
     getProjectByPath(path: string): ProjectSummary | null {
-      const project = db.prepare("SELECT * FROM projects WHERE path = ? LIMIT 1").get(path) as
-        | Row
-        | undefined;
+      const project = db.prepare("SELECT * FROM projects WHERE path = ? LIMIT 1").get(path) as Row | undefined;
       return project ? store.getProject(asString(project.id)) : null;
     },
     createProject(input: ProjectCreateInput): ProjectSummary {
       const resolvedPath = normalize(resolve(input.path));
-      const inferredName =
-        input.name?.trim() || basename(resolvedPath) || slugifyName(resolvedPath);
+      const inferredName = input.name?.trim() || basename(resolvedPath) || slugifyName(resolvedPath);
       const existing = db
         .prepare("SELECT * FROM projects WHERE path = ? OR name = ? LIMIT 1")
         .get(resolvedPath, inferredName) as Row | undefined;
@@ -482,27 +473,22 @@ export function createStore(db: DatabaseSync) {
       );
       return store.getProject(id)!;
     },
-    updateProjectStatus(
-      projectId: string,
-      status: ProjectStatus,
-      lastIndexedAt: string | null = null
-    ): void {
+    updateProjectStatus(projectId: string, status: ProjectStatus, lastIndexedAt: string | null = null): void {
       const ts = now();
-      db.prepare(
-        "UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?"
-      ).run(status, lastIndexedAt, ts, projectId);
+      db.prepare("UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?").run(
+        status,
+        lastIndexedAt,
+        ts,
+        projectId
+      );
     },
     listSessions(limit = 50): SessionRecord[] {
-      return (
-        db
-          .prepare("SELECT * FROM agent_sessions ORDER BY started_at DESC LIMIT ?")
-          .all(limit) as Row[]
-      ).map(rowToSession);
+      return (db.prepare("SELECT * FROM agent_sessions ORDER BY started_at DESC LIMIT ?").all(limit) as Row[]).map(
+        rowToSession
+      );
     },
     getSession(sessionId: string): SessionRecord | null {
-      const row = db.prepare("SELECT * FROM agent_sessions WHERE id = ? LIMIT 1").get(sessionId) as
-        | Row
-        | undefined;
+      const row = db.prepare("SELECT * FROM agent_sessions WHERE id = ? LIMIT 1").get(sessionId) as Row | undefined;
       return row ? rowToSession(row) : null;
     },
     createSession(input: CreateSessionInput): SessionRecord {
@@ -598,9 +584,7 @@ export function createStore(db: DatabaseSync) {
       return store.getTask(id)!;
     },
     getTask(taskId: string): TaskRecord | null {
-      const row = db.prepare("SELECT * FROM agent_tasks WHERE id = ? LIMIT 1").get(taskId) as
-        | Row
-        | undefined;
+      const row = db.prepare("SELECT * FROM agent_tasks WHERE id = ? LIMIT 1").get(taskId) as Row | undefined;
       return row ? rowToTask(row) : null;
     },
     updateTask(taskId: string, patch: Partial<TaskRecord>): TaskRecord {
@@ -678,9 +662,7 @@ export function createStore(db: DatabaseSync) {
     }> {
       return (
         db
-          .prepare(
-            "SELECT id, project_id, title, body, created_at FROM lessons ORDER BY created_at DESC LIMIT ?"
-          )
+          .prepare("SELECT id, project_id, title, body, created_at FROM lessons ORDER BY created_at DESC LIMIT ?")
           .all(limit) as Row[]
       ).map((row) => ({
         id: asString(row.id),
@@ -690,14 +672,10 @@ export function createStore(db: DatabaseSync) {
         createdAt: asString(row.created_at),
       }));
     },
-    listRecentChecks(
-      limit = 20
-    ): Array<{ id: string; name: string; status: string; createdAt: string }> {
+    listRecentChecks(limit = 20): Array<{ id: string; name: string; status: string; createdAt: string }> {
       return (
         db
-          .prepare(
-            "SELECT id, name, status, created_at FROM check_runs ORDER BY created_at DESC LIMIT ?"
-          )
+          .prepare("SELECT id, name, status, created_at FROM check_runs ORDER BY created_at DESC LIMIT ?")
           .all(limit) as Row[]
       ).map((row) => ({
         id: asString(row.id),
@@ -740,9 +718,7 @@ export function createStore(db: DatabaseSync) {
     listProjectSessions(projectId: string, limit = 10): SessionRecord[] {
       return (
         db
-          .prepare(
-            "SELECT * FROM agent_sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT ?"
-          )
+          .prepare("SELECT * FROM agent_sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT ?")
           .all(projectId, limit) as Row[]
       ).map(rowToSession);
     },
@@ -754,9 +730,9 @@ export function createStore(db: DatabaseSync) {
       ).map(rowToTask);
     },
     listRecentTasks(limit = 20): TaskRecord[] {
-      return (
-        db.prepare("SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]
-      ).map(rowToTask);
+      return (db.prepare("SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(
+        rowToTask
+      );
     },
     listProjectLessons(
       projectId: string,
@@ -814,45 +790,39 @@ export function createStore(db: DatabaseSync) {
         ? (db
             .prepare("SELECT * FROM handoffs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
             .all(sessionId, limit) as Row[])
-        : (db
-            .prepare("SELECT * FROM handoffs ORDER BY created_at DESC LIMIT ?")
-            .all(limit) as Row[]);
+        : (db.prepare("SELECT * FROM handoffs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]);
       return rows.map((row) => ({
         id: asString(row.id),
         sessionId: asString(row.session_id),
         projectId: asString(row.project_id),
         target: asString(row.target) as HandoffRequest["target"],
         prompt: asString(row.prompt),
-        selectedContext: safeParseJson(
-          asString(row.selected_context_json)
-        ) as HandoffResponse["selectedContext"],
+        selectedContext: safeParseJson(asString(row.selected_context_json)) as HandoffResponse["selectedContext"],
       }));
     },
     listCheckRuns(limit = 20): CheckRunSummary[] {
-      return (
-        db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]
-      ).map((row) => ({
-        id: asString(row.id),
-        name: asString(row.name),
-        status: asString(row.status) as CheckRunSummary["status"],
-        command: row.command == null ? null : asString(row.command),
-        output: row.output == null ? null : asString(row.output),
-        errorOutput: row.error_output == null ? null : asString(row.error_output),
-        exitCode: row.exit_code == null ? null : toNumber(row.exit_code),
-        startedAt: row.started_at == null ? null : asString(row.started_at),
-        finishedAt: row.finished_at == null ? null : asString(row.finished_at),
-        createdAt: asString(row.created_at),
-        updatedAt: asString(row.updated_at),
-      }));
+      return (db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(
+        (row) => ({
+          id: asString(row.id),
+          name: asString(row.name),
+          status: asString(row.status) as CheckRunSummary["status"],
+          command: row.command == null ? null : asString(row.command),
+          output: row.output == null ? null : asString(row.output),
+          errorOutput: row.error_output == null ? null : asString(row.error_output),
+          exitCode: row.exit_code == null ? null : toNumber(row.exit_code),
+          startedAt: row.started_at == null ? null : asString(row.started_at),
+          finishedAt: row.finished_at == null ? null : asString(row.finished_at),
+          createdAt: asString(row.created_at),
+          updatedAt: asString(row.updated_at),
+        })
+      );
     },
     listReviews(projectId?: string | null, limit = 20): ReviewRecord[] {
       const rows = projectId
         ? (db
             .prepare("SELECT * FROM reviews WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
             .all(projectId, limit) as Row[])
-        : (db
-            .prepare("SELECT * FROM reviews ORDER BY created_at DESC LIMIT ?")
-            .all(limit) as Row[]);
+        : (db.prepare("SELECT * FROM reviews ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]);
       return rows.map((row) => ({
         id: asString(row.id),
         projectId: row.project_id == null ? null : asString(row.project_id),
@@ -870,9 +840,7 @@ export function createStore(db: DatabaseSync) {
       }));
     },
     getReview(reviewId: string): ReviewRecord | null {
-      const row = db.prepare("SELECT * FROM reviews WHERE id = ? LIMIT 1").get(reviewId) as
-        | Row
-        | undefined;
+      const row = db.prepare("SELECT * FROM reviews WHERE id = ? LIMIT 1").get(reviewId) as Row | undefined;
       if (!row) return null;
       return {
         id: asString(row.id),
@@ -900,22 +868,14 @@ export function createStore(db: DatabaseSync) {
       const editedFiles = input.editedFiles ?? [];
       const checks = input.checks ?? [];
       const scopeCreep = editedFiles.filter((file) => !plannedFiles.includes(file));
-      const missingTests = checks.some((check) => /tests?|coverage|verify/i.test(check))
-        ? []
-        : ["tests"];
-      const riskyChanges = editedFiles.filter((file) =>
-        /package\.json|migration|schema|auth|session|db/i.test(file)
-      );
+      const missingTests = checks.some((check) => /tests?|coverage|verify/i.test(check)) ? [] : ["tests"];
+      const riskyChanges = editedFiles.filter((file) => /package\.json|migration|schema|auth|session|db/i.test(file));
       const summaryParts = [
         input.title ?? `Review for ${input.project}`,
         input.notes ? `Notes: ${input.notes}` : null,
         scopeCreep.length > 0 ? `Scope creep: ${scopeCreep.join(", ")}` : "No obvious scope creep.",
-        missingTests.length > 0
-          ? `Missing tests: ${missingTests.join(", ")}`
-          : "Checks appear adequate.",
-        riskyChanges.length > 0
-          ? `Risky changes: ${riskyChanges.join(", ")}`
-          : "No high-risk files detected.",
+        missingTests.length > 0 ? `Missing tests: ${missingTests.join(", ")}` : "Checks appear adequate.",
+        riskyChanges.length > 0 ? `Risky changes: ${riskyChanges.join(", ")}` : "No high-risk files detected.",
       ].filter(Boolean);
       const summary = summaryParts.join("\n");
       const id = createId("review");
@@ -975,9 +935,7 @@ export function createStore(db: DatabaseSync) {
       return response;
     },
     getCheckRun(checkId: string): CheckRunSummary | null {
-      const row = db.prepare("SELECT * FROM check_runs WHERE id = ? LIMIT 1").get(checkId) as
-        | Row
-        | undefined;
+      const row = db.prepare("SELECT * FROM check_runs WHERE id = ? LIMIT 1").get(checkId) as Row | undefined;
       if (!row) return null;
       return {
         id: asString(row.id),
@@ -1062,11 +1020,7 @@ export function createStore(db: DatabaseSync) {
         if (active) return active;
       }
       const tasks = store.listTasks(sessionId, 100);
-      return (
-        tasks.find((task) => task.status === "running" || task.status === "queued") ??
-        tasks.at(-1) ??
-        null
-      );
+      return tasks.find((task) => task.status === "running" || task.status === "queued") ?? tasks.at(-1) ?? null;
     },
     getNextSubtask(sessionId: string): TaskRecord | null {
       const tasks = store.listTasks(sessionId, 100);
@@ -1119,23 +1073,21 @@ export function createStore(db: DatabaseSync) {
       }));
     },
     listMcpCalls(limit = 20): McpCallSummary[] {
-      return (
-        db.prepare("SELECT * FROM mcp_calls ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]
-      ).map((row) => ({
-        id: asString(row.id),
-        sessionId: row.session_id == null ? null : asString(row.session_id),
-        projectId: row.project_id == null ? null : asString(row.project_id),
-        toolName: asString(row.tool_name),
-        inputJson: asString(row.input_json),
-        outputJson: row.output_json == null ? null : asString(row.output_json),
-        blocked: toBool(row.blocked),
-        createdAt: asString(row.created_at),
-      }));
+      return (db.prepare("SELECT * FROM mcp_calls ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(
+        (row) => ({
+          id: asString(row.id),
+          sessionId: row.session_id == null ? null : asString(row.session_id),
+          projectId: row.project_id == null ? null : asString(row.project_id),
+          toolName: asString(row.tool_name),
+          inputJson: asString(row.input_json),
+          outputJson: row.output_json == null ? null : asString(row.output_json),
+          blocked: toBool(row.blocked),
+          createdAt: asString(row.created_at),
+        })
+      );
     },
     getMcpCall(callId: string): McpCallSummary | null {
-      const row = db.prepare("SELECT * FROM mcp_calls WHERE id = ? LIMIT 1").get(callId) as
-        | Row
-        | undefined;
+      const row = db.prepare("SELECT * FROM mcp_calls WHERE id = ? LIMIT 1").get(callId) as Row | undefined;
       if (!row) return null;
       return {
         id: asString(row.id),
@@ -1165,11 +1117,7 @@ export function createStore(db: DatabaseSync) {
         updatedAt: asString(row.updated_at),
       }));
     },
-    enqueueJob(input: {
-      type: string;
-      payload: Record<string, unknown>;
-      availableAt?: string | null;
-    }): JobRecord {
+    enqueueJob(input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }): JobRecord {
       const id = createId("job");
       const ts = now();
       const availableAt = input.availableAt ?? ts;
@@ -1198,11 +1146,7 @@ export function createStore(db: DatabaseSync) {
         )
         .get(now()) as Row | undefined;
       if (!row) return null;
-      db.prepare("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?").run(
-        "running",
-        now(),
-        row.id
-      );
+      db.prepare("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?").run("running", now(), row.id);
       return {
         id: asString(row.id),
         type: asString(row.type),
@@ -1214,9 +1158,7 @@ export function createStore(db: DatabaseSync) {
       };
     },
     completeJob(jobId: string, output: unknown): JobRecord {
-      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as
-        | Row
-        | undefined;
+      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as Row | undefined;
       if (!current) {
         throw new Error(`unknown job: ${jobId}`);
       }
@@ -1241,9 +1183,7 @@ export function createStore(db: DatabaseSync) {
       };
     },
     failJob(jobId: string, error: string): JobRecord {
-      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as
-        | Row
-        | undefined;
+      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as Row | undefined;
       if (!current) {
         throw new Error(`unknown job: ${jobId}`);
       }
@@ -1318,21 +1258,20 @@ export function createStore(db: DatabaseSync) {
       const project = store.getProject(input.project);
       if (!project) throw new Error(`Unknown project: ${input.project}`);
       const risk = input.risk ?? "medium";
-      const { decision: routeDecision, profileId: selectedPlannerProfile } =
-        await resolveModelProfile(
-          {
-            role: "planner",
-            mode: "local",
-            cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-            details: {
-              risk,
-              goal: input.goal,
-              contextTokens: Math.max(2048, Math.min(32_768, input.goal.length * 64)),
-            },
-            fallbackProfileId: "planner-balanced-local",
+      const { decision: routeDecision, profileId: selectedPlannerProfile } = await resolveModelProfile(
+        {
+          role: "planner",
+          mode: "local",
+          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+          details: {
+            risk,
+            goal: input.goal,
+            contextTokens: Math.max(2048, Math.min(32_768, input.goal.length * 64)),
           },
-          selectModelProfile("plan", { risk, goal: input.goal })
-        );
+          fallbackProfileId: "planner-balanced-local",
+        },
+        selectModelProfile("plan", { risk, goal: input.goal })
+      );
       const session = store.createSession({
         projectId: project.id,
         title: `Plan: ${input.goal.slice(0, 60)}`,
@@ -1396,17 +1335,12 @@ export function createStore(db: DatabaseSync) {
         sessionId: session.id,
         taskId: null,
       });
-      let plannerParseStatus: "parsed" | "repaired" | "deterministic_fallback" =
-        "deterministic_fallback";
+      let plannerParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
       let taskGraphDraft = defaultTaskGraph;
       let likelyFiles = files.slice(0, 8);
       let checks = ["typecheck", "tests"];
       let modelRecommendation =
-        risk === "high"
-          ? "planner-deep-local"
-          : risk === "medium"
-            ? "planner-balanced-local"
-            : "planner-fast-local";
+        risk === "high" ? "planner-deep-local" : risk === "medium" ? "planner-balanced-local" : "planner-fast-local";
       let plannerModelCallId: string | null = null;
       try {
         store.appendEvent(
@@ -1475,10 +1409,7 @@ export function createStore(db: DatabaseSync) {
         }
         if (parsedPlanner) {
           taskGraphDraft = parsedPlanner.taskGraph;
-          likelyFiles =
-            parsedPlanner.likelyFiles.length > 0
-              ? parsedPlanner.likelyFiles.slice(0, 8)
-              : likelyFiles;
+          likelyFiles = parsedPlanner.likelyFiles.length > 0 ? parsedPlanner.likelyFiles.slice(0, 8) : likelyFiles;
           checks = parsedPlanner.checks.length > 0 ? parsedPlanner.checks : checks;
           modelRecommendation = parsedPlanner.modelRecommendation ?? modelRecommendation;
         }
@@ -1874,9 +1805,7 @@ export function createStore(db: DatabaseSync) {
     dashboardSnapshot(): DashboardSnapshot {
       const projects = db.prepare("SELECT COUNT(*) AS count FROM projects").get() as Row;
       const activeSessions = db
-        .prepare(
-          "SELECT COUNT(*) AS count FROM agent_sessions WHERE status IN ('queued','running','paused')"
-        )
+        .prepare("SELECT COUNT(*) AS count FROM agent_sessions WHERE status IN ('queued','running','paused')")
         .get() as Row;
       return {
         projects: toNumber(projects.count),
@@ -1915,9 +1844,7 @@ export function createStore(db: DatabaseSync) {
         )
           ? 0.5
           : 0;
-        return pathBoost > 0 || authBoost > 0
-          ? { ...chunk, score: chunk.score + pathBoost + authBoost }
-          : chunk;
+        return pathBoost > 0 || authBoost > 0 ? { ...chunk, score: chunk.score + pathBoost + authBoost } : chunk;
       });
       boosted.sort((left, right) => right.score - left.score);
       return boosted;
@@ -1947,17 +1874,16 @@ export function createStore(db: DatabaseSync) {
         throw new Error(`Unknown project: ${projectIdentifier}`);
       }
       const projectConfig = resolveProjectConfig(project.path);
-      const { decision: routeDecision, profileId: selectedEmbeddingProfile } =
-        await resolveModelProfile(
-          {
-            role: "embedding",
-            mode: "local",
-            cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-            details: { goal: project.path, contextTokens: 1024 },
-            fallbackProfileId: projectConfig.models.embedding ?? "embedding-local",
-          },
-          selectModelProfile("index", { goal: project.path })
-        );
+      const { decision: routeDecision, profileId: selectedEmbeddingProfile } = await resolveModelProfile(
+        {
+          role: "embedding",
+          mode: "local",
+          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+          details: { goal: project.path, contextTokens: 1024 },
+          fallbackProfileId: projectConfig.models.embedding ?? "embedding-local",
+        },
+        selectModelProfile("index", { goal: project.path })
+      );
 
       const session = store.createSession({
         projectId: project.id,
@@ -2007,11 +1933,7 @@ export function createStore(db: DatabaseSync) {
       });
       store.updateTask(task.id, { status: "running" });
       store.updateProjectStatus(project.id, "indexing");
-      push(
-        "session.created",
-        { title: session.title, source: session.source },
-        { agent: "orchestrator" }
-      );
+      push("session.created", { title: session.title, source: session.source }, { agent: "orchestrator" });
       push("session.started", { mode: session.mode }, { agent: "orchestrator" });
       push(
         "task.created",
@@ -2099,9 +2021,7 @@ export function createStore(db: DatabaseSync) {
           qdrantFailed: indexSummary.qdrantFailed,
         },
       });
-      const embeddingCalls = modelsRepo
-        .listCalls(session.id, 200)
-        .filter((call) => call.role === "embedding");
+      const embeddingCalls = modelsRepo.listCalls(session.id, 200).filter((call) => call.role === "embedding");
       const lastEmbeddingCall = embeddingCalls.at(-1) ?? null;
       store.appendEvent(
         createEvent(
@@ -2128,11 +2048,7 @@ export function createStore(db: DatabaseSync) {
         { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed },
         { taskId: task.id, agent: "indexer" }
       );
-      push(
-        "session.completed",
-        { summary: completedSession.finalSummary },
-        { agent: "orchestrator" }
-      );
+      push("session.completed", { summary: completedSession.finalSummary }, { agent: "orchestrator" });
       const lesson = store.createLesson({
         projectId: project.id,
         sessionId: session.id,
@@ -2219,9 +2135,7 @@ export function createStore(db: DatabaseSync) {
         omittedContextJson: JSON.stringify(input.compiledPrompt.omittedContext),
         safetyNotesJson: JSON.stringify(input.compiledPrompt.safetyNotes),
         outputSchemaJson:
-          input.compiledPrompt.outputSchema == null
-            ? null
-            : JSON.stringify(input.compiledPrompt.outputSchema),
+          input.compiledPrompt.outputSchema == null ? null : JSON.stringify(input.compiledPrompt.outputSchema),
       });
     },
     listCompiledPrompts(sessionId?: string | null, limit = 50): CompiledPromptRecord[] {
@@ -2312,21 +2226,14 @@ function parsePlannerOutput(value: unknown): {
     return null;
   }
   const record = value as Record<string, unknown>;
-  if (
-    !Array.isArray(record.taskGraph) ||
-    !Array.isArray(record.likelyFiles) ||
-    !Array.isArray(record.checks)
-  ) {
+  if (!Array.isArray(record.taskGraph) || !Array.isArray(record.likelyFiles) || !Array.isArray(record.checks)) {
     return null;
   }
-  const likelyFiles = record.likelyFiles.filter(
-    (entry): entry is string => typeof entry === "string"
-  );
+  const likelyFiles = record.likelyFiles.filter((entry): entry is string => typeof entry === "string");
   const checks = record.checks.filter((entry): entry is string => typeof entry === "string");
   const taskGraph = record.taskGraph
     .filter(
-      (entry): entry is Record<string, unknown> =>
-        typeof entry === "object" && entry !== null && !Array.isArray(entry)
+      (entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && !Array.isArray(entry)
     )
     .map((entry) => {
       const expectedFiles = Array.isArray(entry.expectedFiles)
@@ -2350,8 +2257,7 @@ function parsePlannerOutput(value: unknown): {
     taskGraph,
     likelyFiles,
     checks,
-    modelRecommendation:
-      typeof record.modelRecommendation === "string" ? record.modelRecommendation : null,
+    modelRecommendation: typeof record.modelRecommendation === "string" ? record.modelRecommendation : null,
   };
 }
 

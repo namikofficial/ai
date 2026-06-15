@@ -31,9 +31,7 @@ function computeTimelineLink(item: TimelineItem): string | undefined {
   }
 }
 
-export function getTimelineItems(
-  timeline: SessionTimelineResponse | null | undefined
-): TimelineItem[] {
+export function getTimelineItems(timeline: SessionTimelineResponse | null | undefined): TimelineItem[] {
   const raw: TimelineItem[] = Array.isArray(timeline?.timeline)
     ? [...timeline.timeline]
     : Array.isArray(timeline?.items)

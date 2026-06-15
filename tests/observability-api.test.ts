@@ -7,11 +7,7 @@ import { startWorkbenchServer } from "../apps/api/src/server.ts";
 
 async function startTestServer(): Promise<{
   workspace: string;
-  request: (
-    method: string,
-    url: string,
-    body?: unknown
-  ) => Promise<{ statusCode: number; body: string }>;
+  request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>;
   close: () => Promise<void>;
 }> {
   const workspace = await mkdtemp(join(tmpdir(), "ai-obs-api-"));
@@ -35,8 +31,7 @@ async function startTestServer(): Promise<{
   });
   return {
     workspace,
-    request: async (method: string, url: string, body?: unknown) =>
-      handle.inject({ method, url, body }),
+    request: async (method: string, url: string, body?: unknown) => handle.inject({ method, url, body }),
     close: async () => {
       await handle.close();
       await rm(workspace, { recursive: true, force: true });
@@ -45,11 +40,7 @@ async function startTestServer(): Promise<{
 }
 
 async function getJson<T>(
-  request: (
-    method: string,
-    url: string,
-    body?: unknown
-  ) => Promise<{ statusCode: number; body: string }>,
+  request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>,
   url: string
 ): Promise<T> {
   const res = await request("GET", url);
@@ -60,11 +51,7 @@ async function getJson<T>(
 }
 
 async function postJson<T>(
-  request: (
-    method: string,
-    url: string,
-    body?: unknown
-  ) => Promise<{ statusCode: number; body: string }>,
+  request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>,
   url: string,
   body: unknown
 ): Promise<T> {
@@ -78,11 +65,10 @@ async function postJson<T>(
 test("observability api: retrieval queries endpoints return populated data", async () => {
   const ctx = await startTestServer();
   try {
-    const add = await postJson<{ status: "ok"; data: { id: string; name: string } }>(
-      ctx.request,
-      "/projects",
-      { path: join(ctx.workspace, "sample"), name: "sample" }
-    );
+    const add = await postJson<{ status: "ok"; data: { id: string; name: string } }>(ctx.request, "/projects", {
+      path: join(ctx.workspace, "sample"),
+      name: "sample",
+    });
     const projectId = add.data.id;
     await postJson(ctx.request, `/projects/${projectId}/index`, {});
 
@@ -159,11 +145,7 @@ test("observability api: retrieval queries endpoints return populated data", asy
     assert.equal(timeline.data.timeline.length, timeline.data.items.length);
     assert.ok(timeline.data.counts.messages >= 2);
     assert.ok(timeline.data.counts.modelCalls >= 1);
-    assert.ok(
-      timeline.data.timeline.every(
-        (item) => typeof item.ts === "string" && typeof item.kind === "string"
-      )
-    );
+    assert.ok(timeline.data.timeline.every((item) => typeof item.ts === "string" && typeof item.kind === "string"));
 
     const prompts = await getJson<{
       status: "ok";
@@ -290,9 +272,7 @@ test("observability api: conversations and agent runs expose full session trace"
       };
     }>(ctx.request, `/sessions/${ask.data.sessionId}/trace`);
     assert.equal(trace.data.messages.length, 2);
-    assert.ok(
-      trace.data.retrievalQueries.some((query) => query.originalQuery === "where is auth handled?")
-    );
+    assert.ok(trace.data.retrievalQueries.some((query) => query.originalQuery === "where is auth handled?"));
     assert.ok(trace.data.modelCalls.some((call) => call.role === "retrieval_judge"));
   } finally {
     await ctx.close();
@@ -384,10 +364,7 @@ test("observability api: models, skills, context, eval endpoints respond cleanly
     assert.equal(routed.data.route.taskPattern, "ask");
     assert.ok(routed.data.profile);
 
-    const routes = await getJson<{ status: "ok"; data: Array<{ taskPattern: string }> }>(
-      ctx.request,
-      "/models/routes"
-    );
+    const routes = await getJson<{ status: "ok"; data: Array<{ taskPattern: string }> }>(ctx.request, "/models/routes");
     assert.ok(routes.data.some((route) => route.taskPattern === "ask"));
 
     const skills = await getJson<{ status: "ok"; data: unknown[] }>(ctx.request, "/skills");
@@ -413,10 +390,7 @@ test("observability api: models, skills, context, eval endpoints respond cleanly
     assert.ok(created.data.id);
     assert.equal(created.data.question, "what does handleLogin do?");
 
-    const outcomes = await getJson<{ status: "ok"; data: unknown[] }>(
-      ctx.request,
-      "/eval/outcomes"
-    );
+    const outcomes = await getJson<{ status: "ok"; data: unknown[] }>(ctx.request, "/eval/outcomes");
     assert.ok(Array.isArray(outcomes.data));
   } finally {
     await ctx.close();
@@ -438,16 +412,12 @@ test("observability api: handoff records context pack, agent run, and handoff ro
       depth: "shallow",
     });
 
-    const handoff = await postJson<{ status: "ok"; data: { id: string } }>(
-      ctx.request,
-      "/handoff",
-      {
-        sessionId: ask.data.sessionId,
-        project: add.data.id,
-        target: "opencode",
-        subtask: "explain the auth file",
-      }
-    );
+    const handoff = await postJson<{ status: "ok"; data: { id: string } }>(ctx.request, "/handoff", {
+      sessionId: ask.data.sessionId,
+      project: add.data.id,
+      target: "opencode",
+      subtask: "explain the auth file",
+    });
     assert.ok(handoff.data.id);
 
     const packs = await getJson<{ status: "ok"; data: Array<{ id: string; reason: string }> }>(

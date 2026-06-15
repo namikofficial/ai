@@ -10,10 +10,7 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
   const repo = join(workspace, "sample-repo");
   await mkdir(join(repo, "src"), { recursive: true });
   for (let i = 0; i < 4; i++) {
-    await writeFile(
-      join(repo, "src", `noise-${i}.ts`),
-      `export function noise${i}() { return "noise ${i}"; }\n`
-    );
+    await writeFile(join(repo, "src", `noise-${i}.ts`), `export function noise${i}() { return "noise ${i}"; }\n`);
   }
   await writeFile(
     join(repo, "src", "auth.ts"),
@@ -79,9 +76,7 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
     `auth (${authResultSecond!.finalScore}) should be ranked at or above billing (${billingResultSecond!.finalScore}) after the boost`
   );
 
-  const authBoostAfter = store.retrieval
-    .listPathBoosts(project.id, 50)
-    .find((b) => b.path === "src/auth.ts");
+  const authBoostAfter = store.retrieval.listPathBoosts(project.id, 50).find((b) => b.path === "src/auth.ts");
   assert.ok(authBoostAfter, "auth.ts should still be in chunk_path_boosts after the second ask");
 
   store.db.close();
@@ -92,14 +87,8 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
   const workspace = await mkdtemp(join(tmpdir(), "ai-feedback-bad-"));
   const repo = join(workspace, "sample-repo");
   await mkdir(join(repo, "src"), { recursive: true });
-  await writeFile(
-    join(repo, "src", "alpha.ts"),
-    "export const alpha = 'shared term appears here for search';\n"
-  );
-  await writeFile(
-    join(repo, "src", "beta.ts"),
-    "export const beta = 'shared term appears here for search';\n"
-  );
+  await writeFile(join(repo, "src", "alpha.ts"), "export const alpha = 'shared term appears here for search';\n");
+  await writeFile(join(repo, "src", "beta.ts"), "export const beta = 'shared term appears here for search';\n");
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "sample-repo" });
@@ -126,15 +115,8 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
   const alphaBoost = boosts.find((b) => b.path === "src/alpha.ts");
   const betaBoost = boosts.find((b) => b.path === "src/beta.ts");
   assert.ok(alphaBoost);
-  assert.equal(
-    betaBoost,
-    undefined,
-    "beta should not have a boost since no feedback was recorded for it"
-  );
-  assert.ok(
-    alphaBoost!.weight < 0.5,
-    `bad feedback should produce weight below neutral (got ${alphaBoost!.weight})`
-  );
+  assert.equal(betaBoost, undefined, "beta should not have a boost since no feedback was recorded for it");
+  assert.ok(alphaBoost!.weight < 0.5, `bad feedback should produce weight below neutral (got ${alphaBoost!.weight})`);
 
   const second = await store.ask({
     project: project.id,

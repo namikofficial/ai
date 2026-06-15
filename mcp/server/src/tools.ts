@@ -1,10 +1,5 @@
 import type { createStore } from "../../../packages/db/src/store.ts";
-import type {
-  ConfigSnapshot,
-  ProjectSummary,
-  SessionRecord,
-  TaskRecord,
-} from "../../../packages/shared/src/index.ts";
+import type { ConfigSnapshot, ProjectSummary, SessionRecord, TaskRecord } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
 
 type Store = ReturnType<typeof createStore>;
@@ -144,8 +139,7 @@ function toolDescriptors(): ToolDescriptor[] {
     },
     {
       name: "ai_get_subtask_context",
-      description:
-        "Return the session, task, files, chunks, and lessons needed to work on a subtask.",
+      description: "Return the session, task, files, chunks, and lessons needed to work on a subtask.",
       inputSchema: {
         type: "object",
         properties: {
@@ -442,19 +436,13 @@ async function handleTool(
     case "ai_get_next_subtask":
       return store.getNextSubtask(asString(args.sessionId));
     case "ai_get_subtask_context":
-      return store.getSubtaskContext(
-        asString(args.sessionId),
-        args.taskId == null ? null : asString(args.taskId)
-      );
+      return store.getSubtaskContext(asString(args.sessionId), args.taskId == null ? null : asString(args.taskId));
     case "ai_create_handoff":
       return await store.createHandoff({
         sessionId: asString(args.sessionId),
         project: asString(args.project),
         target:
-          args.target === "opencode" ||
-          args.target === "codex" ||
-          args.target === "clipboard" ||
-          args.target === "file"
+          args.target === "opencode" || args.target === "codex" || args.target === "clipboard" || args.target === "file"
             ? args.target
             : "manual",
         subtask: asString(args.subtask),
@@ -526,9 +514,7 @@ async function handleTool(
       const memoryEntries = projectId
         ? store.memory.listEntries(projectId, undefined, 200)
         : store.memory.listEntries(null, undefined, 200);
-      const facts = projectId
-        ? store.memory.listFacts(projectId, 200)
-        : store.memory.listFacts(null, 200);
+      const facts = projectId ? store.memory.listFacts(projectId, 200) : store.memory.listFacts(null, 200);
       const rules = projectId ? store.memory.listProjectRules(projectId, 200) : [];
       const skills = store.skills.listSkills(undefined, 200);
       const reviews = projectId ? store.listReviews(projectId, 200) : store.listReviews(null, 200);
@@ -599,16 +585,12 @@ async function handleTool(
       const projectId = args.project ? asString(args.project) : null;
       const statusValue = args.status;
       const statusFilter =
-        statusValue === "pending" || statusValue === "accepted" || statusValue === "rejected"
-          ? statusValue
-          : undefined;
+        statusValue === "pending" || statusValue === "accepted" || statusValue === "rejected" ? statusValue : undefined;
       return store.memory.listCandidates(statusFilter, projectId, asNumber(args.limit, 50));
     }
     case "ai_accept_memory_candidate": {
       const candidateId = asString(args.candidateId);
-      const before = store.memory
-        .listCandidates(undefined, undefined, 1000)
-        .find((entry) => entry.id === candidateId);
+      const before = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId);
       if (!before) {
         throw new Error(`Unknown memory candidate: ${candidateId}`);
       }
@@ -622,9 +604,7 @@ async function handleTool(
       const notes = args.notes ? asString(args.notes) : null;
       const entry = store.memory.acceptCandidate(candidateId, notes);
       const after =
-        store.memory
-          .listCandidates(undefined, undefined, 1000)
-          .find((entry) => entry.id === candidateId) ?? before;
+        store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId) ?? before;
       store.appendEvent(
         createEvent(
           "lesson.created",
@@ -674,9 +654,7 @@ async function handleTool(
     case "ai_reject_memory_candidate": {
       const candidateId = asString(args.candidateId);
       const reason = args.reason ? asString(args.reason) : null;
-      const before = store.memory
-        .listCandidates(undefined, undefined, 1000)
-        .find((entry) => entry.id === candidateId);
+      const before = store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId);
       if (!before) {
         throw new Error(`Unknown memory candidate: ${candidateId}`);
       }
@@ -685,9 +663,7 @@ async function handleTool(
       }
       store.memory.reviewCandidate(candidateId, "rejected", reason);
       const after =
-        store.memory
-          .listCandidates(undefined, undefined, 1000)
-          .find((entry) => entry.id === candidateId) ?? before;
+        store.memory.listCandidates(undefined, undefined, 1000).find((entry) => entry.id === candidateId) ?? before;
       store.appendEvent(
         createEvent(
           "lesson.created",
@@ -746,21 +722,14 @@ async function handleTool(
     case "ai_record_feedback": {
       const retrievalQueryId = asString(args.retrievalQueryId);
       const ratingInput = asString(args.rating);
-      const rating =
-        ratingInput === "good" || ratingInput === "bad" || ratingInput === "missed"
-          ? ratingInput
-          : null;
+      const rating = ratingInput === "good" || ratingInput === "bad" || ratingInput === "missed" ? ratingInput : null;
       if (!rating) {
         throw new Error(`Invalid rating: must be 'good', 'bad', or 'missed'`);
       }
-      const chunkId =
-        typeof args.chunkId === "string" && args.chunkId.length > 0 ? args.chunkId : null;
-      const missedPath =
-        typeof args.missedPath === "string" && args.missedPath.length > 0 ? args.missedPath : null;
+      const chunkId = typeof args.chunkId === "string" && args.chunkId.length > 0 ? args.chunkId : null;
+      const missedPath = typeof args.missedPath === "string" && args.missedPath.length > 0 ? args.missedPath : null;
       if (rating !== "missed" && !chunkId) {
-        throw new Error(
-          `'good' and 'bad' feedback require a chunkId; 'missed' requires a missedPath`
-        );
+        throw new Error(`'good' and 'bad' feedback require a chunkId; 'missed' requires a missedPath`);
       }
       if (rating === "missed" && !missedPath) {
         throw new Error(`'missed' feedback requires a missedPath`);
@@ -776,9 +745,7 @@ async function handleTool(
         missedPath,
         notes: typeof args.notes === "string" ? args.notes : null,
       });
-      const pathBoosts = query.projectId
-        ? store.retrieval.listPathBoosts(query.projectId, 200)
-        : [];
+      const pathBoosts = query.projectId ? store.retrieval.listPathBoosts(query.projectId, 200) : [];
       const matchingBoost = chunkId
         ? pathBoosts.find((b) => {
             const chunkRow = store.db
@@ -830,11 +797,7 @@ export async function handleMcpRequest(
     });
   }
 
-  if (
-    request.method === "initialized" ||
-    request.method === "notifications/initialized" ||
-    request.method === "ping"
-  ) {
+  if (request.method === "initialized" || request.method === "notifications/initialized" || request.method === "ping") {
     return request.id == null ? null : ok(request.id, {});
   }
 
@@ -851,11 +814,7 @@ export async function handleMcpRequest(
       logMcpCall(store, {
         toolName,
         sessionId: args.sessionId ? asString(args.sessionId) : null,
-        projectId: args.project
-          ? asString(args.project)
-          : args.projectId
-            ? asString(args.projectId)
-            : null,
+        projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
         payload: args,
         blocked: true,
         output: { error: `Unknown tool: ${toolName}` },
@@ -867,11 +826,7 @@ export async function handleMcpRequest(
       logMcpCall(store, {
         toolName,
         sessionId: args.sessionId ? asString(args.sessionId) : null,
-        projectId: args.project
-          ? asString(args.project)
-          : args.projectId
-            ? asString(args.projectId)
-            : null,
+        projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
         payload: args,
         output,
       });
@@ -881,11 +836,7 @@ export async function handleMcpRequest(
           { tool: toolName, args },
           {
             sessionId: args.sessionId ? asString(args.sessionId) : null,
-            projectId: args.project
-              ? asString(args.project)
-              : args.projectId
-                ? asString(args.projectId)
-                : null,
+            projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
             agent: "mcp",
           }
         )
@@ -896,11 +847,7 @@ export async function handleMcpRequest(
       logMcpCall(store, {
         toolName,
         sessionId: args.sessionId ? asString(args.sessionId) : null,
-        projectId: args.project
-          ? asString(args.project)
-          : args.projectId
-            ? asString(args.projectId)
-            : null,
+        projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
         payload: args,
         blocked: true,
         output: { error: message },
@@ -911,11 +858,7 @@ export async function handleMcpRequest(
           { tool: toolName, error: message },
           {
             sessionId: args.sessionId ? asString(args.sessionId) : null,
-            projectId: args.project
-              ? asString(args.project)
-              : args.projectId
-                ? asString(args.projectId)
-                : null,
+            projectId: args.project ? asString(args.project) : args.projectId ? asString(args.projectId) : null,
             agent: "mcp",
             level: "error",
           }

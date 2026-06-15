@@ -1,13 +1,5 @@
 import { type ReactNode, useEffect, useMemo } from "react";
-import {
-  BrowserRouter,
-  Navigate,
-  NavLink,
-  Route,
-  Routes,
-  useLocation,
-  useNavigate,
-} from "react-router-dom";
+import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import type { EventEnvelope } from "../../../packages/shared/src/index.ts";
 import {
   AgentRunDetailPage,

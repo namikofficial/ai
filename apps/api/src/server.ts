@@ -40,12 +40,7 @@ import type {
   SessionTimelineResponse,
   SkillRecord,
 } from "../../../packages/shared/src/index.ts";
-import {
-  createEvent,
-  createId,
-  parseAskRequest,
-  parseProjectCreateInput,
-} from "../../../packages/shared/src/index.ts";
+import { createEvent, createId, parseAskRequest, parseProjectCreateInput } from "../../../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 import {
   renderCard,
@@ -61,10 +56,7 @@ import { runExplainWithStore } from "./retrieval-explain.ts";
 
 export interface IntelligenceStack {
   runtime: ModelRuntime;
-  providers: Pick<
-    ModelProviderRecord,
-    "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled"
-  >[];
+  providers: Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">[];
   profiles: ModelProfileRecord[];
 }
 
@@ -92,11 +84,7 @@ interface JsonResponse {
   error?: { message: string; code?: string };
 }
 
-function json(
-  status: "ok" | "error",
-  data?: unknown,
-  error?: { message: string; code?: string }
-): JsonResponse {
+function json(status: "ok" | "error", data?: unknown, error?: { message: string; code?: string }): JsonResponse {
   return status === "ok" ? { status, data } : { status, error };
 }
 
@@ -112,8 +100,7 @@ function escapeHtml(value: string): string {
 function isHtmlRequest(req: any): boolean {
   const accept = String(req.headers?.accept ?? "");
   return (
-    accept.includes("text/html") ||
-    (!accept.includes("application/json") && !accept.includes("text/event-stream"))
+    accept.includes("text/html") || (!accept.includes("application/json") && !accept.includes("text/event-stream"))
   );
 }
 
@@ -149,9 +136,7 @@ async function readTextBody(fastifyRequest: any, rawReq: any): Promise<string> {
 function safeParseList(value: string): string[] {
   try {
     const parsed = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string")
-      : [];
+    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
   } catch {
     return [];
   }
@@ -165,15 +150,10 @@ function safeParseJson(value: string): unknown {
   }
 }
 
-function readProjectGraph(
-  store: ReturnType<typeof createStore>,
-  projectId: string
-): ProjectContextGraph | null {
+function readProjectGraph(store: ReturnType<typeof createStore>, projectId: string): ProjectContextGraph | null {
   try {
     const row = store.db
-      .prepare(
-        "SELECT summary_json, updated_at FROM project_context_graphs WHERE project_id = ? LIMIT 1"
-      )
+      .prepare("SELECT summary_json, updated_at FROM project_context_graphs WHERE project_id = ? LIMIT 1")
       .get(projectId) as { summary_json: string; updated_at: string } | undefined;
     if (!row) return null;
     const parsed = safeParseJson(row.summary_json);
@@ -185,10 +165,7 @@ function readProjectGraph(
   }
 }
 
-function buildSessionTraceData(
-  store: ReturnType<typeof createStore>,
-  sessionId: string
-): Record<string, unknown> {
+function buildSessionTraceData(store: ReturnType<typeof createStore>, sessionId: string): Record<string, unknown> {
   const session = store.getSession(sessionId);
   if (!session) {
     return {};
@@ -211,18 +188,13 @@ function buildSessionTraceData(
     })),
     memoryCandidates: store.memory
       .listCandidates(undefined, projectId, 100)
-      .filter(
-        (candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId
-      ),
+      .filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId),
     skills: store.skills.listSkills(undefined, 100),
     evalOutcomes: store.evals.listOutcomes(sessionId, 100),
   };
 }
 
-function readCount(
-  store: ReturnType<typeof createStore>,
-  sql: string
-): { count: number; ok: boolean } {
+function readCount(store: ReturnType<typeof createStore>, sql: string): { count: number; ok: boolean } {
   try {
     const row = store.db.prepare(sql).get() as { count?: number } | undefined;
     return { count: typeof row?.count === "number" ? row.count : 0, ok: true };
@@ -231,30 +203,21 @@ function readCount(
   }
 }
 
-function buildHealthSnapshot(
-  store: ReturnType<typeof createStore>,
-  config: ConfigSnapshot
-): Record<string, unknown> {
+function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: ConfigSnapshot): Record<string, unknown> {
   const migrationsApplied = readCount(store, "SELECT COUNT(*) AS count FROM schema_migrations");
   const projectCount = readCount(store, "SELECT COUNT(*) AS count FROM projects");
   const sessionCount = readCount(store, "SELECT COUNT(*) AS count FROM agent_sessions");
   const modelProviderCount = readCount(store, "SELECT COUNT(*) AS count FROM model_providers");
   const promptCount = readCount(store, "SELECT COUNT(*) AS count FROM compiled_prompts");
   const databaseReachable =
-    migrationsApplied.ok &&
-    projectCount.ok &&
-    sessionCount.ok &&
-    modelProviderCount.ok &&
-    promptCount.ok;
+    migrationsApplied.ok && projectCount.ok && sessionCount.ok && modelProviderCount.ok && promptCount.ok;
   const qdrant = {
     enabled: config.qdrantEnabled,
     url: config.qdrantUrl,
     collection: config.qdrantCollection,
   };
   // Redact database path for safety
-  const redactedDatabasePath = config.databasePath
-    ? `.../${path.basename(config.databasePath)}`
-    : null;
+  const redactedDatabasePath = config.databasePath ? `.../${path.basename(config.databasePath)}` : null;
   const redactedRuntimeDir = config.runtimeDir ? `.../${path.basename(config.runtimeDir)}` : null;
 
   return {
@@ -274,10 +237,7 @@ function buildHealthSnapshot(
   };
 }
 
-function buildRuntimeForStore(
-  store: ReturnType<typeof createStore>,
-  cloudEnabled: boolean
-): ModelRuntime {
+function buildRuntimeForStore(store: ReturnType<typeof createStore>, cloudEnabled: boolean): ModelRuntime {
   return createModelRuntime({
     providers: store.models.listProviders(),
     profiles: store.models.listProfiles(),
@@ -453,10 +413,7 @@ function renderProjectDetailPage(store: ReturnType<typeof createStore>, projectI
   const project = store.getProject(projectId);
   if (!project) {
     return pageShell("Project not found", `/projects/${projectId}`, {
-      contentHtml: renderCard(
-        "Missing project",
-        `No project found for <code>${escapeHtml(projectId)}</code>.`
-      ),
+      contentHtml: renderCard("Missing project", `No project found for <code>${escapeHtml(projectId)}</code>.`),
       projects: store.listProjects(),
       projectCount: store.listProjects().length,
       sessionCount: store.listSessions(1000).length,
@@ -560,10 +517,7 @@ function renderSessionDetailPage(store: ReturnType<typeof createStore>, sessionI
   const session = store.getSession(sessionId);
   if (!session) {
     return pageShell("Session not found", `/sessions/${sessionId}`, {
-      contentHtml: renderCard(
-        "Missing session",
-        `No session found for <code>${escapeHtml(sessionId)}</code>.`
-      ),
+      contentHtml: renderCard("Missing session", `No session found for <code>${escapeHtml(sessionId)}</code>.`),
       projects: store.listProjects(),
       projectCount: store.listProjects().length,
       sessionCount: store.listSessions(1000).length,
@@ -602,11 +556,7 @@ function renderSessionDetailPage(store: ReturnType<typeof createStore>, sessionI
       ]),
       6
     ),
-    renderCard(
-      "Final Summary",
-      `<pre>${escapeHtml(session.finalSummary ?? "No final summary yet.")}</pre>`,
-      6
-    ),
+    renderCard("Final Summary", `<pre>${escapeHtml(session.finalSummary ?? "No final summary yet.")}</pre>`, 6),
     renderCard(
       "Timeline",
       `<div class="list">${timeline.items.length > 0 ? timeline.items.map((item) => `<div class="list-item"><strong>${escapeHtml(item.kind)}: ${escapeHtml(item.title)}</strong><div class="tiny">${escapeHtml(item.summary)}</div></div>`).join("") : renderEmptyState("Empty timeline", "No events captured for this session yet.")}</div>`,
@@ -643,10 +593,7 @@ function renderCompiledPromptPage(store: ReturnType<typeof createStore>, promptI
   const prompt = store.getCompiledPrompt(promptId);
   if (!prompt) {
     return pageShell("Prompt not found", `/prompts/${promptId}`, {
-      contentHtml: renderCard(
-        "Missing prompt",
-        `No compiled prompt found for <code>${escapeHtml(promptId)}</code>.`
-      ),
+      contentHtml: renderCard("Missing prompt", `No compiled prompt found for <code>${escapeHtml(promptId)}</code>.`),
       projects: store.listProjects(),
       projectCount: store.listProjects().length,
       sessionCount: store.listSessions(1000).length,
@@ -676,30 +623,15 @@ function renderCompiledPromptPage(store: ReturnType<typeof createStore>, promptI
       6
     ),
     renderCard("Messages", `<pre>${escapeHtml(JSON.stringify(messages, null, 2))}</pre>`, 6),
-    renderCard(
-      "Included Context",
-      `<pre>${escapeHtml(JSON.stringify(includedContext, null, 2))}</pre>`,
-      6
-    ),
-    renderCard(
-      "Omitted Context",
-      `<pre>${escapeHtml(JSON.stringify(omittedContext, null, 2))}</pre>`,
-      6
-    ),
+    renderCard("Included Context", `<pre>${escapeHtml(JSON.stringify(includedContext, null, 2))}</pre>`, 6),
+    renderCard("Omitted Context", `<pre>${escapeHtml(JSON.stringify(omittedContext, null, 2))}</pre>`, 6),
     renderCard("Safety Notes", `<pre>${escapeHtml(JSON.stringify(safetyNotes, null, 2))}</pre>`, 6),
-    renderCard(
-      "Output Schema",
-      `<pre>${escapeHtml(JSON.stringify(outputSchema, null, 2))}</pre>`,
-      6
-    ),
+    renderCard("Output Schema", `<pre>${escapeHtml(JSON.stringify(outputSchema, null, 2))}</pre>`, 6),
   ].join("");
 
   return pageShell(`Prompt ${prompt.id}`, `/prompts/${prompt.id}`, {
     contentHtml,
-    rightPanelHtml: renderCard(
-      "Prompt Trace",
-      `<div class="stack">${renderCompiledPromptItem(prompt)}</div>`
-    ),
+    rightPanelHtml: renderCard("Prompt Trace", `<div class="stack">${renderCompiledPromptItem(prompt)}</div>`),
     projects: store.listProjects(),
     projectCount: store.listProjects().length,
     sessionCount: store.listSessions(1000).length,
@@ -708,10 +640,7 @@ function renderCompiledPromptPage(store: ReturnType<typeof createStore>, promptI
   });
 }
 
-function renderPromptsPage(
-  store: ReturnType<typeof createStore>,
-  sessionId?: string | null
-): string {
+function renderPromptsPage(store: ReturnType<typeof createStore>, sessionId?: string | null): string {
   const prompts = store.listCompiledPrompts(sessionId ?? null, 100);
   const contentHtml = [
     renderCard(
@@ -720,25 +649,21 @@ function renderPromptsPage(
       12
     ),
   ].join("");
-  return pageShell(
-    "Prompts",
-    `/prompts${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`,
-    {
-      contentHtml,
-      rightPanelHtml: renderCard(
-        "Prompt Filter",
-        renderKeyValueList([
-          ["Session", sessionId ?? "all"],
-          ["Count", String(prompts.length)],
-        ])
-      ),
-      projects: store.listProjects(),
-      projectCount: store.listProjects().length,
-      sessionCount: store.listSessions(1000).length,
-      activeSessionCount: store.dashboardSnapshot().activeSessions,
-      liveStatus: "ready",
-    }
-  );
+  return pageShell("Prompts", `/prompts${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ""}`, {
+    contentHtml,
+    rightPanelHtml: renderCard(
+      "Prompt Filter",
+      renderKeyValueList([
+        ["Session", sessionId ?? "all"],
+        ["Count", String(prompts.length)],
+      ])
+    ),
+    projects: store.listProjects(),
+    projectCount: store.listProjects().length,
+    sessionCount: store.listSessions(1000).length,
+    activeSessionCount: store.dashboardSnapshot().activeSessions,
+    liveStatus: "ready",
+  });
 }
 
 function renderTasksPage(store: ReturnType<typeof createStore>): string {
@@ -779,10 +704,7 @@ function renderTaskDetailPage(store: ReturnType<typeof createStore>, taskId: str
   const task = store.getTask(taskId);
   if (!task) {
     return pageShell("Task not found", `/tasks/${taskId}`, {
-      contentHtml: renderCard(
-        "Missing task",
-        `No task found for <code>${escapeHtml(taskId)}</code>.`
-      ),
+      contentHtml: renderCard("Missing task", `No task found for <code>${escapeHtml(taskId)}</code>.`),
       projects: store.listProjects(),
       projectCount: store.listProjects().length,
       sessionCount: store.listSessions(1000).length,
@@ -800,9 +722,7 @@ function renderTaskDetailPage(store: ReturnType<typeof createStore>, taskId: str
   const actualFiles = safeParseList(task.actualFilesJson);
   const checks = safeParseList(task.checksJson);
   const result =
-    task.resultJson.trim() && task.resultJson.trim() !== "{}"
-      ? task.resultJson
-      : "No result recorded yet.";
+    task.resultJson.trim() && task.resultJson.trim() !== "{}" ? task.resultJson : "No result recorded yet.";
 
   const contentHtml = [
     renderCard(
@@ -920,10 +840,7 @@ function renderAskPage(
                 `<div class="list-item"><strong>${escapeHtml(citation.path)}</strong><div class="tiny">Lines ${citation.startLine}-${citation.endLine} · score ${citation.score.toFixed(1)}</div><pre>${escapeHtml(citation.excerpt)}</pre></div>`
             )
             .join("")}</div>`
-        : renderEmptyState(
-            "No citations",
-            "If retrieval misses, the response will say so explicitly."
-          ),
+        : renderEmptyState("No citations", "If retrieval misses, the response will say so explicitly."),
       12
     ),
   ].join("");
@@ -1017,9 +934,7 @@ function renderPlannerPage(
 ): string {
   const projects = store.listProjects();
   const projectOptions = projects
-    .map(
-      (project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`
-    )
+    .map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`)
     .join("");
   const contentHtml = [
     renderCard(
@@ -1045,10 +960,7 @@ function renderPlannerPage(
             ["Depth", options.result.researchDepth],
             ["Checks", options.result.checks.join(", ")],
           ])
-        : renderEmptyState(
-            "No plan yet",
-            options.error ?? "Generate a task graph for a project goal."
-          ),
+        : renderEmptyState("No plan yet", options.error ?? "Generate a task graph for a project goal."),
       6
     ),
     renderCard(
@@ -1103,14 +1015,10 @@ function renderHandoffPage(
   const projects = store.listProjects();
   const sessions = store.listSessions(50);
   const projectOptions = projects
-    .map(
-      (project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`
-    )
+    .map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`)
     .join("");
   const sessionOptions = sessions
-    .map(
-      (session) => `<option value="${escapeHtml(session.id)}">${escapeHtml(session.title)}</option>`
-    )
+    .map((session) => `<option value="${escapeHtml(session.id)}">${escapeHtml(session.title)}</option>`)
     .join("");
   const contentHtml = [
     renderCard(
@@ -1134,31 +1042,19 @@ function renderHandoffPage(
       "Prompt",
       options.result
         ? `<pre>${escapeHtml(options.result.prompt)}</pre>`
-        : renderEmptyState(
-            "No handoff yet",
-            options.error ?? "Generate a target-specific prompt from a live session."
-          ),
+        : renderEmptyState("No handoff yet", options.error ?? "Generate a target-specific prompt from a live session."),
       6
     ),
     renderCard(
       "Selected Context",
       options.result
         ? renderKeyValueList([
-            [
-              "Files to inspect",
-              options.result.selectedContext.filesToInspect.join(", ") || "none",
-            ],
-            [
-              "Files likely to edit",
-              options.result.selectedContext.filesLikelyToEdit.join(", ") || "none",
-            ],
+            ["Files to inspect", options.result.selectedContext.filesToInspect.join(", ") || "none"],
+            ["Files likely to edit", options.result.selectedContext.filesLikelyToEdit.join(", ") || "none"],
             ["Checks to run", options.result.selectedContext.checksToRun.join(", ")],
             ["Constraints", options.result.selectedContext.constraints.join(" | ")],
           ])
-        : renderEmptyState(
-            "No context",
-            "The handoff will include files, checks, and constraints."
-          ),
+        : renderEmptyState("No context", "The handoff will include files, checks, and constraints."),
       12
     ),
   ].join("");
@@ -1251,9 +1147,7 @@ function renderReviewsPage(
 ): string {
   const projects = store.listProjects();
   const projectOptions = projects
-    .map(
-      (project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`
-    )
+    .map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`)
     .join("");
   const reviews = store.listReviews(undefined, 20);
   const contentHtml = [
@@ -1302,10 +1196,7 @@ function renderReviewDetailPage(store: ReturnType<typeof createStore>, reviewId:
   const review = store.getReview(reviewId);
   if (!review) {
     return pageShell("Review not found", `/reviews/${reviewId}`, {
-      contentHtml: renderCard(
-        "Missing review",
-        `No review found for <code>${escapeHtml(reviewId)}</code>.`
-      ),
+      contentHtml: renderCard("Missing review", `No review found for <code>${escapeHtml(reviewId)}</code>.`),
       projects: store.listProjects(),
       projectCount: store.listProjects().length,
       sessionCount: store.listSessions(1000).length,
@@ -1382,10 +1273,7 @@ function renderReviewDetailPage(store: ReturnType<typeof createStore>, reviewId:
 
   return pageShell(review.title, `/reviews/${review.id}`, {
     contentHtml,
-    rightPanelHtml: renderCard(
-      "Recent Trace",
-      renderEventFeed(store.listEvents(session?.id ?? undefined, 40))
-    ),
+    rightPanelHtml: renderCard("Recent Trace", renderEventFeed(store.listEvents(session?.id ?? undefined, 40))),
     activeProjectId: project?.id ?? null,
     projects: store.listProjects(),
     projectCount: store.listProjects().length,
@@ -1512,11 +1400,7 @@ function renderMcpPage(store: ReturnType<typeof createStore>): string {
 function renderSettingsPage(store: ReturnType<typeof createStore>, config: ConfigSnapshot): string {
   const settings = store.getSettings(config);
   const contentHtml = [
-    renderCard(
-      "Settings Snapshot",
-      `<pre>${escapeHtml(JSON.stringify(settings, null, 2))}</pre>`,
-      12
-    ),
+    renderCard("Settings Snapshot", `<pre>${escapeHtml(JSON.stringify(settings, null, 2))}</pre>`, 12),
     renderCard(
       "Runtime Notes",
       renderEmptyState(
@@ -1582,21 +1466,14 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   app.addContentTypeParser("text/plain", { parseAs: "string" }, (_request, body, done) => {
     done(null, body);
   });
-  app.addContentTypeParser(
-    "application/x-www-form-urlencoded",
-    { parseAs: "string" },
-    (_request, body, done) => {
-      done(null, body);
-    }
-  );
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => {
+    done(null, body);
+  });
   app.addContentTypeParser("multipart/form-data", (_request, payload, done) => {
     const req = payload as { on: (event: string, listener: (...args: unknown[]) => void) => void };
     let data = "";
     req.on("data", (chunk: unknown) => {
-      data +=
-        typeof chunk === "string"
-          ? chunk
-          : (chunk as { toString(enc: string): string }).toString("utf8");
+      data += typeof chunk === "string" ? chunk : (chunk as { toString(enc: string): string }).toString("utf8");
     });
     req.on("end", () => done(null, data));
     req.on("error", (err: unknown) => done(err instanceof Error ? err : new Error(String(err))));
@@ -1799,10 +1676,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           }
           if (method === "GET" && rest === "/retrieval") {
             const query = String(url.searchParams.get("q") ?? "");
-            sendJson(
-              res,
-              json("ok", { chunks: store.searchChunks(projectId, query, { limit: 20 }), query })
-            );
+            sendJson(res, json("ok", { chunks: store.searchChunks(projectId, query, { limit: 20 }), query }));
             return;
           }
         }
@@ -1923,22 +1797,13 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
                 : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))
             ) as Record<string, unknown>;
             const input: SessionReplayRequest = {
-              fromTimelineItemId:
-                typeof body.fromTimelineItemId === "string" ? body.fromTimelineItemId : undefined,
-              editedUserRequest:
-                typeof body.editedUserRequest === "string" ? body.editedUserRequest : undefined,
-              editedSystemPrompt:
-                typeof body.editedSystemPrompt === "string" ? body.editedSystemPrompt : undefined,
-              editedContextPackId:
-                typeof body.editedContextPackId === "string" ? body.editedContextPackId : undefined,
-              selectedPromptId:
-                typeof body.selectedPromptId === "string" ? body.selectedPromptId : undefined,
-              modelProfileId:
-                typeof body.modelProfileId === "string" ? body.modelProfileId : undefined,
-              mode:
-                body.mode === "local" || body.mode === "hybrid" || body.mode === "cloud"
-                  ? body.mode
-                  : undefined,
+              fromTimelineItemId: typeof body.fromTimelineItemId === "string" ? body.fromTimelineItemId : undefined,
+              editedUserRequest: typeof body.editedUserRequest === "string" ? body.editedUserRequest : undefined,
+              editedSystemPrompt: typeof body.editedSystemPrompt === "string" ? body.editedSystemPrompt : undefined,
+              editedContextPackId: typeof body.editedContextPackId === "string" ? body.editedContextPackId : undefined,
+              selectedPromptId: typeof body.selectedPromptId === "string" ? body.selectedPromptId : undefined,
+              modelProfileId: typeof body.modelProfileId === "string" ? body.modelProfileId : undefined,
+              mode: body.mode === "local" || body.mode === "hybrid" || body.mode === "cloud" ? body.mode : undefined,
               dryRun: body.dryRun === true || body.dryRun === "true",
             };
             const parentSession = store.getSession(sessionId);
@@ -1959,10 +1824,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               projectId: parentSession.projectId,
               title: `Replay: ${parentSession.title}`,
               userGoal: replayQuestion,
-              mode:
-                replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud"
-                  ? replayMode
-                  : "local",
+              mode: replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud" ? replayMode : "local",
               source: "replay",
               modelProfile: input.modelProfileId ?? parentSession.modelProfile,
             });
@@ -1977,9 +1839,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
                 parentSession.id,
                 branchSession.id,
                 input.fromTimelineItemId ?? null,
-                replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud"
-                  ? replayMode
-                  : "local",
+                replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud" ? replayMode : "local",
                 JSON.stringify(input),
                 new Date().toISOString(),
                 new Date().toISOString()
@@ -2007,9 +1867,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
                 project: parentSession.projectId ?? "",
                 question: replayQuestion,
                 mode:
-                  replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud"
-                    ? replayMode
-                    : "local",
+                  replayMode === "local" || replayMode === "hybrid" || replayMode === "cloud" ? replayMode : "local",
                 depth: "standard",
               },
               preferredAnswerProfileId: input.modelProfileId ?? parentSession.modelProfile,
@@ -2050,10 +1908,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             sendHtml(res, renderTaskDetailPage(store, taskId));
             return;
           }
-          if (
-            method === "POST" &&
-            (rest === "/start" || rest === "/complete" || rest === "/fail")
-          ) {
+          if (method === "POST" && (rest === "/start" || rest === "/complete" || rest === "/fail")) {
             const body = (
               req.headers?.["content-type"]?.includes("application/json")
                 ? await readJsonBody(request, req)
@@ -2128,8 +1983,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         if (path.startsWith("/handoffs/")) {
           const handoffId = decodeURIComponent(path.slice("/handoffs/".length)).split("/")[0];
           if (method === "GET") {
-            const handoff =
-              store.listHandoffs(undefined, 100).find((item) => item.id === handoffId) ?? null;
+            const handoff = store.listHandoffs(undefined, 100).find((item) => item.id === handoffId) ?? null;
             sendJson(res, json("ok", handoff));
             return;
           }
@@ -2161,10 +2015,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           const normalized: PlanRequest = {
             project: String(body.project ?? ""),
             goal: String(body.goal ?? ""),
-            risk:
-              body.risk === "low" || body.risk === "medium" || body.risk === "high"
-                ? body.risk
-                : "medium",
+            risk: body.risk === "low" || body.risk === "medium" || body.risk === "high" ? body.risk : "medium",
           };
           const result = await store.createPlan(normalized);
           if (isHtmlRequest(req)) {
@@ -2200,13 +2051,9 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             `Mode: ${mode}`,
             "",
             `Found ${chunks.length} local sources and ${lessons.length} lessons.`,
-            mode === "web"
-              ? "Web research is not wired yet, so this result is local-first only."
-              : "",
+            mode === "web" ? "Web research is not wired yet, so this result is local-first only." : "",
             "",
-            ...sources
-              .slice(0, 3)
-              .map((source) => `- ${source.path} (score ${source.score.toFixed(1)})`),
+            ...sources.slice(0, 3).map((source) => `- ${source.path} (score ${source.score.toFixed(1)})`),
           ]
             .filter(Boolean)
             .join("\n");
@@ -2283,11 +2130,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             const projectId = String(body.projectId ?? devRequest.project);
             const project = store.getProject(projectId);
             if (!project) {
-              sendJson(
-                res,
-                json("error", undefined, { message: `unknown project: ${projectId}` }),
-                404
-              );
+              sendJson(res, json("error", undefined, { message: `unknown project: ${projectId}` }), 404);
               return;
             }
             const session = store.createSession({
@@ -2388,9 +2231,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           if (method === "POST" && head === "runs" && trimmedRest.endsWith("/approve")) {
             const runId = trimmedRest.split("/")[0] ?? "";
             const body = (
-              req.headers?.["content-type"]?.includes("application/json")
-                ? await readJsonBody(request, req)
-                : {}
+              req.headers?.["content-type"]?.includes("application/json") ? await readJsonBody(request, req) : {}
             ) as Record<string, unknown> | null;
             const approval = await approveDevRun({
               runId,
@@ -2438,9 +2279,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           if (method === "POST" && head === "runs" && trimmedRest.endsWith("/cancel")) {
             const runId = trimmedRest.split("/")[0] ?? "";
             const body = (
-              req.headers?.["content-type"]?.includes("application/json")
-                ? await readJsonBody(request, req)
-                : {}
+              req.headers?.["content-type"]?.includes("application/json") ? await readJsonBody(request, req) : {}
             ) as Record<string, unknown> | null;
             const outcome = await cancelDevRun({
               runId,
@@ -2487,9 +2326,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               )
             );
           } else {
-            store.appendEvent(
-              createEvent("check.completed", { name }, { projectId, agent: "checks" })
-            );
+            store.appendEvent(createEvent("check.completed", { name }, { projectId, agent: "checks" }));
           }
           if (isHtmlRequest(req)) {
             sendHtml(res, renderChecksPage(store));
@@ -2666,11 +2503,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             sendJson(res, json("ok", engineResult));
           } catch (error) {
             const statusCode = (error as Error & { statusCode?: number }).statusCode ?? 500;
-            sendJson(
-              res,
-              json("error", undefined, { message: (error as Error).message }),
-              statusCode
-            );
+            sendJson(res, json("error", undefined, { message: (error as Error).message }), statusCode);
           }
           return;
         }
@@ -2732,11 +2565,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           const limit = Number(body.limit ?? 8) || 8;
           const project = store.getProject(projectId);
           if (!project) {
-            sendJson(
-              res,
-              json("error", undefined, { message: `Unknown project: ${projectId}` }),
-              404
-            );
+            sendJson(res, json("error", undefined, { message: `Unknown project: ${projectId}` }), 404);
             return;
           }
           const explanation = runExplainWithStore(store, { projectId, query, mode, depth, limit });
@@ -2751,8 +2580,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
                 path: entry.path,
                 finalScore: entry.finalScore,
                 rerankReason:
-                  explanation.ranked.find((ranked) => ranked.path === entry.path)?.rerankReason ??
-                  "selected",
+                  explanation.ranked.find((ranked) => ranked.path === entry.path)?.rerankReason ?? "selected",
               })),
             })
           );
@@ -2790,9 +2618,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               res,
               json("ok", {
                 lessons: store.listRecentLessons(20),
-                rules: store
-                  .listProjects()
-                  .flatMap((project) => store.listProjectRules(project.id, 10)),
+                rules: store.listProjects().flatMap((project) => store.listProjectRules(project.id, 10)),
               })
             );
             return;
@@ -2892,10 +2718,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         }
         if (method === "GET" && path === "/models") {
           if (!isHtmlRequest(req)) {
-            sendJson(
-              res,
-              json("ok", { usage: store.listModelUsage(50), settings: store.getSettings(config) })
-            );
+            sendJson(res, json("ok", { usage: store.listModelUsage(50), settings: store.getSettings(config) }));
             return;
           }
           sendHtml(res, renderModelsPage(store, config));
@@ -2925,10 +2748,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               sendHtml(
                 res,
                 pageShell("MCP call not found", `/mcp/calls/${callId}`, {
-                  contentHtml: renderCard(
-                    "Missing call",
-                    `No MCP call found for <code>${escapeHtml(callId)}</code>.`
-                  ),
+                  contentHtml: renderCard("Missing call", `No MCP call found for <code>${escapeHtml(callId)}</code>.`),
                   projects: store.listProjects(),
                   projectCount: store.listProjects().length,
                   sessionCount: store.listSessions(1000).length,
@@ -2957,11 +2777,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
                     6
                   ),
                   renderCard("Input", `<pre>${escapeHtml(call.inputJson)}</pre>`, 6),
-                  renderCard(
-                    "Output",
-                    `<pre>${escapeHtml(call.outputJson ?? "No output recorded.")}</pre>`,
-                    12
-                  ),
+                  renderCard("Output", `<pre>${escapeHtml(call.outputJson ?? "No output recorded.")}</pre>`, 12),
                 ].join(""),
                 rightPanelHtml: renderCard(
                   "Recent Trace",
@@ -3041,9 +2857,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             ? store.retrieval.listQueriesForSession(sessionId, limit)
             : projectId
               ? store.retrieval.listQueriesForProject(projectId, limit)
-              : store.retrieval
-                  .listQueriesForProject(store.listProjects()[0]?.id ?? "", limit)
-                  .slice(0, 0);
+              : store.retrieval.listQueriesForProject(store.listProjects()[0]?.id ?? "", limit).slice(0, 0);
           sendJson(res, json("ok", queries));
           return;
         }
@@ -3052,11 +2866,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           if (method === "GET") {
             const query = store.retrieval.getQuery(id);
             if (!query) {
-              sendJson(
-                res,
-                json("error", undefined, { message: "retrieval query not found" }),
-                404
-              );
+              sendJson(res, json("error", undefined, { message: "retrieval query not found" }), 404);
               return;
             }
             sendJson(
@@ -3075,16 +2885,9 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         }
 
         if (method === "GET" && path === "/memory/candidates") {
-          const status = url.searchParams.get("status") as
-            | "pending"
-            | "accepted"
-            | "rejected"
-            | null;
+          const status = url.searchParams.get("status") as "pending" | "accepted" | "rejected" | null;
           const projectId = url.searchParams.get("projectId");
-          sendJson(
-            res,
-            json("ok", store.memory.listCandidates(status ?? "pending", projectId, 100))
-          );
+          sendJson(res, json("ok", store.memory.listCandidates(status ?? "pending", projectId, 100)));
           return;
         }
         if (path.startsWith("/memory/candidates/") && method === "POST") {
@@ -3102,21 +2905,12 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             sendJson(res, json("ok", { id, status: "rejected" }));
             return;
           }
-          sendJson(
-            res,
-            json("error", undefined, { message: `unknown action: ${action ?? ""}` }),
-            400
-          );
+          sendJson(res, json("error", undefined, { message: `unknown action: ${action ?? ""}` }), 400);
           return;
         }
         if (method === "GET" && path === "/memory/entries") {
           const projectId = url.searchParams.get("projectId");
-          const scope = url.searchParams.get("scope") as
-            | "global"
-            | "project"
-            | "repo"
-            | "path"
-            | null;
+          const scope = url.searchParams.get("scope") as "global" | "project" | "repo" | "path" | null;
           sendJson(res, json("ok", store.memory.listEntries(projectId, scope ?? undefined, 100)));
           return;
         }
@@ -3141,12 +2935,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         }
 
         if (method === "GET" && path === "/skills/candidates") {
-          const status = url.searchParams.get("status") as
-            | "pending"
-            | "active"
-            | "deprecated"
-            | "rejected"
-            | null;
+          const status = url.searchParams.get("status") as "pending" | "active" | "deprecated" | "rejected" | null;
           sendJson(res, json("ok", store.skills.listCandidates(status ?? undefined, 100)));
           return;
         }
@@ -3164,11 +2953,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             sendJson(res, json("ok", { id, status: "rejected", reason: body?.reason ?? null }));
             return;
           }
-          sendJson(
-            res,
-            json("error", undefined, { message: `unknown action: ${action ?? ""}` }),
-            400
-          );
+          sendJson(res, json("error", undefined, { message: `unknown action: ${action ?? ""}` }), 400);
           return;
         }
         if (method === "GET" && path === "/skills") {
@@ -3197,28 +2982,18 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
               : Object.fromEntries(new URLSearchParams(await readTextBody(request, req)))
           ) as Record<string, unknown>;
           const selectedProfileId = store.recommendModelProfile(
-            body.mode === "cloud" || body.mode === "hybrid" || body.mode === "local"
-              ? body.mode
-              : "any",
+            body.mode === "cloud" || body.mode === "hybrid" || body.mode === "local" ? body.mode : "any",
             {
-              risk:
-                body.risk === "low" || body.risk === "medium" || body.risk === "high"
-                  ? body.risk
-                  : undefined,
+              risk: body.risk === "low" || body.risk === "medium" || body.risk === "high" ? body.risk : undefined,
               depth:
-                body.depth === "shallow" || body.depth === "standard" || body.depth === "deep"
-                  ? body.depth
-                  : undefined,
+                body.depth === "shallow" || body.depth === "standard" || body.depth === "deep" ? body.depth : undefined,
               question: body.question ? String(body.question) : undefined,
               goal: body.goal ? String(body.goal) : undefined,
             }
           );
           const route = store.recordModelRoute({
             taskPattern: String(body.taskPattern ?? body.task ?? "ask"),
-            mode:
-              body.mode === "cloud" || body.mode === "hybrid" || body.mode === "local"
-                ? body.mode
-                : "any",
+            mode: body.mode === "cloud" || body.mode === "hybrid" || body.mode === "local" ? body.mode : "any",
             selectedProfileId,
             fallbackProfileId: body.fallbackProfileId ? String(body.fallbackProfileId) : null,
             reason: body.reason ? String(body.reason) : null,
@@ -3310,12 +3085,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
           const sessionId = url.searchParams.get("sessionId");
           sendJson(
             res,
-            json(
-              "ok",
-              sessionId
-                ? store.agents.listHandoffs(sessionId, 100)
-                : store.agents.listAllHandoffs(100)
-            )
+            json("ok", sessionId ? store.agents.listHandoffs(sessionId, 100) : store.agents.listAllHandoffs(100))
           );
           return;
         }
@@ -3389,23 +3159,14 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
         }
         if (method === "GET" && path === "/eval/outcomes") {
           const sessionId = url.searchParams.get("sessionId");
-          sendJson(
-            res,
-            json(
-              "ok",
-              sessionId ? store.evals.listOutcomes(sessionId) : store.evals.listAllOutcomes(100)
-            )
-          );
+          sendJson(res, json("ok", sessionId ? store.evals.listOutcomes(sessionId) : store.evals.listAllOutcomes(100)));
           return;
         }
 
         sendHtml(
           res,
           pageShell("Not Found", path, {
-            contentHtml: renderCard(
-              "Not Found",
-              `No route matched <code>${escapeHtml(path)}</code>.`
-            ),
+            contentHtml: renderCard("Not Found", `No route matched <code>${escapeHtml(path)}</code>.`),
             projects: store.listProjects(),
             projectCount: store.listProjects().length,
             sessionCount: store.listSessions(1000).length,
@@ -3456,26 +3217,12 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     });
   });
 
-  const inject = async (input: {
-    method: string;
-    url: string;
-    headers?: Record<string, string>;
-    body?: unknown;
-  }) => {
+  const inject = async (input: { method: string; url: string; headers?: Record<string, string>; body?: unknown }) => {
     const headers = {
       accept: "application/json",
-      ...(input.body === undefined
-        ? input.headers
-        : { "content-type": "application/json", ...input.headers }),
+      ...(input.body === undefined ? input.headers : { "content-type": "application/json", ...input.headers }),
     };
-    const method = input.method.toUpperCase() as
-      | "GET"
-      | "POST"
-      | "PUT"
-      | "PATCH"
-      | "DELETE"
-      | "OPTIONS"
-      | "HEAD";
+    const method = input.method.toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
     const response = await app.inject({
       method,
       url: input.url,

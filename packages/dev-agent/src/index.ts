@@ -15,10 +15,7 @@ import { existsSync } from "node:fs";
 import { type ExecutionEvent, parseDevRequest } from "../../agent-protocol/src/dev.ts";
 import type { ConversationRepo } from "../../db/src/repositories/conversation.ts";
 import type { DevRunsRepo, DevRunUpdateInput } from "../../db/src/repositories/dev-runs.ts";
-import type {
-  ExecutionRepo,
-  ExecutionWorkspaceRecord,
-} from "../../db/src/repositories/execution.ts";
+import type { ExecutionRepo, ExecutionWorkspaceRecord } from "../../db/src/repositories/execution.ts";
 import type { ModelsRepo } from "../../db/src/repositories/models.ts";
 import type { RetrievalRepo } from "../../db/src/repositories/retrieval.ts";
 import {
@@ -78,9 +75,7 @@ const DEFAULT_CHECKS = ["typecheck"] as const;
 
 function resolveChecks(input: RunDevWorkflowInput, projectConfig: ProjectChecksConfig): string[] {
   const requested =
-    input.request.checks && input.request.checks.length > 0
-      ? input.request.checks
-      : projectConfig.dev.defaultChecks;
+    input.request.checks && input.request.checks.length > 0 ? input.request.checks : projectConfig.dev.defaultChecks;
   if (requested.length === 0) return [...DEFAULT_CHECKS];
   return Array.from(new Set(requested));
 }
@@ -93,10 +88,8 @@ function highestRisk(levels: RiskLevel[]): RiskLevel {
 
 function nextCommandFor(runId: string, status: DevRunStatus, applied: boolean): string {
   if (applied) return `ai dev show ${runId}`;
-  if (status === "awaiting_approval")
-    return `ai dev diff ${runId}  # then: ai dev approve ${runId}`;
-  if (status === "completed" || status === "failed" || status === "cancelled")
-    return `ai dev show ${runId}`;
+  if (status === "awaiting_approval") return `ai dev diff ${runId}  # then: ai dev approve ${runId}`;
+  if (status === "completed" || status === "failed" || status === "cancelled") return `ai dev show ${runId}`;
   return `ai dev show ${runId}`;
 }
 
@@ -118,9 +111,7 @@ function buildDevPrompt(input: {
   riskHints: string[];
   rules: string[];
 }): string {
-  const context = input.retrieved
-    .map((entry) => `FILE: ${entry.path}\n\`\`\`\n${entry.content}\n\`\`\``)
-    .join("\n\n");
+  const context = input.retrieved.map((entry) => `FILE: ${entry.path}\n\`\`\`\n${entry.content}\n\`\`\``).join("\n\n");
   return [
     `You are the workbench dev editor. Plan the smallest possible set of edits for this goal.`,
     `Project: ${input.projectName}`,
@@ -166,15 +157,11 @@ function parseModelPlan(text: string): DevPlan | null {
     const obj = parsed;
     const summary = typeof obj.summary === "string" ? obj.summary : "";
     const edits = Array.isArray(obj.edits) ? (obj.edits as DevEdit[]) : [];
-    const checks = Array.isArray(obj.checks)
-      ? (obj.checks as string[]).filter((c) => typeof c === "string")
-      : [];
-    const risk =
-      obj.risk === "high" || obj.risk === "medium" || obj.risk === "low" ? obj.risk : "low";
+    const checks = Array.isArray(obj.checks) ? (obj.checks as string[]).filter((c) => typeof c === "string") : [];
+    const risk = obj.risk === "high" || obj.risk === "medium" || obj.risk === "low" ? obj.risk : "low";
     const plan: DevPlan = { summary, edits, checks, risk };
     if (typeof obj.notes === "string") plan.notes = obj.notes;
-    if (typeof obj.missingContextReason === "string")
-      plan.missingContextReason = obj.missingContextReason;
+    if (typeof obj.missingContextReason === "string") plan.missingContextReason = obj.missingContextReason;
     return plan;
   } catch {
     return null;
@@ -197,11 +184,7 @@ async function readProjectSources(
   return sources;
 }
 
-function pickFileHints(
-  queries: RetrievalQueryRecord[],
-  projectPath: string,
-  repo: RetrievalRepo
-): string[] {
+function pickFileHints(queries: RetrievalQueryRecord[], projectPath: string, repo: RetrievalRepo): string[] {
   const hints = new Set<string>();
   for (const query of queries) {
     const results = repo.listResults(query.id, 8) as Array<{ path: string }>;
@@ -245,9 +228,7 @@ function retrievalContextForQueries(
       if (
         !chunks.find(
           (existing) =>
-            existing.path === entry.path &&
-            existing.startLine === entry.startLine &&
-            existing.endLine === entry.endLine
+            existing.path === entry.path && existing.startLine === entry.startLine && existing.endLine === entry.endLine
         )
       ) {
         chunks.push({
@@ -455,10 +436,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
   const parsedRequest = parseDevRequest(input.request);
   const projectConfig = readProjectChecksConfig(input.project.config ?? null);
   const requestedChecks = resolveChecks(input, projectConfig);
-  const maxRepairs = Math.max(
-    0,
-    Math.min(input.request.maxRepairs ?? projectConfig.dev.maxRepairLoops, 5)
-  );
+  const maxRepairs = Math.max(0, Math.min(input.request.maxRepairs ?? projectConfig.dev.maxRepairLoops, 5));
 
   const run = input.runtime.devRuns.createRun({
     sessionId: input.sessionId,
@@ -470,10 +448,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     maxRepairs,
   });
 
-  const emit = makeEmitter(
-    { runId: run.id, sessionId: input.sessionId, projectId: input.project.id },
-    input.emit
-  );
+  const emit = makeEmitter({ runId: run.id, sessionId: input.sessionId, projectId: input.project.id }, input.emit);
   emit({ kind: "run.queued", message: "queued dev run" });
   emit({ kind: "run.started", message: "starting dev pipeline" });
 
@@ -517,10 +492,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     const queries = existingQueries.length > 0 ? existingQueries : [chosenQuery];
     const contextChunks = retrievalContextForQueries(queries, input.runtime.retrieval);
     const hints = pickFileHints(queries, input.project.path, input.runtime.retrieval);
-    const sources = await readProjectSources(
-      input,
-      hints.length > 0 ? hints : ["README.md", "package.json"]
-    );
+    const sources = await readProjectSources(input, hints.length > 0 ? hints : ["README.md", "package.json"]);
 
     // Stage 1: plan
     input.runtime.devRuns.updateRun(run.id, { status: "planning" });
@@ -787,9 +759,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     const allEditPaths = Array.from(
       new Set([
         ...editOutcomes.applied.map((edit) => edit.path),
-        ...editOutcomes.applied
-          .filter((edit) => edit.changeType === "create")
-          .map((edit) => edit.path),
+        ...editOutcomes.applied.filter((edit) => edit.changeType === "create").map((edit) => edit.path),
       ])
     );
     const diff = await collectDiffForRun({
@@ -821,8 +791,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         finishedAt: new Date().toISOString(),
         durationMs: Date.now() - new Date(startedAt).getTime(),
         errorMessage:
-          failedCheck.stderr.slice(0, 1000) ||
-          `${failedCheck.name} exited with ${failedCheck.exitCode ?? "n/a"}`,
+          failedCheck.stderr.slice(0, 1000) || `${failedCheck.name} exited with ${failedCheck.exitCode ?? "n/a"}`,
       });
       emit({ kind: "run.failed", level: "warn", message: failedCheck.name });
       return { run: updated, result: buildResult(updated, diff, false) };

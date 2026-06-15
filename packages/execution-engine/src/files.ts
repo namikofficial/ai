@@ -92,9 +92,7 @@ export function isIgnoredDirectory(relativePath: string): boolean {
 
 export function guardPath(input: PathGuardInput): PathGuardResult {
   const root = path.resolve(input.root);
-  const candidateRaw = path.isAbsolute(input.candidate)
-    ? input.candidate
-    : path.join(root, input.candidate);
+  const candidateRaw = path.isAbsolute(input.candidate) ? input.candidate : path.join(root, input.candidate);
   const normalized = path.resolve(candidateRaw);
   const relative = path.relative(root, normalized);
   const relativeSlash = normalizeSlashes(relative);

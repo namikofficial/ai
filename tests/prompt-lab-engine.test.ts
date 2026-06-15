@@ -33,10 +33,7 @@ function makeCompiledPrompt(messagesJson: string): CompiledPromptRecord {
   };
 }
 
-function makeProfile(
-  providerId: string,
-  overrides: Partial<ModelProfileRecord> = {}
-): ModelProfileRecord {
+function makeProfile(providerId: string, overrides: Partial<ModelProfileRecord> = {}): ModelProfileRecord {
   const ts = new Date().toISOString();
   return {
     id: "profile-1",
@@ -87,9 +84,7 @@ function makeStore(input: {
     getCompiledPrompt(id) {
       return (
         input.compiledPrompt ??
-        (id === "prompt-1"
-          ? makeCompiledPrompt(JSON.stringify([{ role: "user", content: "hello" }]))
-          : null)
+        (id === "prompt-1" ? makeCompiledPrompt(JSON.stringify([{ role: "user", content: "hello" }])) : null)
       );
     },
     createRun(run) {
@@ -125,9 +120,7 @@ function makeStore(input: {
       };
     },
     getProfile(id) {
-      return (
-        (input.profiles ?? [makeProfile("provider-1")]).find((profile) => profile.id === id) ?? null
-      );
+      return (input.profiles ?? [makeProfile("provider-1")]).find((profile) => profile.id === id) ?? null;
     },
     listProfiles() {
       return input.profiles ?? [makeProfile("provider-1")];
@@ -141,8 +134,7 @@ function makeStore(input: {
 
 function getServerPort(server: unknown): number {
   const address = (server as { address: () => { port: number } | string | null }).address();
-  if (!address || typeof address === "string")
-    throw new Error("expected server to listen on a TCP port");
+  if (!address || typeof address === "string") throw new Error("expected server to listen on a TCP port");
   return address.port;
 }
 

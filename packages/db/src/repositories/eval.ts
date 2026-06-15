@@ -172,35 +172,17 @@ export function createEvalRepo(db: DatabaseSync) {
     listCases(projectId?: string | null, limit = 50): EvalCaseRecord[] {
       const rows = projectId
         ? (db
-            .prepare(
-              "SELECT * FROM eval_cases WHERE project_id = ? ORDER BY created_at DESC LIMIT ?"
-            )
+            .prepare("SELECT * FROM eval_cases WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
             .all(projectId, limit) as EvalCaseRow[])
-        : (db
-            .prepare("SELECT * FROM eval_cases ORDER BY created_at DESC LIMIT ?")
-            .all(limit) as EvalCaseRow[]);
+        : (db.prepare("SELECT * FROM eval_cases ORDER BY created_at DESC LIMIT ?").all(limit) as EvalCaseRow[]);
       return rows.map(rowToCase);
     },
-    startRun(input: {
-      caseId: string;
-      sessionId?: string | null;
-      projectId?: string | null;
-    }): EvalRunRecord {
+    startRun(input: { caseId: string; sessionId?: string | null; projectId?: string | null }): EvalRunRecord {
       const id = newId("erun");
       const ts = now();
       db.prepare(
         `INSERT INTO eval_runs (id, case_id, session_id, project_id, started_at, finished_at, passed, score, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        id,
-        input.caseId,
-        input.sessionId ?? null,
-        input.projectId ?? null,
-        ts,
-        null,
-        0,
-        0,
-        null
-      );
+      ).run(id, input.caseId, input.sessionId ?? null, input.projectId ?? null, ts, null, 0, 0, null);
       return {
         id,
         caseId: input.caseId,
@@ -213,14 +195,15 @@ export function createEvalRepo(db: DatabaseSync) {
         notes: null,
       };
     },
-    completeRun(
-      id: string,
-      input: { passed: boolean; score: number; notes?: string | null }
-    ): EvalRunRecord {
+    completeRun(id: string, input: { passed: boolean; score: number; notes?: string | null }): EvalRunRecord {
       const ts = now();
-      db.prepare(
-        `UPDATE eval_runs SET finished_at = ?, passed = ?, score = ?, notes = ? WHERE id = ?`
-      ).run(ts, input.passed ? 1 : 0, input.score, input.notes ?? null, id);
+      db.prepare(`UPDATE eval_runs SET finished_at = ?, passed = ?, score = ?, notes = ? WHERE id = ?`).run(
+        ts,
+        input.passed ? 1 : 0,
+        input.score,
+        input.notes ?? null,
+        id
+      );
       const row = db.prepare("SELECT * FROM eval_runs WHERE id = ?").get(id) as EvalRunRow;
       return rowToRun(row);
     },
@@ -328,9 +311,7 @@ export function createEvalRepo(db: DatabaseSync) {
     },
     listOutcomes(sessionId: string, limit = 20): SessionOutcomeRecord[] {
       const rows = db
-        .prepare(
-          "SELECT * FROM session_outcomes WHERE session_id = ? ORDER BY created_at DESC LIMIT ?"
-        )
+        .prepare("SELECT * FROM session_outcomes WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
         .all(sessionId, limit) as SessionOutcomeRow[];
       return rows.map(rowToOutcome);
     },

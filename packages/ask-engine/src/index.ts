@@ -13,16 +13,8 @@ import {
   compilePrompt,
 } from "../../prompt-compiler/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
-import {
-  analyzeQuery,
-  classifyIntent,
-  rewriteQuery,
-  runRetrievalPipeline,
-} from "../../retrieval-engine/src/index.ts";
-import {
-  buildRetrievalPipelineInput,
-  type RetrievalPipelineSource,
-} from "../../retrieval-engine/src/pipeline.ts";
+import { analyzeQuery, classifyIntent, rewriteQuery, runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
+import { buildRetrievalPipelineInput, type RetrievalPipelineSource } from "../../retrieval-engine/src/pipeline.ts";
 import type {
   AskRequest,
   AskResponse,
@@ -59,9 +51,7 @@ export interface BuildAskQueryRewritePromptInput {
   analysis: unknown;
 }
 
-export function buildAskQueryRewritePrompt(
-  input: BuildAskQueryRewritePromptInput
-): CompilePromptInput {
+export function buildAskQueryRewritePrompt(input: BuildAskQueryRewritePromptInput): CompilePromptInput {
   return {
     mode: "query_rewrite",
     role: "query_rewrite",
@@ -97,9 +87,7 @@ export interface BuildAskRetrievalJudgePromptInput {
   droppedCount: number;
 }
 
-export function buildAskRetrievalJudgePrompt(
-  input: BuildAskRetrievalJudgePromptInput
-): CompilePromptInput {
+export function buildAskRetrievalJudgePrompt(input: BuildAskRetrievalJudgePromptInput): CompilePromptInput {
   return {
     mode: "retrieval_judge",
     role: "retrieval_judge",
@@ -398,10 +386,7 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
         reason: string;
       }>;
     }): { id: string; budgetTokens: number; usedTokens: number };
-    listPacksForSession(
-      sessionId: string,
-      limit?: number
-    ): Array<{ id: string; reason: string | null }>;
+    listPacksForSession(sessionId: string, limit?: number): Array<{ id: string; reason: string | null }>;
     listItems(packId: string): Array<{
       kind: string;
       rank: number;
@@ -482,16 +467,8 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
       notes?: string | null;
     }): void;
   };
-  invokeModel(
-    profileId: string,
-    request: ModelInvokeRequest,
-    options?: ModelInvokeOptions
-  ): Promise<ModelInvokeResult>;
-  enqueueJob(input: {
-    type: string;
-    payload: Record<string, unknown>;
-    availableAt?: string | null;
-  }): { id: string };
+  invokeModel(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
+  enqueueJob(input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }): { id: string };
   listEvents(sessionId?: string, limit?: number): EventEnvelope[];
 }
 
@@ -607,8 +584,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     risk: "low",
     input: { question: input.input.question, retrievalQueryId: retrievalQuery.id, intent, mode },
   });
-  const queryRewriteProfileId =
-    input.store.models.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
+  const queryRewriteProfileId = input.store.models.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
   const queryRewritePrompt = compilePrompt(
     buildAskQueryRewritePrompt({
       question: input.input.question,
@@ -624,8 +600,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     retrievalQueryId: retrievalQuery.id,
   });
   let queryRewriteCallId: string | null = null;
-  let queryRewriteParseStatus: "parsed" | "repaired" | "deterministic_fallback" =
-    "deterministic_fallback";
+  let queryRewriteParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
   let rewriteVariants = [rewritten.variant];
   let rewritePathHints = [...rewritten.pathHints];
   let rewriteSymbolHints = [...rewritten.symbolHints];
@@ -647,8 +622,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         role: "query_rewrite",
         messages: queryRewritePrompt.messages,
         temperature: 0,
-        maxOutputTokens:
-          input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
+        maxOutputTokens: input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
         metadata: {
           compiledPrompt: queryRewritePrompt,
           retrievalQueryId: retrievalQuery.id,
@@ -684,8 +658,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
             },
           ],
           temperature: 0,
-          maxOutputTokens:
-            input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
+          maxOutputTokens: input.store.models.getProfile(queryRewriteProfileId)?.maxOutputTokens ?? 512,
           metadata: {
             compiledPrompt: queryRewritePrompt,
             retrievalQueryId: retrievalQuery.id,
@@ -703,16 +676,12 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       }
     }
     if (parsedRewrite) {
-      const normalized = parsedRewrite.rewrites
-        .map((entry) => entry.trim())
-        .filter((entry) => entry.length > 0);
+      const normalized = parsedRewrite.rewrites.map((entry) => entry.trim()).filter((entry) => entry.length > 0);
       if (normalized.length > 0) {
         rewriteVariants = normalized.slice(0, 6);
       }
-      rewritePathHints =
-        parsedRewrite.pathHints.length > 0 ? parsedRewrite.pathHints : rewritePathHints;
-      rewriteSymbolHints =
-        parsedRewrite.symbolHints.length > 0 ? parsedRewrite.symbolHints : rewriteSymbolHints;
+      rewritePathHints = parsedRewrite.pathHints.length > 0 ? parsedRewrite.pathHints : rewritePathHints;
+      rewriteSymbolHints = parsedRewrite.symbolHints.length > 0 ? parsedRewrite.symbolHints : rewriteSymbolHints;
     }
     const selectedRewrite = rewriteVariants[0] ?? rewritten.variant;
     if (selectedRewrite !== rewritten.variant || selectedRewrite !== input.input.question.trim()) {
@@ -735,9 +704,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     queryRewriteCallId =
       input.store.models
         .listCalls(session.id, 200)
-        .filter(
-          (call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id
-        )
+        .filter((call) => call.role === "query_rewrite" && call.retrievalQueryId === retrievalQuery.id)
         .at(-1)?.id ?? null;
     input.store.appendEvent(
       createEvent(
@@ -815,8 +782,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   input.store.appendEvent(retrievalStarted);
 
   const ftsLimit = input.input.depth === "deep" ? 12 : input.input.depth === "shallow" ? 4 : 8;
-  const embeddingProfileId =
-    input.store.models.getProfile("embedding-local")?.id ?? "embedding-local";
+  const embeddingProfileId = input.store.models.getProfile("embedding-local")?.id ?? "embedding-local";
   const embeddingProfile = input.store.models.getProfile(embeddingProfileId);
   const queryEmbedding = await input.runtime.embed(
     embeddingProfileId,
@@ -953,10 +919,8 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   let resolvedMiss: { path: string; notes: string | null } | null = pipelineOutput.miss
     ? { path: pipelineOutput.miss.path, notes: pipelineOutput.miss.notes }
     : null;
-  let retrievalJudgeParseStatus: "parsed" | "repaired" | "deterministic_fallback" =
-    "deterministic_fallback";
-  const retrievalJudgeProfileId =
-    input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
+  let retrievalJudgeParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
+  const retrievalJudgeProfileId = input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
   const retrievalJudgePrompt = compilePrompt(
     buildAskRetrievalJudgePrompt({
       question: input.input.question,
@@ -1007,8 +971,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         role: "retrieval_judge",
         messages: retrievalJudgePrompt.messages,
         temperature: 0,
-        maxOutputTokens:
-          input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
+        maxOutputTokens: input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
         metadata: {
           compiledPrompt: retrievalJudgePrompt,
           retrievalQueryId: retrievalQuery.id,
@@ -1022,9 +985,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         retrievalQueryId: retrievalQuery.id,
       }
     );
-    const parseRetrievalJudgeResult = (
-      text: string
-    ): ReturnType<typeof parseRetrievalJudgeOutput> => {
+    const parseRetrievalJudgeResult = (text: string): ReturnType<typeof parseRetrievalJudgeOutput> => {
       try {
         return parseRetrievalJudgeOutput(parseJsonFragment(text));
       } catch {
@@ -1048,8 +1009,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
             },
           ],
           temperature: 0,
-          maxOutputTokens:
-            input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
+          maxOutputTokens: input.store.models.getProfile(retrievalJudgeProfileId)?.maxOutputTokens ?? 512,
           metadata: {
             compiledPrompt: retrievalJudgePrompt,
             retrievalQueryId: retrievalQuery.id,
@@ -1243,9 +1203,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         .listCalls(session.id, 200)
         .filter(
           (call) =>
-            call.role === "answer" &&
-            call.taskId === answerAgentRun.id &&
-            call.retrievalQueryId === retrievalQuery.id
+            call.role === "answer" && call.taskId === answerAgentRun.id && call.retrievalQueryId === retrievalQuery.id
         );
       answerCallId = matchingCalls.at(-1)?.id ?? null;
       answer = buildAnswerFromCompiledPrompt(compiledAnswer, result.text, citations, confidence);

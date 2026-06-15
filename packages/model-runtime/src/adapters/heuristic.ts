@@ -48,11 +48,8 @@ export class HeuristicAdapter implements ModelProviderAdapter {
   }
 
   async invoke(request: ModelInvokeRequest): Promise<ModelInvokeResult> {
-    const prompt = request.messages
-      .map((message) => `${message.role}: ${message.content}`)
-      .join("\n");
-    const lastUserMessage =
-      request.messages.filter((m) => m.role === "user").at(-1)?.content ?? prompt;
+    const prompt = request.messages.map((message) => `${message.role}: ${message.content}`).join("\n");
+    const lastUserMessage = request.messages.filter((m) => m.role === "user").at(-1)?.content ?? prompt;
     let text: string;
 
     switch (request.role) {

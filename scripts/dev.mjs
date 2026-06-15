@@ -17,10 +17,7 @@ function loadEnvFile(path) {
       }
       const key = trimmed.slice(0, index).trim();
       let value = trimmed.slice(index + 1).trim();
-      if (
-        (value.startsWith('"') && value.endsWith('"')) ||
-        (value.startsWith("'") && value.endsWith("'"))
-      ) {
+      if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
         value = value.slice(1, -1);
       }
       if (!(key in process.env)) {
@@ -66,9 +63,7 @@ async function main() {
 
   const apiPort = await pickFreePort(parsePort(process.env.AI_API_PORT, 4242));
   const webPort = await pickFreePort(
-    parsePort(process.env.AI_WEB_PORT, 3000) === apiPort
-      ? 0
-      : parsePort(process.env.AI_WEB_PORT, 3000)
+    parsePort(process.env.AI_WEB_PORT, 3000) === apiPort ? 0 : parsePort(process.env.AI_WEB_PORT, 3000)
   );
 
   process.env.AI_API_PORT = String(apiPort);

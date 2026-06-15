@@ -51,9 +51,7 @@ test("worker session.reflect creates memory candidates from conversation", async
     "candidate body should mention the user preference"
   );
 
-  const reflectedEvent = store
-    .listEvents(session.id, 50)
-    .find((e) => e.type === "session.reflected");
+  const reflectedEvent = store.listEvents(session.id, 50).find((e) => e.type === "session.reflected");
   assert.ok(reflectedEvent, "session.reflected event should be appended");
   const reflectedPayload = reflectedEvent!.payload as {
     compiledId?: string;
@@ -62,9 +60,7 @@ test("worker session.reflect creates memory candidates from conversation", async
   assert.ok(reflectedPayload.compiledId);
   assert.ok(reflectedPayload.modelCallId);
 
-  const reflectionCalls = store.models
-    .listCalls(session.id, 100)
-    .filter((call) => call.role === "reflection");
+  const reflectionCalls = store.models.listCalls(session.id, 100).filter((call) => call.role === "reflection");
   assert.equal(
     reflectionCalls.length,
     1,
@@ -270,11 +266,7 @@ test("worker session.reflect is atomic: a mid-flight failure rolls back all cand
 
   const failedJob = store.listJobs(10).find((entry) => entry.type === "session.reflect");
   assert.ok(failedJob, "session.reflect job should still be tracked");
-  assert.equal(
-    failedJob!.status,
-    "failed",
-    "job should be marked failed after the simulated mid-flight failure"
-  );
+  assert.equal(failedJob!.status, "failed", "job should be marked failed after the simulated mid-flight failure");
   const failurePayload = JSON.parse(failedJob!.payloadJson) as { error?: string };
   assert.ok(
     failurePayload.error?.includes("simulated mid-flight failure"),
@@ -291,11 +283,7 @@ test("worker session.reflect is atomic: a mid-flight failure rolls back all cand
     beforeSkills,
     "skill candidates should have been rolled back"
   );
-  assert.equal(
-    store.memory.listFacts(project.id, 100).length,
-    beforeFacts,
-    "facts should have been rolled back"
-  );
+  assert.equal(store.memory.listFacts(project.id, 100).length, beforeFacts, "facts should have been rolled back");
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -373,9 +361,7 @@ test("worker session.reflect parses valid model JSON and records parseStatus", a
 
   try {
     assert.equal(await processNextJob(store), true);
-    const reflectedEvent = store
-      .listEvents(session.id, 50)
-      .find((e) => e.type === "session.reflected");
+    const reflectedEvent = store.listEvents(session.id, 50).find((e) => e.type === "session.reflected");
     assert.ok(reflectedEvent);
     assert.equal((reflectedEvent!.payload as { parseStatus?: string }).parseStatus, "parsed");
     const candidates = store.memory.listCandidates("pending", project.id, 20);

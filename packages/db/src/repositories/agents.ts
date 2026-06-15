@@ -160,17 +160,12 @@ export function createAgentsRepo(db: DatabaseSync) {
     },
     updateRun(
       id: string,
-      patch: Partial<
-        Pick<AgentRunRecord, "status" | "output" | "error" | "finishedAt" | "durationMs">
-      >
+      patch: Partial<Pick<AgentRunRecord, "status" | "output" | "error" | "finishedAt" | "durationMs">>
     ): AgentRunRecord {
-      const current = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as
-        | AgentRunRow
-        | undefined;
+      const current = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as AgentRunRow | undefined;
       if (!current) throw new Error(`unknown agent run: ${id}`);
       const nextStatus = patch.status ?? (current.status as AgentStatus);
-      const nextOutput =
-        patch.output !== undefined ? JSON.stringify(patch.output) : current.output_json;
+      const nextOutput = patch.output !== undefined ? JSON.stringify(patch.output) : current.output_json;
       const nextError = patch.error !== undefined ? patch.error : current.error;
       const nextFinished = patch.finishedAt !== undefined ? patch.finishedAt : current.finished_at;
       const nextDuration = patch.durationMs !== undefined ? patch.durationMs : current.duration_ms;
@@ -182,9 +177,7 @@ export function createAgentsRepo(db: DatabaseSync) {
       return rowToRun(updated);
     },
     getRun(id: string): AgentRunRecord | null {
-      const row = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as
-        | AgentRunRow
-        | undefined;
+      const row = db.prepare("SELECT * FROM agent_runs WHERE id = ? LIMIT 1").get(id) as AgentRunRow | undefined;
       return row ? rowToRun(row) : null;
     },
     listRuns(sessionId: string, limit = 200): AgentRunRecord[] {
@@ -206,16 +199,7 @@ export function createAgentsRepo(db: DatabaseSync) {
         `INSERT INTO agent_messages (
           id, agent_run_id, direction, role, content, meta_json, ts, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      ).run(
-        id,
-        input.agentRunId,
-        input.direction,
-        input.role,
-        input.content,
-        JSON.stringify(input.meta ?? {}),
-        ts,
-        ts
-      );
+      ).run(id, input.agentRunId, input.direction, input.role, input.content, JSON.stringify(input.meta ?? {}), ts, ts);
       return {
         id,
         agentRunId: input.agentRunId,
@@ -270,9 +254,7 @@ export function createAgentsRepo(db: DatabaseSync) {
     },
     listHandoffs(sessionId: string, limit = 50): AgentHandoffRecord[] {
       const rows = db
-        .prepare(
-          "SELECT * FROM agent_handoffs WHERE session_id = ? ORDER BY created_at ASC LIMIT ?"
-        )
+        .prepare("SELECT * FROM agent_handoffs WHERE session_id = ? ORDER BY created_at ASC LIMIT ?")
         .all(sessionId, limit) as AgentHandoffRow[];
       return rows.map(rowToHandoff);
     },

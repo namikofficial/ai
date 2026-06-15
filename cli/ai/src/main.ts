@@ -122,9 +122,7 @@ function parseJson<T>(value: string | null): T | null {
 }
 
 function projectConfigCandidates(projectPath: string): string[] {
-  return [".ai-workbench.json", ".ai-workbench", ".aiconfig"].map((name) =>
-    join(projectPath, name)
-  );
+  return [".ai-workbench.json", ".ai-workbench", ".aiconfig"].map((name) => join(projectPath, name));
 }
 
 function validateProjectConfigFile(projectPath: string): {
@@ -151,11 +149,7 @@ function validateProjectConfigFile(projectPath: string): {
         value: parsed as Record<string, unknown>,
       };
     } catch (error) {
-      if (
-        error instanceof Error &&
-        "code" in error &&
-        (error as { code?: string }).code === "ENOENT"
-      ) {
+      if (error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT") {
         continue;
       }
       return {
@@ -276,8 +270,7 @@ async function run(): Promise<void> {
 
   if (command === "api") {
     const apiOnlyPort = Number(options.port ?? options["api-port"] ?? apiPort);
-    const apiOnlyUrl =
-      options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
+    const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
     const handle = await startWorkbenchServer({
       config: { apiUrl: apiOnlyUrl, webPort: apiOnlyPort, apiPort: apiOnlyPort },
     });
@@ -292,8 +285,7 @@ async function run(): Promise<void> {
   if (command === "web") {
     const webPort = Number(options.port ?? 3000);
     const apiOnlyPort = Number(options["api-port"] ?? 4242);
-    const apiOnlyUrl =
-      options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
+    const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
     const apiHandle = await startWorkbenchServer({
       config: { apiUrl: apiOnlyUrl, webPort: apiOnlyPort, apiPort: apiOnlyPort },
     });
@@ -573,11 +565,8 @@ async function run(): Promise<void> {
 
   if (command === "trace") {
     const subcommand =
-      positionals[0] === "timeline" || positionals[0] === "conversation"
-        ? positionals.shift()!
-        : "conversation";
-    const sessionId =
-      positionals[0] ?? (subcommand === "conversation" ? positionals.shift() : null);
+      positionals[0] === "timeline" || positionals[0] === "conversation" ? positionals.shift()! : "conversation";
+    const sessionId = positionals[0] ?? (subcommand === "conversation" ? positionals.shift() : null);
     if (!sessionId) {
       throw new Error("trace requires a session id");
     }
@@ -615,9 +604,7 @@ async function run(): Promise<void> {
       selectedPromptId: promptId,
       modelProfileId,
       mode:
-        options.mode === "local" || options.mode === "cloud" || options.mode === "hybrid"
-          ? options.mode
-          : undefined,
+        options.mode === "local" || options.mode === "cloud" || options.mode === "hybrid" ? options.mode : undefined,
       dryRun: options["dry-run"] === "true" || options.dryRun === "true",
     });
     printJson(result);
@@ -687,15 +674,11 @@ async function run(): Promise<void> {
   if (command === "retrieval") {
     const subcommand = positionals.shift();
     const project = options.project;
-    const query = subcommand
-      ? `${subcommand} ${positionals.join(" ")}`.trim()
-      : positionals.join(" ");
+    const query = subcommand ? `${subcommand} ${positionals.join(" ")}`.trim() : positionals.join(" ");
     if (!project) {
       throw new Error("retrieval requires --project <name>");
     }
-    printJson(
-      await client.searchRetrieval({ project, query, limit: Number(options.limit ?? 8) || 8 })
-    );
+    printJson(await client.searchRetrieval({ project, query, limit: Number(options.limit ?? 8) || 8 }));
     return;
   }
 
@@ -750,13 +733,9 @@ async function dispatchRetrievalExplain(input: {
     throw new Error("retrieval explain requires a query string");
   }
   const mode: RetrievalMode =
-    input.options.mode === "cloud" || input.options.mode === "hybrid"
-      ? input.options.mode
-      : "local";
+    input.options.mode === "cloud" || input.options.mode === "hybrid" ? input.options.mode : "local";
   const depth: RetrievalDepth =
-    input.options.depth === "shallow" || input.options.depth === "deep"
-      ? input.options.depth
-      : "standard";
+    input.options.depth === "shallow" || input.options.depth === "deep" ? input.options.depth : "standard";
   const limit = Number(input.options.limit ?? 8) || 8;
   await withDirectStore((store) => {
     const projectRecord = store.getProject(project);
@@ -826,8 +805,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
         printJson(entry);
         return;
       }
-      const reasonArg =
-        process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
+      const reasonArg = process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
       store.memory.reviewCandidate(id, "rejected", reasonArg);
       printJson({ id, status: "rejected" });
       return;
@@ -872,9 +850,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       return;
     }
     if (sub === "health") {
-      const health = await Promise.all(
-        store.models.listProviders().map((provider) => runtime.health(provider.id))
-      );
+      const health = await Promise.all(store.models.listProviders().map((provider) => runtime.health(provider.id)));
       const calls = store.models.listAllCalls(50);
       printJson({
         providers: store.models.listProviders(),
@@ -913,8 +889,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
         cloudEnabled: config.cloudEnabled,
         details: {
           risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
-          depth:
-            depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
+          depth: depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
           question,
           goal,
         },
@@ -934,8 +909,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
                   : "ask",
             {
               risk: risk === "low" || risk === "medium" || risk === "high" ? risk : undefined,
-              depth:
-                depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
+              depth: depth === "shallow" || depth === "standard" || depth === "deep" ? depth : undefined,
               question,
               goal,
             }
@@ -1141,8 +1115,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
         printJson(skill);
         return;
       }
-      const reasonArg =
-        process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
+      const reasonArg = process.argv.find((arg) => arg.startsWith("--reason="))?.split("=")[1] ?? "";
       store.skills.reviewCandidate(id, "rejected");
       printJson({ id, status: "rejected", reason: reasonArg });
       return;

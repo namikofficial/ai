@@ -10,12 +10,7 @@
 // bootstrap a fresh database. Tests and CLI tools that want to start from
 // the same defaults import `seedDefaultModelCatalog` from here.
 
-import type {
-  ModelProfileRecord,
-  ModelProviderKind,
-  ModelProviderRecord,
-  ModelRole,
-} from "../../shared/src/index.ts";
+import type { ModelProfileRecord, ModelProviderKind, ModelProviderRecord, ModelRole } from "../../shared/src/index.ts";
 
 export interface DefaultProviderInput {
   id: string;
@@ -36,20 +31,10 @@ export interface DefaultEnvOverrides {
 
 function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): DefaultEnvOverrides {
   return {
-    localBaseUrl:
-      env.AI_LOCAL_BASE_URL && env.AI_LOCAL_BASE_URL.length > 0 ? env.AI_LOCAL_BASE_URL : undefined,
-    modelFast:
-      env.AI_LOCAL_MODEL_FAST && env.AI_LOCAL_MODEL_FAST.length > 0
-        ? env.AI_LOCAL_MODEL_FAST
-        : undefined,
-    modelDeep:
-      env.AI_LOCAL_MODEL_DEEP && env.AI_LOCAL_MODEL_DEEP.length > 0
-        ? env.AI_LOCAL_MODEL_DEEP
-        : undefined,
-    modelCoder:
-      env.AI_LOCAL_MODEL_CODER && env.AI_LOCAL_MODEL_CODER.length > 0
-        ? env.AI_LOCAL_MODEL_CODER
-        : undefined,
+    localBaseUrl: env.AI_LOCAL_BASE_URL && env.AI_LOCAL_BASE_URL.length > 0 ? env.AI_LOCAL_BASE_URL : undefined,
+    modelFast: env.AI_LOCAL_MODEL_FAST && env.AI_LOCAL_MODEL_FAST.length > 0 ? env.AI_LOCAL_MODEL_FAST : undefined,
+    modelDeep: env.AI_LOCAL_MODEL_DEEP && env.AI_LOCAL_MODEL_DEEP.length > 0 ? env.AI_LOCAL_MODEL_DEEP : undefined,
+    modelCoder: env.AI_LOCAL_MODEL_CODER && env.AI_LOCAL_MODEL_CODER.length > 0 ? env.AI_LOCAL_MODEL_CODER : undefined,
     embeddingModel:
       env.AI_LOCAL_EMBEDDING_MODEL && env.AI_LOCAL_EMBEDDING_MODEL.length > 0
         ? env.AI_LOCAL_EMBEDDING_MODEL
@@ -104,9 +89,7 @@ export interface DefaultProfileInput {
   latencyScore?: number;
 }
 
-export function buildDefaultProfileRows(
-  env: NodeJS.ProcessEnv = process.env
-): DefaultProfileInput[] {
+export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): DefaultProfileInput[] {
   const overrides = readEnvOverrides(env);
   const fastModel = overrides.modelFast ?? DEFAULT_FAST_MODEL;
   const deepModel = overrides.modelDeep ?? DEFAULT_DEEP_MODEL;
@@ -288,17 +271,13 @@ export function buildDefaultProfileRows(
 
 export const DEFAULT_PROFILE_ROWS: DefaultProfileInput[] = buildDefaultProfileRows();
 
-export function buildDefaultProvider(
-  provider: DefaultProviderInput,
-  baseUrl?: string
-): ModelProviderRecord {
+export function buildDefaultProvider(provider: DefaultProviderInput, baseUrl?: string): ModelProviderRecord {
   const ts = new Date().toISOString();
   return {
     id: provider.id,
     kind: provider.kind,
     displayName: provider.displayName,
-    baseUrl:
-      provider.id === "provider_llamacpp_local" ? (baseUrl ?? provider.baseUrl) : provider.baseUrl,
+    baseUrl: provider.id === "provider_llamacpp_local" ? (baseUrl ?? provider.baseUrl) : provider.baseUrl,
     apiKeyEnv: provider.apiKeyEnv,
     enabled: provider.enabled,
     createdAt: ts,

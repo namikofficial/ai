@@ -35,10 +35,7 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
     }),
     getSession: (id) => sessions.get(id) ?? null,
     searchChunks: (projectId: string, query: string) => {
-      if (
-        query.includes("missing?") ||
-        (query === "" && messages[messages.length - 1]?.content === "missing?")
-      ) {
+      if (query.includes("missing?") || (query === "" && messages[messages.length - 1]?.content === "missing?")) {
         return [];
       }
       return [
@@ -281,9 +278,7 @@ test("runAskWorkflow: handles retrieval miss (no chunks)", async () => {
   const eventTypes = store.events.map((e) => e.type);
   assert.ok(eventTypes.includes("answer.fallback"));
   // Should NOT emit model.completed for answer if it skipped it
-  const answerCalls = store.events.filter(
-    (e) => e.type === "model.completed" && e.payload.role === "answer"
-  );
+  const answerCalls = store.events.filter((e) => e.type === "model.completed" && e.payload.role === "answer");
   assert.equal(answerCalls.length, 0);
 });
 
@@ -341,9 +336,7 @@ test("runAskWorkflow: handles answer model failure", async () => {
 
   const eventTypes = store.events.map((e) => e.type);
   assert.ok(eventTypes.includes("model.failed"));
-  const answerCompleted = store.events.filter(
-    (e) => e.type === "model.completed" && e.payload.role === "answer"
-  );
+  const answerCompleted = store.events.filter((e) => e.type === "model.completed" && e.payload.role === "answer");
   assert.equal(answerCompleted.length, 0);
 });
 

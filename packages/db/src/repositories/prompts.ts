@@ -82,9 +82,7 @@ export function createPromptRepo(db: DatabaseSync) {
     listCompiledPrompts(sessionId?: string | null, limit = 50): CompiledPromptRecord[] {
       const rows = sessionId
         ? (db
-            .prepare(
-              "SELECT * FROM compiled_prompts WHERE session_id = ? ORDER BY created_at DESC LIMIT ?"
-            )
+            .prepare("SELECT * FROM compiled_prompts WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
             .all(sessionId, limit) as CompiledPromptRow[])
         : (db
             .prepare("SELECT * FROM compiled_prompts ORDER BY created_at DESC LIMIT ?")

@@ -93,14 +93,8 @@ export function createCodeIntelligenceRepo(db: DatabaseSync) {
         .prepare("SELECT id FROM code_symbols WHERE project_id = ? AND file_id = ?")
         .all(projectId, fileId) as Array<{ id: string }>;
       const oldIds = existingIds.map((row) => row.id);
-      db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?").run(
-        projectId,
-        fileId
-      );
-      db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?").run(
-        projectId,
-        fileId
-      );
+      db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?").run(projectId, fileId);
+      db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?").run(projectId, fileId);
       if (oldIds.length > 0) {
         const placeholders = oldIds.map(() => "?").join(", ");
         db.prepare(
@@ -178,9 +172,7 @@ export function createCodeIntelligenceRepo(db: DatabaseSync) {
       const trimmed = query?.trim() ?? "";
       if (trimmed.length === 0) {
         const rows = db
-          .prepare(
-            "SELECT * FROM code_symbols WHERE project_id = ? ORDER BY path ASC, start_line ASC LIMIT ?"
-          )
+          .prepare("SELECT * FROM code_symbols WHERE project_id = ? ORDER BY path ASC, start_line ASC LIMIT ?")
           .all(projectId, limit) as CodeSymbolRow[];
         return rows.map(rowToSymbol);
       }
@@ -197,9 +189,7 @@ export function createCodeIntelligenceRepo(db: DatabaseSync) {
       return rows.map(rowToSymbol);
     },
     getSymbol(id: string): CodeSymbolRecord | null {
-      const row = db.prepare("SELECT * FROM code_symbols WHERE id = ? LIMIT 1").get(id) as
-        | CodeSymbolRow
-        | undefined;
+      const row = db.prepare("SELECT * FROM code_symbols WHERE id = ? LIMIT 1").get(id) as CodeSymbolRow | undefined;
       return row ? rowToSymbol(row) : null;
     },
     listSymbolChunks(symbolId: string): Array<{
@@ -239,9 +229,7 @@ export function createCodeIntelligenceRepo(db: DatabaseSync) {
     },
     listEdgesForSymbol(symbolId: string): CodeEdgeRecord[] {
       const rows = db
-        .prepare(
-          "SELECT * FROM code_edges WHERE from_symbol_id = ? OR to_symbol_id = ? ORDER BY created_at ASC"
-        )
+        .prepare("SELECT * FROM code_edges WHERE from_symbol_id = ? OR to_symbol_id = ? ORDER BY created_at ASC")
         .all(symbolId, symbolId) as CodeEdgeRow[];
       return rows.map(rowToEdge);
     },
@@ -252,15 +240,15 @@ export function createCodeIntelligenceRepo(db: DatabaseSync) {
       return rows.map(rowToEdge);
     },
     countSymbols(projectId: string): number {
-      const row = db
-        .prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?")
-        .get(projectId) as { count: number } | undefined;
+      const row = db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(projectId) as
+        | { count: number }
+        | undefined;
       return row?.count ?? 0;
     },
     countEdges(projectId: string): number {
-      const row = db
-        .prepare("SELECT COUNT(*) as count FROM code_edges WHERE project_id = ?")
-        .get(projectId) as { count: number } | undefined;
+      const row = db.prepare("SELECT COUNT(*) as count FROM code_edges WHERE project_id = ?").get(projectId) as
+        | { count: number }
+        | undefined;
       return row?.count ?? 0;
     },
   };

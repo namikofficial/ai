@@ -372,8 +372,5 @@ test("retrieval-pipeline: pathBoosts re-rank chunks when feedback is sparse", ()
   assert.ok(alphaBoosted && betaBoosted);
   const alphaScore = alphaBoosted.finalScore;
   const betaScore = betaBoosted.finalScore;
-  assert.ok(
-    alphaScore > betaScore,
-    `alpha (${alphaScore}) should outrank beta (${betaScore}) after pathBoosts`
-  );
+  assert.ok(alphaScore > betaScore, `alpha (${alphaScore}) should outrank beta (${betaScore}) after pathBoosts`);
 });

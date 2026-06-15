@@ -141,8 +141,7 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "orchestrator",
     role: "session-coordinator",
-    description:
-      "Coordinates session lifecycle, intent classification, sub-agent dispatch, and reflection.",
+    description: "Coordinates session lifecycle, intent classification, sub-agent dispatch, and reflection.",
     allowedTools: ["session.emit", "model.invoke", "task.update", "memory.read", "memory.write"],
     requiredEvents: ["session.created", "session.started", "session.completed", "session.failed"],
     modelRole: "planner",
@@ -166,8 +165,7 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "query_rewriter_agent",
     role: "query-rewriter",
-    description:
-      "Generates typo-tolerant rewrites, path/symbol hints, and intent-conditioned variants.",
+    description: "Generates typo-tolerant rewrites, path/symbol hints, and intent-conditioned variants.",
     allowedTools: ["session.emit", "model.invoke", "memory.read"],
     requiredEvents: ["agent.started", "agent.completed"],
     modelRole: "query_rewrite",
@@ -180,13 +178,7 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
     id: "retrieval_agent",
     role: "retrieval-pipeline",
     description: "Runs hybrid retrieval, rerank, compression, and confidence scoring.",
-    allowedTools: [
-      "retrieval.search",
-      "retrieval.rerank",
-      "session.emit",
-      "memory.read",
-      "facts.read",
-    ],
+    allowedTools: ["retrieval.search", "retrieval.rerank", "session.emit", "memory.read", "facts.read"],
     requiredEvents: ["retrieval.started", "retrieval.completed", "retrieval.low_confidence"],
     modelRole: "retrieval_judge",
     risk: "low",
@@ -197,8 +189,7 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "context_agent",
     role: "context-packer",
-    description:
-      "Builds a context pack from previous messages, memory, facts, retrieval results, and budget.",
+    description: "Builds a context pack from previous messages, memory, facts, retrieval results, and budget.",
     allowedTools: ["context.build", "session.emit", "memory.read", "facts.read"],
     requiredEvents: ["agent.started", "agent.completed"],
     modelRole: "summarizer",
@@ -234,8 +225,7 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "handoff_agent",
     role: "target-handoff",
-    description:
-      "Generates a target-specific handoff prompt with context pack, files, and stop conditions.",
+    description: "Generates a target-specific handoff prompt with context pack, files, and stop conditions.",
     allowedTools: ["context.build", "session.emit", "model.invoke", "task.update"],
     requiredEvents: ["handoff.created"],
     modelRole: "coder_handoff",
@@ -271,16 +261,8 @@ const BASE_DESCRIPTORS: AgentDescriptor[] = [
   {
     id: "learning_agent",
     role: "learning-loop",
-    description:
-      "Creates memory candidates, accepts/rejects memory, and proposes skill candidates.",
-    allowedTools: [
-      "memory.read",
-      "memory.write",
-      "facts.read",
-      "facts.write",
-      "skill.suggest",
-      "session.emit",
-    ],
+    description: "Creates memory candidates, accepts/rejects memory, and proposes skill candidates.",
+    allowedTools: ["memory.read", "memory.write", "facts.read", "facts.write", "skill.suggest", "session.emit"],
     requiredEvents: ["lesson.created"],
     modelRole: "reflection",
     risk: "low",
@@ -469,9 +451,7 @@ export class AgentExecutor {
       risk: descriptor.risk,
       startedAt,
       finishedAt,
-      durationMs: finishedAt
-        ? new Date(finishedAt).getTime() - new Date(startedAt).getTime()
-        : null,
+      durationMs: finishedAt ? new Date(finishedAt).getTime() - new Date(startedAt).getTime() : null,
       error,
       createdAt: startedAt,
       updatedAt: finishedAt ?? startedAt,
@@ -527,8 +507,7 @@ export class AgentExecutor {
       }
     }
     const profileId =
-      input.profileId ??
-      (descriptor.modelRole ? this.findProfileIdForRole(descriptor.modelRole) : null);
+      input.profileId ?? (descriptor.modelRole ? this.findProfileIdForRole(descriptor.modelRole) : null);
     if (!profileId) {
       const run = this.createRun(
         { ...input, id: runId },
@@ -638,9 +617,7 @@ export class AgentExecutor {
   }
 
   private findProfileIdForRole(role: ModelRole): string | null {
-    const profiles = this.runtime
-      .listProfiles()
-      .filter((profile) => profile.role === role && profile.enabled);
+    const profiles = this.runtime.listProfiles().filter((profile) => profile.role === role && profile.enabled);
     if (profiles.length === 0) return null;
     return profiles[0].id;
   }
@@ -691,10 +668,7 @@ export class AgentExecutor {
   ): Promise<ModelInvokeResult> {
     const agentId = this.id;
     return await new Promise<ModelInvokeResult>((resolve, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`agent timeout after ${timeoutMs}ms`)),
-        timeoutMs
-      );
+      const timer = setTimeout(() => reject(new Error(`agent timeout after ${timeoutMs}ms`)), timeoutMs);
       this.hooks
         .invokeModel(profileId, request, {
           sessionId: input.sessionId ?? null,

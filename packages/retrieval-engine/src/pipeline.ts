@@ -25,11 +25,7 @@ export interface RetrievalPipelineSource {
     listPathBoosts(projectId: string, limit: number): Array<{ path: string; weight: number }>;
   };
   memory: {
-    listEntries(
-      projectId?: string | null,
-      scope?: MemoryScope,
-      limit?: number
-    ): MemoryEntryRecord[];
+    listEntries(projectId?: string | null, scope?: MemoryScope, limit?: number): MemoryEntryRecord[];
     listFacts(
       projectId?: string | null,
       limit?: number

@@ -42,9 +42,7 @@ declare module "node:os" {
 }
 
 declare module "node:util" {
-  export function promisify<T>(
-    fn: (callback: (err?: Error | null, result?: T) => void) => void
-  ): () => Promise<T>;
+  export function promisify<T>(fn: (callback: (err?: Error | null, result?: T) => void) => void): () => Promise<T>;
   export function promisify<T, A1>(
     fn: (arg1: A1, callback: (err?: Error | null, result?: T) => void) => void
   ): (arg1: A1) => Promise<T>;
@@ -68,29 +66,20 @@ declare module "node:fs/promises" {
     destination: string,
     options?: { recursive?: boolean; force?: boolean }
   ): Promise<void>;
-  export function mkdir(
-    path: string,
-    options?: { recursive?: boolean }
-  ): Promise<string | undefined>;
+  export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>;
   export function mkdtemp(prefix: string): Promise<string>;
   export function readFile(
     path: string | URL,
     options?: { encoding?: BufferEncoding } | BufferEncoding
   ): Promise<string>;
-  export function readdir(
-    path: string,
-    options?: { withFileTypes?: boolean }
-  ): Promise<string[] | Dirent[]>;
+  export function readdir(path: string, options?: { withFileTypes?: boolean }): Promise<string[] | Dirent[]>;
   export function stat(path: string): Promise<{
     isDirectory(): boolean;
     isFile(): boolean;
     size: number;
     mtimeMs: number;
   }>;
-  export function rm(
-    path: string,
-    options?: { recursive?: boolean; force?: boolean }
-  ): Promise<void>;
+  export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
   export function unlink(path: string): Promise<void>;
   export function writeFile(
     path: string,
@@ -122,15 +111,8 @@ declare module "node:test" {
 }
 
 declare module "node:fs" {
-  export function readFileSync(
-    path: string,
-    options?: { encoding?: BufferEncoding } | BufferEncoding
-  ): string;
-  export function writeFileSync(
-    path: string,
-    data: string | Uint8Array,
-    options?: { encoding?: string }
-  ): void;
+  export function readFileSync(path: string, options?: { encoding?: BufferEncoding } | BufferEncoding): string;
+  export function writeFileSync(path: string, data: string | Uint8Array, options?: { encoding?: string }): void;
   export function mkdirSync(path: string, options?: { recursive?: boolean }): void;
   export function rmSync(path: string, options?: { recursive?: boolean; force?: boolean }): void;
   export function existsSync(path: string): boolean;

@@ -22,13 +22,7 @@ import {
 } from "../../retrieval-engine/src/index.ts";
 import { createId } from "../../shared/src/index.ts";
 import { chunkContent, hashContent, isFileSizeIndexable } from "./chunk.ts";
-import {
-  inferLanguage,
-  isProbablyTextFile,
-  isReadableFile,
-  safeReadText,
-  walkFiles,
-} from "./walk.ts";
+import { inferLanguage, isProbablyTextFile, isReadableFile, safeReadText, walkFiles } from "./walk.ts";
 
 export interface IndexFileResult {
   path: string;
@@ -73,9 +67,7 @@ export interface IndexProjectOptions {
   language?: string | null;
   onWarning?: (warning: { kind: string; path: string; detail: string }) => void;
   onProgress?: (progress: { filesIndexed: number; chunksIndexed: number }) => void;
-  codeIntelligenceExtractor?: (
-    input: Parameters<typeof extractCodeIntelligence>[0]
-  ) => CodeIntelligenceResult;
+  codeIntelligenceExtractor?: (input: Parameters<typeof extractCodeIntelligence>[0]) => CodeIntelligenceResult;
 }
 
 interface ExistingFileRow {
@@ -94,16 +86,10 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-function readExistingFile(
-  db: DatabaseSync,
-  projectId: string,
-  path: string
-): ExistingFileRow | null {
+function readExistingFile(db: DatabaseSync, projectId: string, path: string): ExistingFileRow | null {
   try {
     const row = db
-      .prepare(
-        "SELECT id, path, content_hash, is_indexed FROM files WHERE project_id = ? AND path = ? LIMIT 1"
-      )
+      .prepare("SELECT id, path, content_hash, is_indexed FROM files WHERE project_id = ? AND path = ? LIMIT 1")
       .get(projectId, path) as ExistingFileRow | undefined;
     return row ?? null;
   } catch {
@@ -111,11 +97,7 @@ function readExistingFile(
   }
 }
 
-function readExistingDocument(
-  db: DatabaseSync,
-  projectId: string,
-  path: string
-): ExistingDocumentRow | null {
+function readExistingDocument(db: DatabaseSync, projectId: string, path: string): ExistingDocumentRow | null {
   try {
     const row = db
       .prepare("SELECT id, file_id FROM rag_documents WHERE project_id = ? AND path = ? LIMIT 1")
@@ -154,8 +136,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     const ignore = projectConfig?.ignore ?? [];
     const include = projectConfig?.include ?? [];
     const ignored = ignore.some((pattern) => globMatch(normalized, pattern));
-    const included =
-      include.length === 0 || include.some((pattern) => globMatch(normalized, pattern));
+    const included = include.length === 0 || include.some((pattern) => globMatch(normalized, pattern));
     return !ignored && included;
   });
   const ts = nowIso();
@@ -184,9 +165,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       updated_at = excluded.updated_at`
   );
   const deleteChunks = db.prepare("DELETE FROM rag_chunks WHERE document_id = ?");
-  const deleteSymbolLinks = db.prepare(
-    "DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?"
-  );
+  const deleteSymbolLinks = db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?");
   const deleteSymbols = db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?");
   const insertSymbol = db.prepare(
     `INSERT INTO code_symbols (
@@ -255,15 +234,13 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       ? Math.max(20, Math.floor(maxChunkTokens / 10))
       : Math.max(24, Math.floor(maxChunkTokens / 12));
     const chunks = chunkContent(content, linesPerChunk);
-    const chunkRows: Array<CodeChunkSpan & { id: string; content: string }> = chunks.map(
-      (chunk) => ({
-        id: createId("chunk"),
-        startLine: chunk.startLine,
-        endLine: chunk.endLine,
-        tokenCount: chunk.tokenCount,
-        content: chunk.content,
-      })
-    );
+    const chunkRows: Array<CodeChunkSpan & { id: string; content: string }> = chunks.map((chunk) => ({
+      id: createId("chunk"),
+      startLine: chunk.startLine,
+      endLine: chunk.endLine,
+      tokenCount: chunk.tokenCount,
+      content: chunk.content,
+    }));
     const existingSymbolRows =
       codeIntelligenceEnabled && previous
         ? (db
@@ -318,30 +295,8 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
         };
     deleteChunks.run(documentId);
 
-    upsertFile.run(
-      fileId,
-      projectId,
-      relativePath,
-      language,
-      byteLength,
-      contentHash,
-      1,
-      0,
-      ts,
-      ts,
-      ts
-    );
-    upsertDocument.run(
-      documentId,
-      projectId,
-      fileId,
-      relativePath,
-      contentHash,
-      chunks.length,
-      ts,
-      ts,
-      ts
-    );
+    upsertFile.run(fileId, projectId, relativePath, language, byteLength, contentHash, 1, 0, ts, ts, ts);
+    upsertDocument.run(documentId, projectId, fileId, relativePath, contentHash, chunks.length, ts, ts, ts);
 
     if (code) {
       for (const symbol of code.symbols) {
@@ -391,9 +346,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     }
 
     chunkRows.forEach((chunk, index) => {
-      const chunkHash = hashContent(
-        `${relativePath}\n${chunk.content}\n${chunk.startLine}\n${chunk.endLine}`
-      );
+      const chunkHash = hashContent(`${relativePath}\n${chunk.content}\n${chunk.startLine}\n${chunk.endLine}`);
       const vector = embeddingResult.embeddings[index] ?? [];
       const symbolMetadata = chunkLinks.metadataByChunkId.get(chunk.id) ?? [];
       insertChunk.run(
@@ -425,11 +378,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       );
       if (code) {
         for (const symbol of code.symbols) {
-          if (
-            chunkLinks.links.some(
-              (link) => link.symbolId === symbol.id && link.chunkId === chunk.id
-            )
-          ) {
+          if (chunkLinks.links.some((link) => link.symbolId === symbol.id && link.chunkId === chunk.id)) {
             const overlaps = chunkLinks.links.filter(
               (link) => link.symbolId === symbol.id && link.chunkId === chunk.id
             );
@@ -473,17 +422,15 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     onProgress?.({ filesIndexed, chunksIndexed });
   }
 
-  const staleFileRows = db
-    .prepare("SELECT id, path FROM files WHERE project_id = ?")
-    .all(projectId) as Array<{ id: string; path: string }>;
+  const staleFileRows = db.prepare("SELECT id, path FROM files WHERE project_id = ?").all(projectId) as Array<{
+    id: string;
+    path: string;
+  }>;
   const staleFiles = staleFileRows.filter((row) => !seenPaths.has(row.path));
   if (staleFiles.length > 0) {
     const deleteSearchRows = (path: string) => {
       try {
-        db.prepare("DELETE FROM rag_chunks_fts WHERE project_id = ? AND path = ?").run(
-          projectId,
-          path
-        );
+        db.prepare("DELETE FROM rag_chunks_fts WHERE project_id = ? AND path = ?").run(projectId, path);
       } catch {
         // FTS is optional.
       }
@@ -498,14 +445,8 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       const symbolIds = symbolRows.map((row) => row.id);
       if (symbolIds.length > 0) {
         const placeholders = symbolIds.map(() => "?").join(", ");
-        db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?").run(
-          projectId,
-          staleFile.id
-        );
-        db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?").run(
-          projectId,
-          staleFile.id
-        );
+        db.prepare("DELETE FROM code_symbol_chunks WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
+        db.prepare("DELETE FROM code_symbols WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
         db.prepare(
           `DELETE FROM code_edges
            WHERE project_id = ?
@@ -515,10 +456,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       for (const documentRow of documentRows) {
         db.prepare("DELETE FROM rag_chunks WHERE document_id = ?").run(documentRow.id);
       }
-      db.prepare("DELETE FROM rag_documents WHERE project_id = ? AND file_id = ?").run(
-        projectId,
-        staleFile.id
-      );
+      db.prepare("DELETE FROM rag_documents WHERE project_id = ? AND file_id = ?").run(projectId, staleFile.id);
       db.prepare("DELETE FROM files WHERE project_id = ? AND id = ?").run(projectId, staleFile.id);
       deleteSearchRows(staleFile.path);
     }
@@ -527,9 +465,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
   try {
     if (codeIntelligenceEnabled) {
       const importRows = db
-        .prepare(
-          "SELECT id, path, metadata_json FROM code_symbols WHERE project_id = ? AND kind = 'import'"
-        )
+        .prepare("SELECT id, path, metadata_json FROM code_symbols WHERE project_id = ? AND kind = 'import'")
         .all(projectId) as Array<Record<string, unknown>>;
       const targetRows = db
         .prepare(
@@ -538,10 +474,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
         .all(projectId) as Array<Record<string, unknown>>;
       for (const importRow of importRows) {
         const sourcePath = String(importRow.path);
-        const metadata = JSON.parse(String(importRow.metadata_json || "{}")) as Record<
-          string,
-          unknown
-        >;
+        const metadata = JSON.parse(String(importRow.metadata_json || "{}")) as Record<string, unknown>;
         const modulePath = String(metadata.modulePath ?? metadata.imported ?? "");
         const resolvedPath = resolveLocalReference(sourcePath, modulePath);
         if (!resolvedPath) continue;
@@ -553,9 +486,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
         const bestTarget =
           importedNames.length > 0
             ? (targetForPath.find((row) => importedNames.includes(String(row.name))) ??
-              targetForPath.find((row) =>
-                importedNames.some((name) => String(row.qualified_name).includes(name))
-              ) ??
+              targetForPath.find((row) => importedNames.some((name) => String(row.qualified_name).includes(name))) ??
               targetForPath[0])
             : targetForPath[0];
         if (!bestTarget) continue;
@@ -606,9 +537,7 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
       doc: row.doc == null ? null : String(row.doc),
       metadata: JSON.parse(String(row.metadata_json || "{}")) as Record<string, unknown>,
     }));
-    const paths = db
-      .prepare("SELECT path FROM files WHERE project_id = ?")
-      .all(projectId) as Array<{ path: string }>;
+    const paths = db.prepare("SELECT path FROM files WHERE project_id = ?").all(projectId) as Array<{ path: string }>;
     const graph = buildProjectContextGraph({
       projectId,
       symbols,
@@ -632,8 +561,11 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     }
   }
 
-  db.prepare(
-    "UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?"
-  ).run("ready", ts, ts, projectId);
+  db.prepare("UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?").run(
+    "ready",
+    ts,
+    ts,
+    projectId
+  );
   return { filesIndexed, chunksIndexed, qdrantFailed, reusedFiles, changedFiles };
 }

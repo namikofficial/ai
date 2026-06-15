@@ -228,9 +228,7 @@ export function createDevRunsRepo(db: DatabaseSync) {
       return rowToRun(row);
     },
     updateRun(runId: string, input: DevRunUpdateInput): DevRun {
-      const existing = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(runId) as
-        | DevRunRow
-        | undefined;
+      const existing = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(runId) as DevRunRow | undefined;
       if (!existing) throw new Error(`dev run not found: ${runId}`);
       const current = rowToRun(existing);
       const merged: DevRun = {
@@ -250,15 +248,11 @@ export function createDevRunsRepo(db: DatabaseSync) {
         input.appliedFiles !== undefined
           ? JSON.stringify(input.appliedFiles)
           : asString(existing.applied_files_json ?? "[]");
-      const appliedAt =
-        input.appliedAt !== undefined ? input.appliedAt : asStringOrNull(existing.applied_at);
+      const appliedAt = input.appliedAt !== undefined ? input.appliedAt : asStringOrNull(existing.applied_at);
       const workspaceId = merged.workspace?.id ?? asStringOrNull(existing.workspace_id) ?? null;
-      const workspaceStrategy =
-        merged.workspace?.strategy ?? asStringOrNull(existing.workspace_strategy) ?? null;
-      const workspacePath =
-        merged.workspace?.path ?? asStringOrNull(existing.workspace_path) ?? null;
-      const workspaceBranch =
-        merged.workspace?.branch ?? asStringOrNull(existing.workspace_branch) ?? null;
+      const workspaceStrategy = merged.workspace?.strategy ?? asStringOrNull(existing.workspace_strategy) ?? null;
+      const workspacePath = merged.workspace?.path ?? asStringOrNull(existing.workspace_path) ?? null;
+      const workspaceBranch = merged.workspace?.branch ?? asStringOrNull(existing.workspace_branch) ?? null;
       db.prepare(
         `UPDATE dev_runs
            SET plan_json = ?, status = ?, risk = ?,
@@ -282,14 +276,8 @@ export function createDevRunsRepo(db: DatabaseSync) {
         input.diffSummary ?? asString(existing.diff_summary ?? ""),
         input.diffText ?? asString(existing.diff_text ?? ""),
         input.summary ?? asString(existing.summary ?? ""),
-        JSON.stringify(
-          input.filesEdited ??
-            safeParseJsonArray<string>(asString(existing.files_edited_json ?? "[]"))
-        ),
-        JSON.stringify(
-          input.filesCreated ??
-            safeParseJsonArray<string>(asString(existing.files_created_json ?? "[]"))
-        ),
+        JSON.stringify(input.filesEdited ?? safeParseJsonArray<string>(asString(existing.files_edited_json ?? "[]"))),
+        JSON.stringify(input.filesCreated ?? safeParseJsonArray<string>(asString(existing.files_created_json ?? "[]"))),
         merged.errorMessage,
         appliedAt,
         appliedFiles,
@@ -350,9 +338,7 @@ export function createDevRunsRepo(db: DatabaseSync) {
       return rows.map(rowToEditRecord);
     },
     getRun(id: string): DevRun | null {
-      const row = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(id) as
-        | DevRunRow
-        | undefined;
+      const row = db.prepare("SELECT * FROM dev_runs WHERE id = ? LIMIT 1").get(id) as DevRunRow | undefined;
       return row ? rowToRun(row) : null;
     },
     listRuns(input?: { projectId?: string; sessionId?: string; limit?: number }): DevRun[] {
@@ -360,9 +346,7 @@ export function createDevRunsRepo(db: DatabaseSync) {
       let rows: DevRunRow[];
       if (input?.projectId && input.sessionId) {
         rows = db
-          .prepare(
-            "SELECT * FROM dev_runs WHERE project_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT ?"
-          )
+          .prepare("SELECT * FROM dev_runs WHERE project_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT ?")
           .all(input.projectId, input.sessionId, limit) as DevRunRow[];
       } else if (input?.projectId) {
         rows = db
@@ -373,9 +357,7 @@ export function createDevRunsRepo(db: DatabaseSync) {
           .prepare("SELECT * FROM dev_runs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
           .all(input.sessionId, limit) as DevRunRow[];
       } else {
-        rows = db
-          .prepare("SELECT * FROM dev_runs ORDER BY created_at DESC LIMIT ?")
-          .all(limit) as DevRunRow[];
+        rows = db.prepare("SELECT * FROM dev_runs ORDER BY created_at DESC LIMIT ?").all(limit) as DevRunRow[];
       }
       return rows.map(rowToRun);
     },

@@ -21,16 +21,7 @@ import type {
 } from "../../shared/src/index.ts";
 
 export interface ReflectionEvidence {
-  kind:
-    | "session"
-    | "query"
-    | "context"
-    | "conversation"
-    | "agent_run"
-    | "model_call"
-    | "check"
-    | "review"
-    | "outcome";
+  kind: "session" | "query" | "context" | "conversation" | "agent_run" | "model_call" | "check" | "review" | "outcome";
   refId: string;
   excerpt: string;
   meta?: Record<string, unknown>;
@@ -130,23 +121,12 @@ function buildEvidence(parts: Array<ReflectionEvidence | null>): ReflectionEvide
   return parts.filter((entry): entry is ReflectionEvidence => entry != null);
 }
 
-function extractUserPreference(
-  conversation: ConversationMessageRecord[]
-): MemoryCandidateProposal | null {
+function extractUserPreference(conversation: ConversationMessageRecord[]): MemoryCandidateProposal | null {
   const userMessages = conversation.filter((entry) => entry.role === "user");
   if (userMessages.length === 0) return null;
   const last = userMessages.at(-1)!;
   const lowered = last.content.toLowerCase();
-  const preferenceTokens = [
-    "prefer",
-    "like",
-    "always",
-    "never",
-    "use ",
-    "avoid",
-    "i want",
-    "we use",
-  ];
+  const preferenceTokens = ["prefer", "like", "always", "never", "use ", "avoid", "i want", "we use"];
   if (!preferenceTokens.some((token) => lowered.includes(token))) return null;
   return {
     kind: "user_preference",
@@ -165,9 +145,7 @@ function extractUserPreference(
   };
 }
 
-function extractStyleRule(
-  conversation: ConversationMessageRecord[]
-): MemoryCandidateProposal | null {
+function extractStyleRule(conversation: ConversationMessageRecord[]): MemoryCandidateProposal | null {
   const assistant = conversation.find(
     (entry) => entry.role === "assistant" && entry.content.toLowerCase().includes("always")
   );
@@ -210,9 +188,7 @@ function extractAntiPattern(
   answerEvaluations: AnswerEvaluationRecord[],
   session: SessionRecord
 ): MemoryCandidateProposal | null {
-  const weak = answerEvaluations.find(
-    (entry) => entry.groundedness < 0.4 || entry.contradiction > 0.5
-  );
+  const weak = answerEvaluations.find((entry) => entry.groundedness < 0.4 || entry.contradiction > 0.5);
   if (!weak) return null;
   return {
     kind: "anti_pattern",
@@ -269,9 +245,7 @@ function extractArchitecturalFact(input: ReflectInput): FactProposal | null {
         excerpt: `grounded answers in session: ${acceptedAnswers.length}`,
       },
     ],
-    evidence: [
-      { kind: "review", refId: input.session.id, excerpt: truncate(top.notes ?? "grounded", 240) },
-    ],
+    evidence: [{ kind: "review", refId: input.session.id, excerpt: truncate(top.notes ?? "grounded", 240) }],
   };
 }
 
@@ -290,9 +264,7 @@ function extractDependencyFact(input: ReflectInput): FactProposal | null {
     kind: "usage",
     confidence: 0.5,
     sourceKind: "model_call",
-    sources: [
-      { kind: "session", ref: input.session.id, excerpt: `${top[0]} used ${top[1]} times` },
-    ],
+    sources: [{ kind: "session", ref: input.session.id, excerpt: `${top[0]} used ${top[1]} times` }],
     evidence: [{ kind: "model_call", refId: top[0], excerpt: `successful invocations: ${top[1]}` }],
   };
 }
@@ -337,9 +309,7 @@ function detectStaleFacts(existing: FactRecord[], ttlDays: number): StaleFactPro
 }
 
 function proposeSkillFromChecks(input: ReflectInput): SkillCandidateProposal | null {
-  const successfulChecks = input.checks.filter(
-    (entry) => entry.status === "completed" && entry.command
-  );
+  const successfulChecks = input.checks.filter((entry) => entry.status === "completed" && entry.command);
   if (successfulChecks.length < 1) return null;
   const distinct = new Map<string, { command: string; count: number }>();
   for (const check of successfulChecks) {
@@ -353,11 +323,7 @@ function proposeSkillFromChecks(input: ReflectInput): SkillCandidateProposal | n
   return {
     title: `Run ${top.command} before/after code changes`,
     triggerTerms: [top.command, "check", "verify"],
-    steps: [
-      `run \`${top.command}\``,
-      "collect output and surface failures",
-      "store summary in session trace",
-    ],
+    steps: [`run \`${top.command}\``, "collect output and surface failures", "store summary in session trace"],
     requiredContext: ["project_rules", "retrieval_chunks", "previous_messages"],
     commands: [top.command],
     safetyNotes: `requires \`${top.command}\` to be allowlisted; failures must surface for human review`,
@@ -382,11 +348,7 @@ function proposeSkillFromReviews(input: ReflectInput): SkillCandidateProposal | 
   return {
     title: `Review workflow: ${review.title}`,
     triggerTerms: ["review", "audit", "scope creep"],
-    steps: [
-      "load review summary",
-      "list scope creep and missing tests",
-      "write next-step recommendation",
-    ],
+    steps: ["load review summary", "list scope creep and missing tests", "write next-step recommendation"],
     requiredContext: ["previous_messages", "agent_runs", "model_calls"],
     commands: [],
     safetyNotes: null,
@@ -423,9 +385,7 @@ function buildRetrievalFeedback(input: ReflectInput): RetrievalFeedbackProposal[
         rating: "missed",
         missedPath: contextItems[0].excerpt.slice(0, 80),
         notes: "no candidate results but context exists",
-        evidence: [
-          { kind: "query", refId: retrieval.id, excerpt: truncate(retrieval.originalQuery) },
-        ],
+        evidence: [{ kind: "query", refId: retrieval.id, excerpt: truncate(retrieval.originalQuery) }],
       });
     }
   }
@@ -459,8 +419,7 @@ export function reflect(input: ReflectInput): ReflectionOutput {
       kind: "workflow_lesson",
       title: `Successful session ${input.session.id.slice(0, 8)}`,
       body: truncate(
-        input.session.finalSummary ??
-          `Outcome: ${input.outcome.outcome}, score=${input.outcome.score}`,
+        input.session.finalSummary ?? `Outcome: ${input.outcome.outcome}, score=${input.outcome.score}`,
         280
       ),
       confidence: 0.6,

@@ -161,16 +161,12 @@ export function createContextRepo(db: DatabaseSync) {
       };
     },
     getPack(id: string): ContextPackRecord | null {
-      const row = db.prepare("SELECT * FROM context_packs WHERE id = ? LIMIT 1").get(id) as
-        | ContextPackRow
-        | undefined;
+      const row = db.prepare("SELECT * FROM context_packs WHERE id = ? LIMIT 1").get(id) as ContextPackRow | undefined;
       return row ? rowToPack(row) : null;
     },
     listPacksForSession(sessionId: string, limit = 50): ContextPackRecord[] {
       const rows = db
-        .prepare(
-          "SELECT * FROM context_packs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?"
-        )
+        .prepare("SELECT * FROM context_packs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
         .all(sessionId, limit) as ContextPackRow[];
       return rows.map(rowToPack);
     },
@@ -182,9 +178,7 @@ export function createContextRepo(db: DatabaseSync) {
     },
     listBudgetEvents(packId: string): ContextBudgetEventRecord[] {
       const rows = db
-        .prepare(
-          "SELECT * FROM context_budget_events WHERE context_pack_id = ? ORDER BY created_at ASC"
-        )
+        .prepare("SELECT * FROM context_budget_events WHERE context_pack_id = ? ORDER BY created_at ASC")
         .all(packId) as ContextBudgetRow[];
       return rows.map(rowToBudget);
     },

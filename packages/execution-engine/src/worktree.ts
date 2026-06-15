@@ -98,9 +98,7 @@ function workspaceRootFor(runtimeDir: string): string {
   return path.join(runtimeDir, "workspaces");
 }
 
-export async function createTaskWorkspace(
-  input: CreateWorkspaceInput
-): Promise<CreateWorkspaceResult> {
+export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
   const root = path.resolve(input.projectPath);
   if (!existsSync(root)) {
     throw new Error(`project path does not exist: ${root}`);
@@ -130,9 +128,7 @@ export async function createTaskWorkspace(
           await execFileAsync("git", ["worktree", "remove", "--force", sessionDir], {
             cwd: root,
           }).catch(() => undefined);
-          await execFileAsync("git", ["branch", "-D", branchName], { cwd: root }).catch(
-            () => undefined
-          );
+          await execFileAsync("git", ["branch", "-D", branchName], { cwd: root }).catch(() => undefined);
           await rm(sessionDir, { recursive: true, force: true }).catch(() => undefined);
         },
       };
@@ -278,10 +274,7 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
   };
 }
 
-async function safeReadText(
-  filePath: string,
-  maxBytes: number
-): Promise<{ value: string; truncated: boolean }> {
+async function safeReadText(filePath: string, maxBytes: number): Promise<{ value: string; truncated: boolean }> {
   try {
     const info = await stat(filePath);
     if (info.size > maxBytes) {

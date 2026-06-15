@@ -1,9 +1,4 @@
-import type {
-  EmbeddingRequest,
-  EmbeddingResult,
-  ModelInvokeRequest,
-  ModelInvokeResult,
-} from "../index.ts";
+import type { EmbeddingRequest, EmbeddingResult, ModelInvokeRequest, ModelInvokeResult } from "../index.ts";
 import type { ModelHealthResult, ModelProviderAdapter } from "./types.ts";
 
 function estimateTokens(text: string): number {
@@ -16,12 +11,7 @@ export class OpenAICompatAdapter implements ModelProviderAdapter {
   private readonly baseUrl: string;
   private readonly apiKey: string | null;
 
-  constructor(
-    id: string,
-    kind: "openai_compat" | "llama_cpp",
-    baseUrl: string,
-    apiKey?: string | null
-  ) {
+  constructor(id: string, kind: "openai_compat" | "llama_cpp", baseUrl: string, apiKey?: string | null) {
     this.id = id;
     this.kind = kind;
     this.baseUrl = baseUrl;
@@ -58,9 +48,7 @@ export class OpenAICompatAdapter implements ModelProviderAdapter {
       return {
         status: response.ok ? "healthy" : "degraded",
         latencyMs: Date.now() - started,
-        detail: response.ok
-          ? "models endpoint reachable"
-          : `health check failed: ${JSON.stringify(raw).slice(0, 200)}`,
+        detail: response.ok ? "models endpoint reachable" : `health check failed: ${JSON.stringify(raw).slice(0, 200)}`,
       };
     } catch (error) {
       return {
@@ -91,8 +79,7 @@ export class OpenAICompatAdapter implements ModelProviderAdapter {
 
     const text = parsed.choices?.[0]?.message?.content ?? "";
     const promptTokens =
-      parsed.usage?.prompt_tokens ??
-      estimateTokens(request.messages.map((message) => message.content).join("\n"));
+      parsed.usage?.prompt_tokens ?? estimateTokens(request.messages.map((message) => message.content).join("\n"));
     const completionTokens = parsed.usage?.completion_tokens ?? estimateTokens(text);
 
     return {

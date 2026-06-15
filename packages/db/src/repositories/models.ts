@@ -10,15 +10,7 @@ import type {
   ModelRole,
   ModelRouteRecord,
 } from "../../../shared/src/index.ts";
-import {
-  asBool,
-  asNumber,
-  asString,
-  asStringOrNull,
-  newId,
-  now,
-  safeParseJson,
-} from "./_shared.ts";
+import { asBool, asNumber, asString, asStringOrNull, newId, now, safeParseJson } from "./_shared.ts";
 
 interface ModelProviderRow {
   id: string;
@@ -190,9 +182,9 @@ export function createModelsRepo(db: DatabaseSync) {
     }): ModelProviderRecord {
       const ts = now();
       if (input.id) {
-        const existing = db
-          .prepare("SELECT * FROM model_providers WHERE id = ? LIMIT 1")
-          .get(input.id) as ModelProviderRow | undefined;
+        const existing = db.prepare("SELECT * FROM model_providers WHERE id = ? LIMIT 1").get(input.id) as
+          | ModelProviderRow
+          | undefined;
         if (existing) {
           db.prepare(
             `UPDATE model_providers
@@ -207,9 +199,7 @@ export function createModelsRepo(db: DatabaseSync) {
             ts,
             input.id
           );
-          const row = db
-            .prepare("SELECT * FROM model_providers WHERE id = ?")
-            .get(input.id) as ModelProviderRow;
+          const row = db.prepare("SELECT * FROM model_providers WHERE id = ?").get(input.id) as ModelProviderRow;
           return rowToProvider(row);
         }
       }
@@ -270,9 +260,9 @@ export function createModelsRepo(db: DatabaseSync) {
       const ts = now();
       const meta = input.meta ?? {};
       if (input.id) {
-        const existing = db
-          .prepare("SELECT * FROM model_profiles WHERE id = ? LIMIT 1")
-          .get(input.id) as ModelProfileRow | undefined;
+        const existing = db.prepare("SELECT * FROM model_profiles WHERE id = ? LIMIT 1").get(input.id) as
+          | ModelProfileRow
+          | undefined;
         if (existing) {
           db.prepare(
             `UPDATE model_profiles SET
@@ -298,9 +288,7 @@ export function createModelsRepo(db: DatabaseSync) {
             ts,
             input.id
           );
-          const row = db
-            .prepare("SELECT * FROM model_profiles WHERE id = ?")
-            .get(input.id) as ModelProfileRow;
+          const row = db.prepare("SELECT * FROM model_profiles WHERE id = ?").get(input.id) as ModelProfileRow;
           return rowToProfile(row);
         }
       }
@@ -356,9 +344,7 @@ export function createModelsRepo(db: DatabaseSync) {
             )
             .all(role) as ModelProfileRow[])
         : (db
-            .prepare(
-              "SELECT * FROM model_profiles WHERE enabled = 1 ORDER BY role ASC, quality_score DESC"
-            )
+            .prepare("SELECT * FROM model_profiles WHERE enabled = 1 ORDER BY role ASC, quality_score DESC")
             .all() as ModelProfileRow[]);
       return rows.map(rowToProfile);
     },
@@ -513,14 +499,7 @@ export function createModelsRepo(db: DatabaseSync) {
                updated_at = ?
          WHERE day = ? AND model_name = ?`
         )
-        .run(
-          input.promptTokens ?? 0,
-          input.completionTokens ?? 0,
-          input.requests ?? 0,
-          ts,
-          day,
-          input.modelName
-        );
+        .run(input.promptTokens ?? 0, input.completionTokens ?? 0, input.requests ?? 0, ts, day, input.modelName);
       if (updated.changes === 0) {
         try {
           db.prepare(
@@ -544,14 +523,7 @@ export function createModelsRepo(db: DatabaseSync) {
                    requests = requests + ?,
                    updated_at = ?
              WHERE day = ? AND model_name = ?`
-          ).run(
-            input.promptTokens ?? 0,
-            input.completionTokens ?? 0,
-            input.requests ?? 0,
-            ts,
-            day,
-            input.modelName
-          );
+          ).run(input.promptTokens ?? 0, input.completionTokens ?? 0, input.requests ?? 0, ts, day, input.modelName);
         }
       }
     },
@@ -580,9 +552,7 @@ export function createModelsRepo(db: DatabaseSync) {
       return rows.map(rowToCall);
     },
     listAllCalls(limit = 200): ModelCallRecord[] {
-      const rows = db
-        .prepare("SELECT * FROM model_calls ORDER BY ts DESC LIMIT ?")
-        .all(limit) as ModelCallRow[];
+      const rows = db.prepare("SELECT * FROM model_calls ORDER BY ts DESC LIMIT ?").all(limit) as ModelCallRow[];
       return rows.map(rowToCall);
     },
     recordHealthCheck(input: {
@@ -620,9 +590,7 @@ export function createModelsRepo(db: DatabaseSync) {
     listHealthChecks(providerId?: string, limit = 50): ModelHealthCheckRecord[] {
       const rows = providerId
         ? (db
-            .prepare(
-              "SELECT * FROM model_health_checks WHERE provider_id = ? ORDER BY checked_at DESC LIMIT ?"
-            )
+            .prepare("SELECT * FROM model_health_checks WHERE provider_id = ? ORDER BY checked_at DESC LIMIT ?")
             .all(providerId, limit) as ModelHealthRow[])
         : (db
             .prepare("SELECT * FROM model_health_checks ORDER BY checked_at DESC LIMIT ?")

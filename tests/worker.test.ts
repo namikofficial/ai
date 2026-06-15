@@ -32,22 +32,11 @@ test("worker processes queued plan jobs", async () => {
     true
   );
   assert.ok(store.listReviews(project.id, 10).length > 0);
-  assert.ok(
-    store
-      .listProjectLessons(project.id, 20)
-      .some((lesson) => lesson.title.startsWith("Plan review"))
-  );
-  assert.ok(
-    store
-      .listProjectLessons(project.id, 20)
-      .some((lesson) => lesson.title.startsWith("Reflection:"))
-  );
+  assert.ok(store.listProjectLessons(project.id, 20).some((lesson) => lesson.title.startsWith("Plan review")));
+  assert.ok(store.listProjectLessons(project.id, 20).some((lesson) => lesson.title.startsWith("Reflection:")));
 
   const planReviewed = store.listEvents().find((e) => e.type === "plan.reviewed");
-  assert.ok(
-    planReviewed,
-    "plan.review job should emit a plan.reviewed event when sessionId is present"
-  );
+  assert.ok(planReviewed, "plan.review job should emit a plan.reviewed event when sessionId is present");
   const planReviewedPayload = planReviewed!.payload as {
     taskCount: number;
     counts: { memoryCandidates: number; skillCandidates: number };
@@ -61,9 +50,7 @@ test("worker processes queued plan jobs", async () => {
   const planCandidates = store.memory
     .listCandidates("pending", project.id, 100)
     .filter((c) => c.sessionId === planSession!.id);
-  const planSkills = store.skills
-    .listCandidates("pending", 100)
-    .filter((c) => c.exampleSessionId === planSession!.id);
+  const planSkills = store.skills.listCandidates("pending", 100).filter((c) => c.exampleSessionId === planSession!.id);
   assert.ok(
     planCandidates.length + planSkills.length > 0,
     "plan.review should surface at least one memory or skill candidate via the reflection engine"
@@ -87,9 +74,7 @@ test("worker processes queued plan jobs", async () => {
     false
   );
   assert.ok(
-    store
-      .listProjectLessons(project.id, 20)
-      .some((lesson) => lesson.title === `Review reflection: ${review.title}`)
+    store.listProjectLessons(project.id, 20).some((lesson) => lesson.title === `Review reflection: ${review.title}`)
   );
 
   const handoffSession = store.createSession({
@@ -109,10 +94,7 @@ test("worker processes queued plan jobs", async () => {
   assert.ok(handoffJob, "createHandoff should enqueue a handoff.archive job");
   assert.equal(await processNextJob(store), true);
   const archived = store.listEvents().find((e) => e.type === "handoff.archived");
-  assert.ok(
-    archived,
-    "handoff.archive job should emit a handoff.archived event when sessionId is present"
-  );
+  assert.ok(archived, "handoff.archive job should emit a handoff.archived event when sessionId is present");
   const archivedPayload = archived!.payload as {
     target: string;
     counts: { memoryCandidates: number; skillCandidates: number };

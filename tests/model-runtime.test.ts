@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  buildAnswer,
-  createModelRuntime,
-  selectModelProfile,
-} from "../packages/model-runtime/src/index.ts";
+import { buildAnswer, createModelRuntime, selectModelProfile } from "../packages/model-runtime/src/index.ts";
 
 test("model-runtime: selectModelProfile keeps the current heuristic routing", () => {
   assert.equal(selectModelProfile("cloud"), "ask-cloud-router");

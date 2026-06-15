@@ -1,18 +1,7 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
-import type {
-  ConversationMessageRecord,
-  ConversationMessageRole,
-} from "../../../shared/src/index.ts";
-import {
-  asBool,
-  asNumber,
-  asString,
-  asStringOrNull,
-  newId,
-  now,
-  safeParseJson,
-} from "./_shared.ts";
+import type { ConversationMessageRecord, ConversationMessageRole } from "../../../shared/src/index.ts";
+import { asBool, asNumber, asString, asStringOrNull, newId, now, safeParseJson } from "./_shared.ts";
 
 interface ConversationRow {
   id: string;

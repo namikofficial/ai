@@ -8,11 +8,7 @@ import { createStore, initializeStore } from "../packages/db/src/store.ts";
 
 async function startTestServer(): Promise<{
   workspace: string;
-  request: (
-    method: string,
-    url: string,
-    body?: unknown
-  ) => Promise<{ statusCode: number; body: string }>;
+  request: (method: string, url: string, body?: unknown) => Promise<{ statusCode: number; body: string }>;
   close: () => Promise<void>;
 }> {
   const workspace = await mkdtemp(join(tmpdir(), "ai-trace-lab-"));
@@ -42,8 +38,7 @@ async function startTestServer(): Promise<{
 
   return {
     workspace,
-    request: async (method: string, url: string, body?: unknown) =>
-      handle.inject({ method, url, body }),
+    request: async (method: string, url: string, body?: unknown) => handle.inject({ method, url, body }),
     close: async () => {
       await handle.close();
       await rm(workspace, { recursive: true, force: true });
@@ -178,14 +173,10 @@ test("timeline, replay, and prompt lab endpoints are replayable and local-first"
       assert.equal(promptLab.data.run.projectId, project.data.id);
       assert.ok(promptLab.data.results.length >= 2);
       assert.ok(
-        promptLab.data.results.some(
-          (result) => result.profileId === "ask-fast-local" && result.status === "ok"
-        )
+        promptLab.data.results.some((result) => result.profileId === "ask-fast-local" && result.status === "ok")
       );
       assert.ok(
-        promptLab.data.results.some(
-          (result) => result.profileId === "ask-cloud-router" && result.status === "blocked"
-        )
+        promptLab.data.results.some((result) => result.profileId === "ask-cloud-router" && result.status === "blocked")
       );
 
       // 400: invalid messages_json (insert a bad prompt directly)
@@ -194,18 +185,7 @@ test("timeline, replay, and prompt lab endpoints are replayable and local-first"
         .prepare(
           "INSERT INTO compiled_prompts (id, session_id, mode, role, messages_json, estimated_tokens, included_context_json, omitted_context_json, safety_notes_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
-        .run(
-          badPromptId,
-          ask.data.sessionId,
-          "answer",
-          "answer",
-          "not valid json",
-          0,
-          "[]",
-          "[]",
-          "{}",
-          "2026-01-01"
-        );
+        .run(badPromptId, ask.data.sessionId, "answer", "answer", "not valid json", 0, "[]", "[]", "{}", "2026-01-01");
       const badJsonRes = await ctx.request("POST", "/prompt-lab/run", {
         projectId: project.data.id,
         promptId: badPromptId,

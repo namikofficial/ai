@@ -149,9 +149,7 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
   // Redact secrets from user request
   const redactedUserRequest = redactSecrets(input.userRequest);
   if (redactedUserRequest.redactions.length > 0) {
-    safetyNotes.push(
-      `Redacted ${redactedUserRequest.redactions.length} secrets from user request.`
-    );
+    safetyNotes.push(`Redacted ${redactedUserRequest.redactions.length} secrets from user request.`);
   }
   messages.push({ role: "user", content: redactedUserRequest.text });
 
@@ -228,9 +226,7 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
       .map((item) => {
         const redacted = redactSecrets(item.excerpt);
         if (redacted.redactions.length > 0) {
-          safetyNotes.push(
-            `Redacted secrets from context pack item ${item.kind} (source: ${item.sourceId})`
-          );
+          safetyNotes.push(`Redacted secrets from context pack item ${item.kind} (source: ${item.sourceId})`);
         }
         return `Kind: ${item.kind}\nExcerpt:\n\`\`\`\n${redacted.text}\n\`\`\``;
       })
@@ -277,9 +273,7 @@ export function buildAnswerFromCompiledPrompt(
 ): string {
   const citationLines =
     citations.length > 0
-      ? citations
-          .map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}`)
-          .join("\n")
+      ? citations.map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}`).join("\n")
       : "none";
   return [
     answerText.trim(),

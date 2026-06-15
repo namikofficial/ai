@@ -7,9 +7,7 @@ test("api client serializes project symbols query params explicitly", async () =
   const calls: string[] = [];
 
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    calls.push(
-      typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url
-    );
+    calls.push(typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url);
     return new Response(
       JSON.stringify({
         status: "ok",

@@ -29,9 +29,7 @@ test("safety: isCloudProviderKind detects cloud kinds", () => {
 });
 
 test("safety: redactSecrets redacts known secret patterns", () => {
-  const result = redactSecrets(
-    "aws key AKIAABCDEFGHIJKLMNOP and token sk-abcdefghijklmnopqrstuvwxyz1234567890"
-  );
+  const result = redactSecrets("aws key AKIAABCDEFGHIJKLMNOP and token sk-abcdefghijklmnopqrstuvwxyz1234567890");
   assert.equal(result.text.includes("[REDACTED:aws_access_key]"), true);
   assert.equal(result.text.includes("[REDACTED:openai_key]"), true);
   assert.equal(result.redactions.length >= 2, true);

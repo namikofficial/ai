@@ -1,11 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  AGENT_REGISTRY,
-  AgentExecutor,
-  getAgent,
-  isToolAllowed,
-} from "../packages/agent-protocol/src/index.ts";
+import { AGENT_REGISTRY, AgentExecutor, getAgent, isToolAllowed } from "../packages/agent-protocol/src/index.ts";
 import { createModelRuntime } from "../packages/model-runtime/src/index.ts";
 import { createEvent } from "../packages/shared/src/index.ts";
 
@@ -46,8 +41,7 @@ test("agent-protocol: AgentExecutor runs a registered agent and records agent_ru
   const events: string[] = [];
   const executor = new AgentExecutor("answer_agent", runtime, {
     recordRun: (run) => runs.push({ id: run.id, agent: run.agent, status: run.status }),
-    recordMessage: (message) =>
-      messages.push({ agentRunId: message.agentRunId, role: message.role }),
+    recordMessage: (message) => messages.push({ agentRunId: message.agentRunId, role: message.role }),
     emitEvent: (event) => events.push(event.type),
     invokeModel: (profileId, request) => runtime.invoke(profileId, request),
     now: () => new Date("2024-01-01T00:00:00Z"),
@@ -119,9 +113,7 @@ test("agent-protocol: AgentExecutor emits model events through hooks", async () 
   });
   await executor.run({ sessionId: "s1", input: { question: "hi" } });
   assert.ok(
-    events.includes("model.completed") ||
-      events.includes("model.called") ||
-      events.includes("agent.completed")
+    events.includes("model.completed") || events.includes("model.called") || events.includes("agent.completed")
   );
 });
 

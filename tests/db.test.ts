@@ -18,9 +18,7 @@ async function startQdrantStub(vectorSize: number): Promise<{
     if (req.method === "GET" && url.startsWith("/collections/")) {
       counts.gets += 1;
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(
-        JSON.stringify({ result: { config: { params: { vectors: { size: vectorSize } } } } })
-      );
+      res.end(JSON.stringify({ result: { config: { params: { vectors: { size: vectorSize } } } } }));
       return;
     }
     if (req.method === "POST" && url.includes("/points/search")) {
@@ -57,10 +55,7 @@ async function startQdrantStub(vectorSize: number): Promise<{
 test("applies the migration and stores projects", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ai-db-"));
   const dbPath = join(dir, "ai.db");
-  await writeFile(
-    join(dir, "README.md"),
-    ["# Temp Project", "", "Auth is documented here."].join("\n")
-  );
+  await writeFile(join(dir, "README.md"), ["# Temp Project", "", "Auth is documented here."].join("\n"));
   await mkdir(join(dir, "src"), { recursive: true });
   await writeFile(
     join(dir, "src", "auth.ts"),
@@ -194,11 +189,7 @@ test("uses FTS fallback when qdrant collection dimension mismatches embedding di
   await mkdir(join(dir, "src"), { recursive: true });
   await writeFile(
     join(dir, "README.md"),
-    [
-      "# Dimension Mismatch Project",
-      "",
-      "Auth is documented here and should still be found by FTS.",
-    ].join("\n")
+    ["# Dimension Mismatch Project", "", "Auth is documented here and should still be found by FTS."].join("\n")
   );
   await writeFile(join(dir, "src", "auth.ts"), "export const authNote = 'auth handled here';\n");
 

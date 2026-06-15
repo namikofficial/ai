@@ -44,9 +44,7 @@ test("indexes a repo and answers from the local retrieval store", async () => {
 
   const sessionEvents = store.listEvents(answer.sessionId);
   assert.ok(
-    sessionEvents.some(
-      (event) => event.type === "retrieval.completed" || event.type === "retrieval.low_confidence"
-    )
+    sessionEvents.some((event) => event.type === "retrieval.completed" || event.type === "retrieval.low_confidence")
   );
   assert.ok(sessionEvents.some((event) => event.type === "session.completed"));
 
@@ -57,14 +55,8 @@ test("indexes a repo and answers from the local retrieval store", async () => {
   });
   assert.equal(plan.response.projectId, project.id);
   assert.ok(plan.response.taskGraph.length > 0);
-  const plannerCalls = store.models
-    .listCalls(plan.session.id, 100)
-    .filter((call) => call.role === "planner");
-  assert.equal(
-    plannerCalls.length,
-    1,
-    "plan should record exactly one runtime-backed planner model call"
-  );
+  const plannerCalls = store.models.listCalls(plan.session.id, 100).filter((call) => call.role === "planner");
+  assert.equal(plannerCalls.length, 1, "plan should record exactly one runtime-backed planner model call");
   const plannerRequest = plannerCalls[0]!.request as {
     metadata?: {
       compiledPrompt?: { mode?: string; messages?: Array<{ role: string; content: string }> };
@@ -75,10 +67,7 @@ test("indexes a repo and answers from the local retrieval store", async () => {
   assert.ok(Array.isArray(plannerRequest.metadata?.compiledPrompt?.messages));
   assert.ok(Array.isArray(plannerRequest.metadata?.responseTrace?.taskGraph));
   assert.equal(store.listTasks(plan.session.id, 10).length, plan.response.taskGraph.length);
-  assert.equal(
-    store.getTask(plan.response.taskGraph[0].id)?.title,
-    plan.response.taskGraph[0].title
-  );
+  assert.equal(store.getTask(plan.response.taskGraph[0].id)?.title, plan.response.taskGraph[0].title);
   assert.equal(store.getTask(plan.response.taskGraph[0].id)?.status, "queued");
 
   const handoff = await store.createHandoff({

@@ -173,14 +173,8 @@ test("observability: createHandoff records agent handoff and context pack", asyn
   });
   assert.ok(handoff.prompt.includes("explain the main file"));
 
-  const handoffCalls = store.models
-    .listCalls(answer.sessionId, 100)
-    .filter((call) => call.role === "coder_handoff");
-  assert.equal(
-    handoffCalls.length,
-    1,
-    "handoff should record exactly one runtime-backed model call"
-  );
+  const handoffCalls = store.models.listCalls(answer.sessionId, 100).filter((call) => call.role === "coder_handoff");
+  assert.equal(handoffCalls.length, 1, "handoff should record exactly one runtime-backed model call");
   const handoffRequest = handoffCalls[0]!.request as {
     metadata?: {
       compiledPrompt?: {
@@ -234,9 +228,7 @@ test("observability: indexProject records an indexer agent run", async () => {
   assert.ok(output && typeof output === "object");
   assert.ok("filesIndexed" in (output as Record<string, unknown>));
 
-  const embeddingCalls = store.models
-    .listCalls(result.session.id, 100)
-    .filter((call) => call.role === "embedding");
+  const embeddingCalls = store.models.listCalls(result.session.id, 100).filter((call) => call.role === "embedding");
   assert.ok(embeddingCalls.length >= 1, "indexing should record runtime-backed embedding calls");
   const embeddingResponse = embeddingCalls[0]!.response as {
     modelName?: string;
@@ -249,9 +241,7 @@ test("observability: indexProject records an indexer agent run", async () => {
   assert.ok(embeddingResponse.providerId);
 
   const chunk = store.db
-    .prepare(
-      "SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1"
-    )
+    .prepare("SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1")
     .get(project.id) as
     | {
         embedding_model: string | null;
@@ -279,9 +269,7 @@ test("observability: reindex skips unchanged files and avoids extra embedding ca
   const project = store.createProject({ path: repo, name: "repo" });
 
   const first = await store.indexProject(project.id);
-  const firstEmbeddingCalls = store.models
-    .listCalls(first.session.id, 100)
-    .filter((call) => call.role === "embedding");
+  const firstEmbeddingCalls = store.models.listCalls(first.session.id, 100).filter((call) => call.role === "embedding");
   assert.ok(firstEmbeddingCalls.length >= 1, "initial index should embed files");
 
   const second = await store.indexProject(project.id);

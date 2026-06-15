@@ -262,16 +262,16 @@ test("code-intelligence: indexing handles deleted files", async () => {
   const project = store.createProject({ path: repo, name: "repo" });
   await store.indexProject(project.id);
 
-  let count = store.db
-    .prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?")
-    .get(project.id) as { count: number };
+  let count = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as {
+    count: number;
+  };
   assert.ok(count.count > 0);
 
   await rm(join(repo, "src", "auth.ts"));
   await store.indexProject(project.id);
-  count = store.db
-    .prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?")
-    .get(project.id) as { count: number };
+  count = store.db.prepare("SELECT COUNT(*) as count FROM code_symbols WHERE project_id = ?").get(project.id) as {
+    count: number;
+  };
   assert.equal(count.count, 0);
 
   store.db.close();

@@ -114,8 +114,7 @@ export function createApiClient(options: ApiClientOptions) {
     }> {
       const params = new URLSearchParams();
       if (input?.query !== undefined && input?.query !== null) params.set("query", input.query);
-      if (input?.limit !== undefined && input?.limit !== null)
-        params.set("limit", String(input.limit));
+      if (input?.limit !== undefined && input?.limit !== null) params.set("limit", String(input.limit));
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/projects/${projectId}/symbols${suffix}`);
     },
@@ -173,9 +172,7 @@ export function createApiClient(options: ApiClientOptions) {
     getSessionEvents(sessionId: string): Promise<{ status: "ok"; data: EventEnvelope[] }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/events`);
     },
-    getSessionTimeline(
-      sessionId: string
-    ): Promise<{ status: "ok"; data: SessionTimelineResponse }> {
+    getSessionTimeline(sessionId: string): Promise<{ status: "ok"; data: SessionTimelineResponse }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/timeline`);
     },
     replaySession(
@@ -208,11 +205,7 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    research(input: {
-      project: string;
-      topic: string;
-      mode?: "local" | "web" | "hybrid";
-    }): Promise<{
+    research(input: { project: string; topic: string; mode?: "local" | "web" | "hybrid" }): Promise<{
       status: "ok";
       data: {
         summary: string;
@@ -237,10 +230,7 @@ export function createApiClient(options: ApiClientOptions) {
     listChecks(): Promise<{ status: "ok"; data: CheckRunSummary[] }> {
       return requestJson(options.baseUrl, "/checks");
     },
-    runCheck(input: {
-      name: string;
-      projectId?: string | null;
-    }): Promise<{ status: "ok"; data: CheckRunSummary }> {
+    runCheck(input: { name: string; projectId?: string | null }): Promise<{ status: "ok"; data: CheckRunSummary }> {
       return requestJson(options.baseUrl, "/checks/run", {
         method: "POST",
         body: JSON.stringify(input),
@@ -362,20 +352,14 @@ export function createApiClient(options: ApiClientOptions) {
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/memory/candidates${suffix}`);
     },
-    acceptMemoryCandidate(
-      id: string,
-      notes?: string
-    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    acceptMemoryCandidate(id: string, notes?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/memory/candidates/${id}/accept`, {
         method: "POST",
         body: JSON.stringify({ notes: notes ?? null }),
         headers: { "content-type": "application/json" },
       });
     },
-    rejectMemoryCandidate(
-      id: string,
-      reason?: string
-    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    rejectMemoryCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/memory/candidates/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
@@ -392,21 +376,11 @@ export function createApiClient(options: ApiClientOptions) {
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/memory/entries${suffix}`);
     },
-    listMemoryFacts(
-      projectId: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(
-        options.baseUrl,
-        `/memory/facts?projectId=${encodeURIComponent(projectId)}`
-      );
+    listMemoryFacts(projectId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/memory/facts?projectId=${encodeURIComponent(projectId)}`);
     },
-    listProjectRules(
-      projectId: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(
-        options.baseUrl,
-        `/memory/rules?projectId=${encodeURIComponent(projectId)}`
-      );
+    listProjectRules(projectId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/memory/rules?projectId=${encodeURIComponent(projectId)}`);
     },
     listSkillCandidates(input?: {
       status?: "pending" | "active" | "deprecated" | "rejected";
@@ -419,10 +393,7 @@ export function createApiClient(options: ApiClientOptions) {
     acceptSkillCandidate(id: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/skills/candidates/${id}/accept`, { method: "POST" });
     },
-    rejectSkillCandidate(
-      id: string,
-      reason?: string
-    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    rejectSkillCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/skills/candidates/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
@@ -485,37 +456,23 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    listAgentRuns(
-      sessionId: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(
-        options.baseUrl,
-        `/agents/runs?sessionId=${encodeURIComponent(sessionId)}`
-      );
+    listAgentRuns(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/agents/runs?sessionId=${encodeURIComponent(sessionId)}`);
     },
     getAgentRun(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/agents/runs/${runId}`);
     },
-    listAgentHandoffs(
-      sessionId?: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listAgentHandoffs(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
       return requestJson(options.baseUrl, `/agents/handoffs${suffix}`);
     },
-    listContextPacks(
-      sessionId: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(
-        options.baseUrl,
-        `/context/packs?sessionId=${encodeURIComponent(sessionId)}`
-      );
+    listContextPacks(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+      return requestJson(options.baseUrl, `/context/packs?sessionId=${encodeURIComponent(sessionId)}`);
     },
     getContextPack(packId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/context/packs/${packId}`);
     },
-    listConversationMessages(
-      sessionId: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listConversationMessages(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/conversations/${encodeURIComponent(sessionId)}`);
     },
     getSessionTrace(sessionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
@@ -534,9 +491,7 @@ export function createApiClient(options: ApiClientOptions) {
     getCompiledPrompt(promptId: string): Promise<{ status: "ok"; data: CompiledPromptRecord }> {
       return requestJson(options.baseUrl, `/prompts/${encodeURIComponent(promptId)}`);
     },
-    listEvalCases(
-      projectId?: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listEvalCases(projectId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
       return requestJson(options.baseUrl, `/eval/cases${suffix}`);
     },
@@ -556,40 +511,36 @@ export function createApiClient(options: ApiClientOptions) {
     listAnswerEvaluations(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       return requestJson(options.baseUrl, `/eval/answers`);
     },
-    listSessionOutcomes(
-      sessionId?: string
-    ): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listSessionOutcomes(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
       const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
       return requestJson(options.baseUrl, `/eval/outcomes${suffix}`);
     },
     streamEvents(onEvent: (event: EventEnvelope) => void): () => void {
       const controller = new AbortController();
-      fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(
-        async (response) => {
-          if (!response.body) {
-            return;
-          }
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = "";
+      fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(async (response) => {
+        if (!response.body) {
+          return;
+        }
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-          while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let boundary = buffer.indexOf("\n\n");
-            while (boundary !== -1) {
-              const raw = buffer.slice(0, boundary).trim();
-              buffer = buffer.slice(boundary + 2);
-              boundary = buffer.indexOf("\n\n");
-              const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
-              if (dataLine) {
-                onEvent(JSON.parse(dataLine.slice(6)) as EventEnvelope);
-              }
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          let boundary = buffer.indexOf("\n\n");
+          while (boundary !== -1) {
+            const raw = buffer.slice(0, boundary).trim();
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf("\n\n");
+            const dataLine = raw.split("\n").find((line) => line.startsWith("data: "));
+            if (dataLine) {
+              onEvent(JSON.parse(dataLine.slice(6)) as EventEnvelope);
             }
           }
         }
-      );
+      });
 
       return () => controller.abort();
     },

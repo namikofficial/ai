@@ -190,11 +190,7 @@ test("retrieval recordFeedback is atomic: a constraint violation rolls back all 
   const originalPrepare = store.db.prepare.bind(store.db);
   let shouldThrow = false;
   store.db.prepare = ((sql: string) => {
-    if (
-      shouldThrow &&
-      sql.includes("chunk_path_boosts") &&
-      (sql.includes("INSERT") || sql.includes("UPDATE"))
-    ) {
+    if (shouldThrow && sql.includes("chunk_path_boosts") && (sql.includes("INSERT") || sql.includes("UPDATE"))) {
       throw new Error("simulated constraint violation");
     }
     return originalPrepare(sql);

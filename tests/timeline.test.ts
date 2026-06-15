@@ -231,9 +231,7 @@ test("timeline builder tolerates malformed prompt json", () => {
     ],
   });
 
-  const payload = timeline.timeline[0]?.payload as
-    | { messages?: unknown; safetyNotes?: unknown }
-    | undefined;
+  const payload = timeline.timeline[0]?.payload as { messages?: unknown; safetyNotes?: unknown } | undefined;
   assert.equal(timeline.timeline.length, 1);
   assert.equal(timeline.timeline[0]?.kind, "compiled_prompt");
   assert.equal(payload?.messages, "[not valid");

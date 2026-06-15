@@ -1,11 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { RetrievalChunk } from "../../shared/src/index.ts";
 import { ftsSearch } from "./fts.ts";
-import {
-  embedQueryForQdrant,
-  type QdrantRuntimeSettings,
-  searchQdrantChunksSync,
-} from "./qdrant.ts";
+import { embedQueryForQdrant, type QdrantRuntimeSettings, searchQdrantChunksSync } from "./qdrant.ts";
 
 function tokenize(text: string): string[] {
   return Array.from(
@@ -26,13 +22,7 @@ function buildFtsQuery(question: string): string | null {
   return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND ");
 }
 
-function rankChunk(
-  question: string,
-  path: string,
-  content: string,
-  startLine: number,
-  endLine: number
-): number {
+function rankChunk(question: string, path: string, content: string, startLine: number, endLine: number): number {
   const haystack = `${path}\n${content}`.toLowerCase();
   const terms = tokenize(question);
   let score = 0;
@@ -53,21 +43,14 @@ function rankChunk(
       score += 2;
     }
   }
-  if (
-    terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))
-  ) {
+  if (terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))) {
     score += 1;
   }
   if (/auth|login|session|token/i.test(path)) score += 2;
   if (/test|spec/i.test(path)) score += 1;
   if (/readme|docs?|notes?/i.test(path)) score += 1;
   if (/index|overview|summary/i.test(path)) score += 0.5;
-  if (
-    terms.some(
-      (term) =>
-        content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `)
-    )
-  ) {
+  if (terms.some((term) => content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `))) {
     score += 1;
   }
   if (
@@ -149,12 +132,7 @@ function scoreSymbolRow(query: string, row: Record<string, unknown>): number {
   return score;
 }
 
-function selectTopSymbolChunks(
-  db: DatabaseSync,
-  projectId: string,
-  query: string,
-  limit: number
-): RetrievalChunk[] {
+function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: string, limit: number): RetrievalChunk[] {
   if (query.trim().length === 0) return [];
   try {
     const symbolRows = db
@@ -190,9 +168,7 @@ function selectTopSymbolChunks(
       const symbolId = asString(symbol.id);
       const symbolMetadata = safeParseJson(asString(symbol.metadata_json));
       const symbolBoost = Math.min(2.5, Math.max(0.5, symbolEntry.score * 0.5));
-      const symbolChunkRows = chunkRows.all(projectId, symbolId, projectId) as Array<
-        Record<string, unknown>
-      >;
+      const symbolChunkRows = chunkRows.all(projectId, symbolId, projectId) as Array<Record<string, unknown>>;
       for (const row of symbolChunkRows) {
         const content = asString(row.content);
         const metadata = safeParseJson(asString(row.metadata_json));
@@ -235,20 +211,14 @@ function selectTopSymbolChunks(
         });
       }
 
-      const incomingEdges = edgeRows.all(projectId, symbolId, symbolId) as Array<
-        Record<string, unknown>
-      >;
+      const incomingEdges = edgeRows.all(projectId, symbolId, symbolId) as Array<Record<string, unknown>>;
       for (const edge of incomingEdges) {
         const otherId =
-          asString(edge.from_symbol_id) === symbolId
-            ? asString(edge.to_symbol_id)
-            : asString(edge.from_symbol_id);
+          asString(edge.from_symbol_id) === symbolId ? asString(edge.to_symbol_id) : asString(edge.from_symbol_id);
         if (!otherId) continue;
         const target = symbolRows.find((row) => asString(row.id) === otherId);
         if (!target) continue;
-        const targetChunks = chunkRows.all(projectId, otherId, projectId) as Array<
-          Record<string, unknown>
-        >;
+        const targetChunks = chunkRows.all(projectId, otherId, projectId) as Array<Record<string, unknown>>;
         for (const row of targetChunks.slice(0, 2)) {
           const content = asString(row.content);
           const metadata = safeParseJson(asString(row.metadata_json));
@@ -329,14 +299,8 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
 
   if (normalizedQuery.length > 0 && input.qdrantSettings) {
     const queryVector =
-      input.queryVector ??
-      embedQueryForQdrant({ text: normalizedQuery, dimension: input.queryVectorDimension ?? 32 });
-    const qdrantChunks = searchQdrantChunksSync(
-      input.qdrantSettings,
-      input.projectId,
-      queryVector,
-      limit
-    );
+      input.queryVector ?? embedQueryForQdrant({ text: normalizedQuery, dimension: input.queryVectorDimension ?? 32 });
+    const qdrantChunks = searchQdrantChunksSync(input.qdrantSettings, input.projectId, queryVector, limit);
     if (qdrantChunks) {
       addCandidates(qdrantChunks);
     }

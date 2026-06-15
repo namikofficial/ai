@@ -107,10 +107,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   const repo = join(workspace, "sample-repo");
   await mkdir(join(repo, "src"), { recursive: true });
   for (let i = 0; i < 6; i++) {
-    await writeFile(
-      join(repo, "src", `feature-${i}.ts`),
-      `export function feature${i}() { return "noise ${i}"; }\n`
-    );
+    await writeFile(join(repo, "src", `feature-${i}.ts`), `export function feature${i}() { return "noise ${i}"; }\n`);
   }
   await writeFile(
     join(repo, "src", "auth.ts"),
@@ -145,9 +142,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   assert.ok(selected.length >= 1, "selected context should be recorded");
   assert.ok(selected.length <= results.length, "selected is a subset of results");
 
-  const judgeCalls = store.models
-    .listCalls(answer.sessionId, 100)
-    .filter((c) => c.role === "retrieval_judge");
+  const judgeCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "retrieval_judge");
   assert.equal(judgeCalls.length, 1);
   const judgeRequest = judgeCalls[0]?.request as {
     metadata?: {
@@ -168,9 +163,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   assert.ok(Array.isArray(judgeRequest.metadata?.responseTrace?.confidenceNotes));
   assert.ok(judgeRequest.metadata?.responseTrace?.boost);
 
-  const rewriteCalls = store.models
-    .listCalls(answer.sessionId, 100)
-    .filter((c) => c.role === "query_rewrite");
+  const rewriteCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "query_rewrite");
   assert.equal(rewriteCalls.length, 1, "ask should record exactly one query rewrite model call");
   const rewriteRequest = rewriteCalls[0]!.request as {
     metadata?: {
@@ -188,13 +181,9 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
     "query rewrite call should record deterministic fallback metadata"
   );
 
-  const answerCalls = store.models
-    .listCalls(answer.sessionId, 100)
-    .filter((c) => c.role === "answer");
+  const answerCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "answer");
   assert.equal(answerCalls.length, 1, "ask should record exactly one answer model call");
-  const embeddingCalls = store.models
-    .listCalls(answer.sessionId, 100)
-    .filter((c) => c.role === "embedding");
+  const embeddingCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "embedding");
   assert.ok(embeddingCalls.length >= 1, "ask should record a query embedding call");
   const answerRequest = answerCalls[0]!.request as {
     metadata?: {
@@ -216,9 +205,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   const routes = store.listModelRoutes(10).filter((route) => route.taskPattern === "ask");
   assert.ok(
     routes.some(
-      (route) =>
-        route.reason?.includes("profile selected") ||
-        route.reason?.includes("local profile selected")
+      (route) => route.reason?.includes("profile selected") || route.reason?.includes("local profile selected")
     )
   );
 
@@ -228,9 +215,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   const budgetEvents = store.context.listBudgetEvents(packId);
   assert.ok(budgetEvents.length >= 0);
 
-  const retrievalCompleted = store
-    .listEvents(answer.sessionId, 100)
-    .filter((e) => e.type === "retrieval.completed");
+  const retrievalCompleted = store.listEvents(answer.sessionId, 100).filter((e) => e.type === "retrieval.completed");
   assert.ok(retrievalCompleted.length >= 1);
 
   store.db.close();
@@ -311,11 +296,7 @@ test("runAskWorkflow records the current orchestration trace, compiled prompts, 
 
     const prompts = fixture.store.listCompiledPrompts(response.sessionId, 10);
     assert.equal(prompts.length, 3);
-    assert.deepEqual(prompts.map((prompt) => prompt.mode).sort(), [
-      "answer",
-      "query_rewrite",
-      "retrieval_judge",
-    ]);
+    assert.deepEqual(prompts.map((prompt) => prompt.mode).sort(), ["answer", "query_rewrite", "retrieval_judge"]);
 
     const packs = fixture.store.context.listPacksForSession(response.sessionId, 10);
     assert.equal(packs.length, 1);
@@ -371,8 +352,7 @@ test("runAskWorkflow falls back without a fake answer completion when nothing is
     const events = fixture.store.listEvents(response.sessionId, 50);
     assert.ok(events.some((event) => event.type === "answer.fallback"));
     assert.equal(
-      events.filter((event) => event.type === "model.completed" && event.payload.role === "answer")
-        .length,
+      events.filter((event) => event.type === "model.completed" && event.payload.role === "answer").length,
       0
     );
     assert.equal(fixture.store.evals.listAnswerEvaluations(10)[0]?.notes, "no_chunks");
@@ -413,12 +393,9 @@ test("runAskWorkflow records model.failed and still completes with synthesis fai
 
     assert.match(response.answer, /could not synthesize a model answer/i);
     const events = fixture.store.listEvents(response.sessionId, 100);
-    assert.ok(
-      events.some((event) => event.type === "model.failed" && event.payload.role === "answer")
-    );
+    assert.ok(events.some((event) => event.type === "model.failed" && event.payload.role === "answer"));
     assert.equal(
-      events.filter((event) => event.type === "model.completed" && event.payload.role === "answer")
-        .length,
+      events.filter((event) => event.type === "model.completed" && event.payload.role === "answer").length,
       0
     );
 

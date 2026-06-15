@@ -126,16 +126,8 @@ export interface ModelRuntime {
       detail: string | null;
     }>
   >;
-  invoke(
-    profileId: string,
-    request: ModelInvokeRequest,
-    options?: ModelInvokeOptions
-  ): Promise<ModelInvokeResult>;
-  embed(
-    profileId: string,
-    request: EmbeddingRequest,
-    options?: ModelInvokeOptions
-  ): Promise<EmbeddingResult>;
+  invoke(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
+  embed(profileId: string, request: EmbeddingRequest, options?: ModelInvokeOptions): Promise<EmbeddingResult>;
   rerank(profileId: string, request: RerankRequest): Promise<RerankResult>;
   listProfiles(): ModelProfileRecord[];
   listProviders(): Array<
@@ -145,17 +137,13 @@ export interface ModelRuntime {
 }
 
 export interface ModelRuntimeInput {
-  providers: Array<
-    Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">
-  >;
+  providers: Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
   profiles: ModelProfileRecord[];
   cloudEnabled: boolean;
   recordCall?: ModelCallRecordedHook;
 }
 
-function redactMetadata(
-  metadata: Record<string, unknown> | undefined
-): Record<string, unknown> | null {
+function redactMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | null {
   if (!metadata) return null;
   try {
     const text = JSON.stringify(metadata);
@@ -175,10 +163,7 @@ export interface LegacyRouteDetails {
   goal?: string;
 }
 
-export function selectModelProfile(
-  mode: LegacyRouteMode,
-  details: LegacyRouteDetails = {}
-): string {
+export function selectModelProfile(mode: LegacyRouteMode, details: LegacyRouteDetails = {}): string {
   if (mode === "cloud") return "ask-cloud-router";
   if (mode === "hybrid") return "ask-hybrid-router";
   if (mode === "index") return "indexer-local";
@@ -211,9 +196,7 @@ export function buildAnswer(
   const citationLines = citations
     .map((citation) => `- ${citation.path}:${citation.startLine}-${citation.endLine}`)
     .join("\n");
-  const chunkSummary = chunks
-    .map((chunk) => `- ${chunk.path}:${chunk.startLine}-${chunk.endLine}`)
-    .join("\n");
+  const chunkSummary = chunks.map((chunk) => `- ${chunk.path}:${chunk.startLine}-${chunk.endLine}`).join("\n");
   return [
     `Question: ${question}`,
     `Project: ${project.name}`,
@@ -266,10 +249,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
     return adapter;
   }
 
-  function recordCallSafely(
-    payload: Parameters<ModelCallRecordedHook>[0],
-    options?: ModelInvokeOptions
-  ): void {
+  function recordCallSafely(payload: Parameters<ModelCallRecordedHook>[0], options?: ModelInvokeOptions): void {
     const hook = options?.recordCall ?? input.recordCall;
     if (!hook) return;
     try {
@@ -293,9 +273,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
       return input.cloudEnabled;
     },
     async health(providerId?: string) {
-      const providers = providerId
-        ? input.providers.filter((p) => p.id === providerId)
-        : input.providers;
+      const providers = providerId ? input.providers.filter((p) => p.id === providerId) : input.providers;
       const results: Array<{
         providerId: string;
         status: ModelHealthStatus;
@@ -314,8 +292,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
           continue;
         }
         // Use a heuristic adapter to check health if no profile exists for this provider yet
-        const profile =
-          input.profiles.find((p) => p.providerId === provider.id) ?? input.profiles[0];
+        const profile = input.profiles.find((p) => p.providerId === provider.id) ?? input.profiles[0];
         const adapter = profile ? getAdapter(profile) : new HeuristicAdapter(provider.id);
         const result = await adapter.health();
         results.push({
@@ -473,9 +450,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
           {
             profileId,
             role: "embedding",
-            promptTokens: Array.isArray(request.input)
-              ? request.input.join("\n").length
-              : request.input.length,
+            promptTokens: Array.isArray(request.input) ? request.input.join("\n").length : request.input.length,
             completionTokens: result.embeddings.length,
             latencyMs: Date.now() - started,
             status: "ok",
@@ -500,9 +475,7 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
           {
             profileId,
             role: "embedding",
-            promptTokens: Array.isArray(request.input)
-              ? request.input.join("\n").length
-              : request.input.length,
+            promptTokens: Array.isArray(request.input) ? request.input.join("\n").length : request.input.length,
             completionTokens: fallback.embeddings.length,
             latencyMs: Date.now() - started,
             status: "fallback",

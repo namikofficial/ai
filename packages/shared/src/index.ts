@@ -533,14 +533,8 @@ export function parseAskRequest(value: unknown): AskRequest {
   return {
     project: requireString(input.project, "project"),
     question: requireString(input.question, "question"),
-    mode:
-      input.mode === "local" || input.mode === "cloud" || input.mode === "hybrid"
-        ? input.mode
-        : undefined,
-    depth:
-      input.depth === "shallow" || input.depth === "standard" || input.depth === "deep"
-        ? input.depth
-        : undefined,
+    mode: input.mode === "local" || input.mode === "cloud" || input.mode === "hybrid" ? input.mode : undefined,
+    depth: input.depth === "shallow" || input.depth === "standard" || input.depth === "deep" ? input.depth : undefined,
   };
 }
 
@@ -554,10 +548,7 @@ export function parseEventEnvelope(value: unknown): EventEnvelope {
     projectId: typeof input.projectId === "string" ? input.projectId : null,
     agent: typeof input.agent === "string" ? input.agent : null,
     level:
-      input.level === "debug" ||
-      input.level === "info" ||
-      input.level === "warn" ||
-      input.level === "error"
+      input.level === "debug" || input.level === "info" || input.level === "warn" || input.level === "error"
         ? input.level
         : "info",
     ts: requireString(input.ts, "ts"),
@@ -695,11 +686,7 @@ export interface ChunkPathBoostRecord {
   updatedAt: string;
 }
 
-export type ModelProviderKind =
-  | "local_openai_compat"
-  | "cloud_openai_compat"
-  | "heuristic"
-  | "fastembed";
+export type ModelProviderKind = "local_openai_compat" | "cloud_openai_compat" | "heuristic" | "fastembed";
 
 export interface ModelProviderRecord {
   id: string;
@@ -856,15 +843,7 @@ export interface CodeEdgeRecord {
   projectId: string;
   fromSymbolId: string;
   toSymbolId: string;
-  kind:
-    | "imports"
-    | "calls"
-    | "defines"
-    | "uses"
-    | "routes_to"
-    | "middleware_for"
-    | "tests"
-    | "unknown";
+  kind: "imports" | "calls" | "defines" | "uses" | "routes_to" | "middleware_for" | "tests" | "unknown";
   confidence: number;
   metadata: Record<string, unknown>;
 }

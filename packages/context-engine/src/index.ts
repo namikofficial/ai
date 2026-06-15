@@ -104,8 +104,7 @@ function dedupeCandidates(candidates: ContextCandidate[]): {
 }
 
 function isFactFresh(fact: FactRecord, ttlDays: number): boolean {
-  if (fact.status === "stale" || fact.status === "disputed" || fact.status === "archived")
-    return false;
+  if (fact.status === "stale" || fact.status === "disputed" || fact.status === "archived") return false;
   if (fact.expiresAt && new Date(fact.expiresAt).getTime() < Date.now()) return false;
   if (fact.lastVerifiedAt) {
     const ageDays = (Date.now() - new Date(fact.lastVerifiedAt).getTime()) / (1000 * 60 * 60 * 24);
@@ -173,9 +172,7 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
   for (const entry of input.ranked) {
     const redacted = redactSecrets(entry.chunk.content);
     if (redacted.redactions.length > 0) {
-      redactionNotes.push(
-        `chunk:${entry.chunk.id} redacted ${redacted.redactions.length} secret(s)`
-      );
+      redactionNotes.push(`chunk:${entry.chunk.id} redacted ${redacted.redactions.length} secret(s)`);
     }
     candidates.push({
       kind: "retrieval_chunk",

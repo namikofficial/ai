@@ -79,9 +79,7 @@ test("model-runtime: invoke falls back to local heuristic when cloud blocked and
   assert.ok(calls.some((c) => c.profileId === "ask-cloud-router" && c.status === "blocked"));
   assert.ok(
     calls.some(
-      (c) =>
-        c.profileId === "ask-fast-local" &&
-        (c.status === "ok" || c.status === "fallback" || c.status === "failed")
+      (c) => c.profileId === "ask-fast-local" && (c.status === "ok" || c.status === "fallback" || c.status === "failed")
     )
   );
 });
@@ -168,16 +166,10 @@ test("model-runtime: invoke with failing cloud falls back to local profile and m
     messages: [{ role: "user", content: "fallback please" }],
   });
   assert.equal(result.profileId, "ask-fast-local");
+  assert.ok(calls.some((c) => c.profileId === "ask-cloud-router" && (c.status === "failed" || c.status === "blocked")));
   assert.ok(
     calls.some(
-      (c) => c.profileId === "ask-cloud-router" && (c.status === "failed" || c.status === "blocked")
-    )
-  );
-  assert.ok(
-    calls.some(
-      (c) =>
-        c.profileId === "ask-fast-local" &&
-        (c.status === "ok" || c.status === "fallback" || c.status === "failed")
+      (c) => c.profileId === "ask-fast-local" && (c.status === "ok" || c.status === "fallback" || c.status === "failed")
     )
   );
 });

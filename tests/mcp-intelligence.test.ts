@@ -382,16 +382,9 @@ test("ai_reflect_session rejects unknown sessions", async () => {
     apiPort: 4242,
   });
 
-  await assertRejects(
-    () => callTool(store, config, 1, "ai_reflect_session", { sessionId: "nope" }),
-    /Unknown session/
-  );
+  await assertRejects(() => callTool(store, config, 1, "ai_reflect_session", { sessionId: "nope" }), /Unknown session/);
   const reflectedForUnknown = store.listEvents().find((e) => e.type === "session.reflected");
-  assert.equal(
-    reflectedForUnknown,
-    undefined,
-    "should not emit session.reflected for unknown sessions"
-  );
+  assert.equal(reflectedForUnknown, undefined, "should not emit session.reflected for unknown sessions");
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -649,9 +642,7 @@ test("ai_get_session_trace returns full replayable trace", async () => {
     budgetTokens: 1000,
     usedTokens: 50,
     reason: "test",
-    items: [
-      { kind: "retrieval_chunk", rank: 0, tokenCount: 50, excerpt: "x", sourceId: "src/x.ts" },
-    ],
+    items: [{ kind: "retrieval_chunk", rank: 0, tokenCount: 50, excerpt: "x", sourceId: "src/x.ts" }],
   });
   const compiledPrompt = compilePrompt({
     mode: "answer",

@@ -122,9 +122,7 @@ function defaultProjectDev(): ProjectChecksConfig["dev"] {
   };
 }
 
-export function readProjectChecksConfig(
-  raw: Record<string, unknown> | null | undefined
-): ProjectChecksConfig {
+export function readProjectChecksConfig(raw: Record<string, unknown> | null | undefined): ProjectChecksConfig {
   if (!raw || typeof raw !== "object") {
     return { checks: defaultProjectChecks(), dev: defaultProjectDev() };
   }
@@ -142,9 +140,7 @@ export function readProjectChecksConfig(
     ? rawDev.defaultChecks.filter((item): item is string => typeof item === "string")
     : defaultProjectDev().defaultChecks;
   const maxRepairLoops =
-    typeof rawDev.maxRepairLoops === "number" &&
-    Number.isFinite(rawDev.maxRepairLoops) &&
-    rawDev.maxRepairLoops >= 0
+    typeof rawDev.maxRepairLoops === "number" && Number.isFinite(rawDev.maxRepairLoops) && rawDev.maxRepairLoops >= 0
       ? Math.floor(rawDev.maxRepairLoops)
       : defaultProjectDev().maxRepairLoops;
   const requireApprovalFor = Array.isArray(rawDev.requireApprovalFor)
@@ -161,10 +157,7 @@ export function readProjectChecksConfig(
   };
 }
 
-export function resolveCheckCommand(
-  name: string,
-  projectConfig: ProjectChecksConfig
-): CommandSpec | null {
+export function resolveCheckCommand(name: string, projectConfig: ProjectChecksConfig): CommandSpec | null {
   const trimmed = name.trim();
   if (!trimmed) return null;
   const builtin = BUILTIN_COMMANDS[trimmed];
@@ -245,9 +238,7 @@ export function isCommandSafe(command: CommandSpec): { safe: boolean; reason: st
   return { safe: true, reason: "ok" };
 }
 
-export async function runAllowedCommand(
-  input: RunAllowedCommandInput
-): Promise<RunAllowedCommandResult> {
+export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<RunAllowedCommandResult> {
   const startedAt = new Date().toISOString();
   const startMs = Date.now();
   const timeoutMs = input.timeoutMs ?? 5 * 60_000;
@@ -276,11 +267,7 @@ export async function runAllowedCommand(
     let stdout = "";
     let stderr = "";
     let settled = false;
-    const settle = (
-      status: CommandStatus,
-      exitCode: number | null,
-      blockedReason: string | null
-    ): void => {
+    const settle = (status: CommandStatus, exitCode: number | null, blockedReason: string | null): void => {
       if (settled) return;
       settled = true;
       resolve({

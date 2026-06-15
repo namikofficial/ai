@@ -152,9 +152,7 @@ test("API POST /reviews enqueues a review.reflect worker job", async () => {
 
     const verifyingStore = createStore(initializeStore(config.databasePath));
     try {
-      const job = verifyingStore.db
-        .prepare("SELECT * FROM jobs WHERE id = ?")
-        .get(body.data.jobId) as
+      const job = verifyingStore.db.prepare("SELECT * FROM jobs WHERE id = ?").get(body.data.jobId) as
         | { id: string; type: string; status: string; payload_json: string }
         | undefined;
       assert.ok(job);

@@ -3,10 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  extractCodeIntelligence,
-  linkSymbolsToChunks,
-} from "../packages/code-intelligence/src/index.ts";
+import { extractCodeIntelligence, linkSymbolsToChunks } from "../packages/code-intelligence/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import { indexProject } from "../packages/indexer/src/index.ts";
 import { searchProjectChunks } from "../packages/retrieval-engine/src/search.ts";
@@ -32,12 +29,8 @@ test("code-intelligence: extracts TypeScript symbols and links them to chunks", 
     ].join("\n"),
   });
 
-  assert.ok(
-    result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService")
-  );
-  assert.ok(
-    result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handleLogin")
-  );
+  assert.ok(result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService"));
+  assert.ok(result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handleLogin"));
   assert.ok(result.symbols.some((symbol) => symbol.kind === "import"));
 
   const chunks = [
@@ -72,12 +65,8 @@ test("code-intelligence: extracts Python symbols with fallback parsing", () => {
     ].join("\n"),
   });
 
-  assert.ok(
-    result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService")
-  );
-  assert.ok(
-    result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handle_login")
-  );
+  assert.ok(result.symbols.some((symbol) => symbol.kind === "class" && symbol.name === "AuthService"));
+  assert.ok(result.symbols.some((symbol) => symbol.kind === "function" && symbol.name === "handle_login"));
   assert.ok(result.symbols.some((symbol) => symbol.kind === "import"));
 });
 
@@ -104,9 +93,7 @@ test("code-intelligence: indexing reuses changed-file ids and refreshes symbol r
   await store.indexProject(project.id);
 
   const firstSymbols = store.db
-    .prepare(
-      "SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC"
-    )
+    .prepare("SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC")
     .all(project.id, "src/auth.ts") as Array<{ name: string; kind: string; path: string }>;
   assert.equal(firstSymbols.filter((row) => row.kind === "function").length, 1);
   assert.equal(firstSymbols.find((row) => row.kind === "function")?.name, "handleLogin");
@@ -118,9 +105,7 @@ test("code-intelligence: indexing reuses changed-file ids and refreshes symbol r
   await store.indexProject(project.id);
 
   const secondSymbols = store.db
-    .prepare(
-      "SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC"
-    )
+    .prepare("SELECT name, kind, path FROM code_symbols WHERE project_id = ? AND path = ? ORDER BY start_line ASC")
     .all(project.id, "src/auth.ts") as Array<{ name: string; kind: string; path: string }>;
   assert.equal(secondSymbols.filter((row) => row.kind === "function").length, 1);
   assert.equal(secondSymbols.find((row) => row.kind === "function")?.name, "handleLoginV2");
@@ -229,14 +214,8 @@ test("code-intelligence: retrieval uses symbol and graph signals", async () => {
   });
 
   assert.ok(chunks.length > 0);
-  assert.ok(
-    chunks.some(
-      (chunk) => Array.isArray(chunk.metadata.codeSymbols) && chunk.metadata.codeSymbols.length > 0
-    )
-  );
-  assert.ok(
-    chunks.some((chunk) => chunk.path === "src/router.ts" && chunk.metadata.graphExpansion)
-  );
+  assert.ok(chunks.some((chunk) => Array.isArray(chunk.metadata.codeSymbols) && chunk.metadata.codeSymbols.length > 0));
+  assert.ok(chunks.some((chunk) => chunk.path === "src/router.ts" && chunk.metadata.graphExpansion));
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -275,13 +254,10 @@ test("code-intelligence: deleted file symbols removed on reindex", async () => {
   await rm(join(repo, "src", "auth.ts"), { force: true });
   await store.indexProject(project.id);
 
-  const symbolsAfter = store.db
-    .prepare("SELECT path FROM code_symbols WHERE project_id = ?")
-    .all(project.id) as Array<{ path: string }>;
-  assert.ok(
-    !symbolsAfter.some((row) => row.path === "src/auth.ts"),
-    "deleted file symbols should be removed"
-  );
+  const symbolsAfter = store.db.prepare("SELECT path FROM code_symbols WHERE project_id = ?").all(project.id) as Array<{
+    path: string;
+  }>;
+  assert.ok(!symbolsAfter.some((row) => row.path === "src/auth.ts"), "deleted file symbols should be removed");
   assert.ok(
     symbolsAfter.some((row) => row.path === "src/router.ts"),
     "surviving file symbols remain"

@@ -86,26 +86,14 @@ function createFallbackId(prefix: string, index: number): string {
 }
 
 export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionTimelineResponse {
-  const messages = (input.messages ?? []).filter((item): item is ConversationMessageRecord =>
-    Boolean(item)
-  );
+  const messages = (input.messages ?? []).filter((item): item is ConversationMessageRecord => Boolean(item));
   const events = (input.events ?? []).filter((item): item is EventEnvelope => Boolean(item));
   const agentRuns = (input.agentRuns ?? []).filter((item): item is AgentRunRecord => Boolean(item));
-  const modelCalls = (input.modelCalls ?? []).filter((item): item is ModelCallRecord =>
-    Boolean(item)
-  );
-  const compiledPrompts = (input.compiledPrompts ?? []).filter(
-    (item): item is CompiledPromptRecord => Boolean(item)
-  );
-  const retrievalQueries = (input.retrievalQueries ?? []).filter(
-    (item): item is RetrievalQueryRecord => Boolean(item)
-  );
-  const contextPacks = (input.contextPacks ?? []).filter((item): item is ContextPackRecord =>
-    Boolean(item)
-  );
-  const outcomes = (input.outcomes ?? []).filter((item): item is SessionOutcomeRecord =>
-    Boolean(item)
-  );
+  const modelCalls = (input.modelCalls ?? []).filter((item): item is ModelCallRecord => Boolean(item));
+  const compiledPrompts = (input.compiledPrompts ?? []).filter((item): item is CompiledPromptRecord => Boolean(item));
+  const retrievalQueries = (input.retrievalQueries ?? []).filter((item): item is RetrievalQueryRecord => Boolean(item));
+  const contextPacks = (input.contextPacks ?? []).filter((item): item is ContextPackRecord => Boolean(item));
+  const outcomes = (input.outcomes ?? []).filter((item): item is SessionOutcomeRecord => Boolean(item));
 
   const contextPackByQueryId = new Map<string, ContextPackRecord>();
   for (const pack of contextPacks) {
@@ -323,10 +311,7 @@ export function buildSessionTimeline(input: BuildSessionTimelineInput): SessionT
         ts: normalizeTimestamp(outcome.createdAt, input.session.startedAt),
         kind: "eval",
         title: asString(outcome.outcome, "eval"),
-        summary: [
-          `score=${outcome.score.toFixed(2)}`,
-          outcome.notes ? `notes=${outcome.notes}` : null,
-        ]
+        summary: [`score=${outcome.score.toFixed(2)}`, outcome.notes ? `notes=${outcome.notes}` : null]
           .filter(Boolean)
           .join(" · "),
         payload: outcome,

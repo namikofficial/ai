@@ -21,33 +21,21 @@ export interface EmbeddingConfigInput {
 
 const KNOWN_PROVIDERS = new Set(["heuristic", "llama_cpp", "fastembed", "openai_compat", "mock"]);
 
-function readString(
-  env: Record<string, string | undefined>,
-  key: string,
-  fallback: string
-): string {
+function readString(env: Record<string, string | undefined>, key: string, fallback: string): string {
   const raw = env[key];
   if (typeof raw !== "string") return fallback;
   const trimmed = raw.trim();
   return trimmed.length === 0 ? fallback : trimmed;
 }
 
-function readNumber(
-  env: Record<string, string | undefined>,
-  key: string,
-  fallback: number
-): number {
+function readNumber(env: Record<string, string | undefined>, key: string, fallback: number): number {
   const raw = env[key];
   if (typeof raw !== "string" || raw.trim().length === 0) return fallback;
   const value = Number(raw);
   return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
 }
 
-function readBool(
-  env: Record<string, string | undefined>,
-  key: string,
-  fallback: boolean
-): boolean {
+function readBool(env: Record<string, string | undefined>, key: string, fallback: boolean): boolean {
   const raw = env[key];
   if (typeof raw !== "string") return fallback;
   return /^(1|true|yes)$/i.test(raw);
@@ -57,9 +45,7 @@ export function readEmbeddingConfig(input: EmbeddingConfigInput = {}): Embedding
   const env = input.env ?? process.env;
   const cloudEnabled = input.cloudEnabled ?? readBool(env, "AI_CLOUD_ENABLED", false);
   const providerRaw = readString(env, "AI_EMBEDDING_PROVIDER", "heuristic").toLowerCase();
-  const provider = KNOWN_PROVIDERS.has(providerRaw)
-    ? (providerRaw as EmbeddingConfig["provider"])
-    : "heuristic";
+  const provider = KNOWN_PROVIDERS.has(providerRaw) ? (providerRaw as EmbeddingConfig["provider"]) : "heuristic";
   if (isCloudProviderKind(provider) && !cloudEnabled) {
     // Cloud embeddings are explicitly disabled until cloud is enabled.
     return {

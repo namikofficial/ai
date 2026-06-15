@@ -1,14 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ApprovalStatus, WorkspaceStrategy } from "../../../shared/src/index.ts";
-import {
-  asBool,
-  asNumber,
-  asString,
-  asStringOrNull,
-  newId,
-  now,
-  safeParseJson,
-} from "./_shared.ts";
+import { asBool, asNumber, asString, asStringOrNull, newId, now, safeParseJson } from "./_shared.ts";
 
 interface WorkspaceRow {
   id: string;
@@ -265,22 +257,17 @@ export function createExecutionRepo(db: DatabaseSync) {
       };
     },
     markWorkspaceCleaned(workspaceId: string): void {
-      db.prepare("UPDATE execution_workspaces SET cleaned_up = 1, updated_at = ? WHERE id = ?").run(
-        now(),
-        workspaceId
-      );
+      db.prepare("UPDATE execution_workspaces SET cleaned_up = 1, updated_at = ? WHERE id = ?").run(now(), workspaceId);
     },
     getWorkspace(workspaceId: string): ExecutionWorkspaceRecord | null {
-      const row = db
-        .prepare("SELECT * FROM execution_workspaces WHERE id = ? LIMIT 1")
-        .get(workspaceId) as WorkspaceRow | undefined;
+      const row = db.prepare("SELECT * FROM execution_workspaces WHERE id = ? LIMIT 1").get(workspaceId) as
+        | WorkspaceRow
+        | undefined;
       return row ? rowToWorkspace(row) : null;
     },
     getWorkspaceForRun(runId: string): ExecutionWorkspaceRecord | null {
       const row = db
-        .prepare(
-          "SELECT * FROM execution_workspaces WHERE run_id = ? ORDER BY created_at DESC LIMIT 1"
-        )
+        .prepare("SELECT * FROM execution_workspaces WHERE run_id = ? ORDER BY created_at DESC LIMIT 1")
         .get(runId) as WorkspaceRow | undefined;
       return row ? rowToWorkspace(row) : null;
     },
@@ -367,9 +354,7 @@ export function createExecutionRepo(db: DatabaseSync) {
         ts,
         input.id
       );
-      const row = db
-        .prepare("SELECT * FROM execution_commands WHERE id = ?")
-        .get(input.id) as CommandRow;
+      const row = db.prepare("SELECT * FROM execution_commands WHERE id = ?").get(input.id) as CommandRow;
       return rowToCommand(row);
     },
     listCommands(runId: string): ExecutionCommandRecord[] {
@@ -438,9 +423,7 @@ export function createExecutionRepo(db: DatabaseSync) {
            SET status = ?, decided_at = ?, decided_by = ?, notes = ?, updated_at = ?
          WHERE id = ?`
       ).run(input.status, ts, input.decidedBy ?? null, input.notes ?? null, ts, input.id);
-      const row = db
-        .prepare("SELECT * FROM execution_approvals WHERE id = ?")
-        .get(input.id) as ApprovalRow;
+      const row = db.prepare("SELECT * FROM execution_approvals WHERE id = ?").get(input.id) as ApprovalRow;
       return rowToApproval(row);
     },
     listApprovals(runId: string): ExecutionApprovalRecord[] {
@@ -493,11 +476,7 @@ export function createExecutionRepo(db: DatabaseSync) {
     },
     markPatchApplied(patchId: string): PatchRecord {
       const ts = now();
-      db.prepare("UPDATE patches SET applied = 1, applied_at = ?, updated_at = ? WHERE id = ?").run(
-        ts,
-        ts,
-        patchId
-      );
+      db.prepare("UPDATE patches SET applied = 1, applied_at = ?, updated_at = ? WHERE id = ?").run(ts, ts, patchId);
       const row = db.prepare("SELECT * FROM patches WHERE id = ?").get(patchId) as PatchRow;
       return rowToPatch(row);
     },

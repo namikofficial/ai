@@ -71,9 +71,7 @@ test("context-engine: buildContextPack respects token budget and pins rules firs
 
 test("context-engine: dedupes near-identical retrieval excerpts", () => {
   const result = buildContextPack({ sessionId: "s1", projectId: "p1", budgetTokens: 2000, ranked });
-  const duplicates = result.items.filter(
-    (i) => i.omissionReason && i.omissionReason.startsWith("dedupe")
-  );
+  const duplicates = result.items.filter((i) => i.omissionReason && i.omissionReason.startsWith("dedupe"));
   assert.equal(duplicates.length, 1);
 });
 

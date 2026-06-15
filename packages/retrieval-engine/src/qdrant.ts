@@ -110,9 +110,7 @@ function readCollectionVectorSize(body: string): number | null {
       result?: {
         config?: {
           params?: {
-            vectors?:
-              | { size?: number; default?: { size?: number } }
-              | Record<string, { size?: number }>;
+            vectors?: { size?: number; default?: { size?: number } } | Record<string, { size?: number }>;
           };
         };
       };
@@ -120,8 +118,7 @@ function readCollectionVectorSize(body: string): number | null {
     const vectors = parsed.result?.config?.params?.vectors;
     if (!vectors || typeof vectors !== "object") return null;
     if ("size" in vectors && typeof vectors.size === "number") return vectors.size;
-    if ("default" in vectors && typeof vectors.default?.size === "number")
-      return vectors.default.size;
+    if ("default" in vectors && typeof vectors.default?.size === "number") return vectors.default.size;
     for (const value of Object.values(vectors)) {
       if (value && typeof value === "object" && typeof value.size === "number") return value.size;
     }
@@ -151,11 +148,9 @@ export function checkQdrantCollectionDimension(
       detail: "no embedding dimension available",
     };
   }
-  const response = qdrantRequestSync(
-    settings.url,
-    `/collections/${encodeURIComponent(settings.collection)}`,
-    { method: "GET" }
-  );
+  const response = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, {
+    method: "GET",
+  });
   if (response?.ok) {
     const existingSize = readCollectionVectorSize(response.body);
     if (existingSize == null) {
@@ -189,35 +184,26 @@ export function checkQdrantCollectionDimension(
   };
 }
 
-export function ensureQdrantCollectionSync(
-  settings: QdrantRuntimeSettings,
-  dimension: number
-): boolean {
+export function ensureQdrantCollectionSync(settings: QdrantRuntimeSettings, dimension: number): boolean {
   if (!settings.enabled || !settings.url) {
     return false;
   }
-  const existing = qdrantRequestSync(
-    settings.url,
-    `/collections/${encodeURIComponent(settings.collection)}`,
-    { method: "GET" }
-  );
+  const existing = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, {
+    method: "GET",
+  });
   if (existing?.ok) {
     const existingSize = readCollectionVectorSize(existing.body);
     return existingSize == null || existingSize === dimension;
   }
-  const created = qdrantRequestSync(
-    settings.url,
-    `/collections/${encodeURIComponent(settings.collection)}`,
-    {
-      method: "PUT",
-      body: {
-        vectors: {
-          size: dimension,
-          distance: "Cosine",
-        },
+  const created = qdrantRequestSync(settings.url, `/collections/${encodeURIComponent(settings.collection)}`, {
+    method: "PUT",
+    body: {
+      vectors: {
+        size: dimension,
+        distance: "Cosine",
       },
-    }
-  );
+    },
+  });
   return Boolean(created?.ok);
 }
 
@@ -249,10 +235,7 @@ export function qdrantPointForChunk(
   };
 }
 
-export function upsertQdrantChunksSync(
-  settings: QdrantRuntimeSettings,
-  points: QdrantPoint[]
-): boolean {
+export function upsertQdrantChunksSync(settings: QdrantRuntimeSettings, points: QdrantPoint[]): boolean {
   if (!settings.enabled || !settings.url || points.length === 0) {
     return false;
   }
@@ -329,9 +312,7 @@ export function searchQdrantChunksSync(
       .map((result) => {
         const payload = result.payload ?? {};
         const metadata =
-          payload.metadata && typeof payload.metadata === "object"
-            ? (payload.metadata as Record<string, unknown>)
-            : {};
+          payload.metadata && typeof payload.metadata === "object" ? (payload.metadata as Record<string, unknown>) : {};
         return {
           id: asString(payload.chunkId ?? result.id),
           projectId: asString(payload.projectId),

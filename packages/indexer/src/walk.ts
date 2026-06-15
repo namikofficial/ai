@@ -77,10 +77,7 @@ export async function walkFiles(root: string, options: WalkOptions = {}): Promis
 }
 
 export function isProbablyTextFile(path: string): boolean {
-  return (
-    TEXT_EXTENSIONS.has(extname(path).toLowerCase()) ||
-    /(^|\/)(package\.json|Dockerfile)$/i.test(path)
-  );
+  return TEXT_EXTENSIONS.has(extname(path).toLowerCase()) || /(^|\/)(package\.json|Dockerfile)$/i.test(path);
 }
 
 export async function safeReadText(path: string): Promise<string | null> {

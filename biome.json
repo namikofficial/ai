@@ -6,9 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "ignoreUnknown": false,
-    "indentWidth": 2,
-    "indentStyle": "space"
+    "ignoreUnknown": false
   },
   "formatter": {
     "enabled": true,
@@ -21,12 +19,6 @@
     "enabled": true,
     "rules": {
       "recommended": true,
-      "style": {
-        "all": true
-      },
-      "complexity": {
-        "all": true
-      },
       "suspicious": {
         "noExplicitAny": "off"
       }
@@ -38,8 +30,7 @@
       "trailingCommas": "es5",
       "semicolons": "always",
       "arrowParentheses": "always",
-      "bracketSpacing": true,
-      "jsxQuoteStyle": "double"
+      "bracketSpacing": true
     }
   },
   "assist": {

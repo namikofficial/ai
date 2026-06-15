@@ -3,11 +3,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  EMPTY_SESSION_TIMELINE_COUNTS,
-  getTimelineCounts,
-  getTimelineItems,
-} from "../apps/web/src/timeline.ts";
+import { EMPTY_SESSION_TIMELINE_COUNTS, getTimelineCounts, getTimelineItems } from "../apps/web/src/timeline.ts";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import type { SessionTimelineResponse, TimelineItem } from "../packages/shared/src/index.ts";
@@ -43,10 +39,7 @@ test("defines the Vite React shell and router surface", async () => {
     assert.ok(appSource.includes(path), `expected router surface to include ${path}`);
   }
 
-  const pagesSource = await readFile(
-    "/home/namik/Documents/code/ai/apps/web/src/pages.tsx",
-    "utf8"
-  );
+  const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
   for (const name of [
     "AgentRunDetailPage",
     "AgentsPage",

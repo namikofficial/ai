@@ -25,14 +25,11 @@ function decodeChunk(chunk: string | Uint8Array): string {
   return binary;
 }
 
-function attachDataListener(
-  stream: ChildProcessLike["stdout"],
-  handler: (chunk: string | Uint8Array) => void
-): void {
+function attachDataListener(stream: ChildProcessLike["stdout"], handler: (chunk: string | Uint8Array) => void): void {
   if (!stream) return;
-  const on = (
-    stream as { on: (event: "data", listener: (chunk: string | Uint8Array) => void) => void }
-  ).on.bind(stream);
+  const on = (stream as { on: (event: "data", listener: (chunk: string | Uint8Array) => void) => void }).on.bind(
+    stream
+  );
   on("data", handler);
 }
 
@@ -70,14 +67,8 @@ test("ai retrieval explain runs the full pipeline and prints ranked/selected/dro
   const workspace = await mkdtemp(join(tmpdir(), "ai-cli-"));
   const repo = join(workspace, "repo");
   await mkdir(join(repo, "src"), { recursive: true });
-  await writeFile(
-    join(repo, "src", "auth.ts"),
-    "export function login(user: string) { return user; }\n"
-  );
-  await writeFile(
-    join(repo, "src", "session.ts"),
-    "export function getSession() { return null; }\n"
-  );
+  await writeFile(join(repo, "src", "auth.ts"), "export function login(user: string) { return user; }\n");
+  await writeFile(join(repo, "src", "session.ts"), "export function getSession() { return null; }\n");
 
   const dbPath = join(workspace, "ai.db");
   const runtimeDir = join(workspace, "runtime");

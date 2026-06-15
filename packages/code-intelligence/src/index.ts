@@ -95,13 +95,7 @@ function dedupeCodeSymbols(symbols: CodeSymbol[]): CodeSymbol[] {
   const seen = new Set<string>();
   const result: CodeSymbol[] = [];
   for (const symbol of symbols) {
-    const key = [
-      symbol.projectId,
-      symbol.fileId,
-      symbol.path,
-      symbol.kind,
-      symbol.qualifiedName,
-    ].join("|");
+    const key = [symbol.projectId, symbol.fileId, symbol.path, symbol.kind, symbol.qualifiedName].join("|");
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(symbol);
@@ -125,10 +119,7 @@ function symbolId(
   startLine: number,
   endLine: number
 ): string {
-  return hashId(
-    "sym",
-    `${input.projectId}|${input.fileId}|${input.path}|${kind}|${name}|${startLine}|${endLine}`
-  );
+  return hashId("sym", `${input.projectId}|${input.fileId}|${input.path}|${kind}|${name}|${startLine}|${endLine}`);
 }
 
 function edgeId(
@@ -144,12 +135,7 @@ function openBraceCount(line: string): number {
   return (line.match(/{/g) ?? []).length - (line.match(/}/g) ?? []).length;
 }
 
-function findBlockEnd(
-  sourceLines: string[],
-  startIndex: number,
-  language: string | null,
-  startIndent = 0
-): number {
+function findBlockEnd(sourceLines: string[], startIndex: number, language: string | null, startIndent = 0): number {
   if (language === "python") {
     for (let index = startIndex + 1; index < sourceLines.length; index += 1) {
       const raw = sourceLines[index] ?? "";
@@ -201,11 +187,7 @@ function makeSymbol(
   };
 }
 
-function collectDocComment(
-  sourceLines: string[],
-  startIndex: number,
-  language: string | null
-): string | null {
+function collectDocComment(sourceLines: string[], startIndex: number, language: string | null): string | null {
   const comments: string[] = [];
   let index = startIndex - 1;
   if (language === "python") {
@@ -310,9 +292,7 @@ function scanTsJs(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edge
       }
     }
 
-    const functionMatch = trimmed.match(
-      /^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/
-    );
+    const functionMatch = trimmed.match(/^(?:export\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)/);
     if (functionMatch) {
       const name = functionMatch[1] ?? "function";
       const endLine = findBlockEnd(sourceLines, index, "typescript");
@@ -343,9 +323,7 @@ function scanTsJs(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edge
       continue;
     }
 
-    const constantMatch = trimmed.match(
-      /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/
-    );
+    const constantMatch = trimmed.match(/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=/);
     if (constantMatch) {
       const name = constantMatch[1] ?? "constant";
       symbols.push(
@@ -384,10 +362,7 @@ function scanTsJs(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edge
     }
 
     if (/(?:router|app)\.(get|post|put|patch|delete|use)\s*\(/i.test(trimmed)) {
-      const verb =
-        trimmed
-          .match(/(?:router|app)\.(get|post|put|patch|delete|use)\s*\(/i)?.[1]
-          ?.toUpperCase() ?? "USE";
+      const verb = trimmed.match(/(?:router|app)\.(get|post|put|patch|delete|use)\s*\(/i)?.[1]?.toUpperCase() ?? "USE";
       const routePath = trimmed.match(/['"`]([^'"`]+)['"`]/)?.[1] ?? trimmed;
       const kind: CodeSymbol["kind"] = verb === "USE" ? "middleware" : "route";
       symbols.push(
@@ -492,9 +467,7 @@ function scanPython(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; ed
 
     if (/^@(?:app|router)\.(get|post|put|patch|delete|route)\b/i.test(trimmed)) {
       const verb =
-        trimmed
-          .match(/^@(?:app|router)\.(get|post|put|patch|delete|route)\b/i)?.[1]
-          ?.toUpperCase() ?? "ROUTE";
+        trimmed.match(/^@(?:app|router)\.(get|post|put|patch|delete|route)\b/i)?.[1]?.toUpperCase() ?? "ROUTE";
       symbols.push(
         makeSymbol(input, verb === "ROUTE" ? "route" : "route", `${verb}`, index + 1, index + 1, {
           signature: trimmed,
@@ -568,14 +541,11 @@ function scanRust(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edge
       continue;
     }
 
-    const itemMatch = trimmed.match(
-      /^(?:pub\s+)?(struct|enum|trait|const|static|mod)\s+([A-Za-z_][\w]*)/
-    );
+    const itemMatch = trimmed.match(/^(?:pub\s+)?(struct|enum|trait|const|static|mod)\s+([A-Za-z_][\w]*)/);
     if (itemMatch) {
       const kindToken = itemMatch[1] ?? "mod";
       const name = itemMatch[2] ?? kindToken;
-      const kind: CodeSymbol["kind"] =
-        kindToken === "const" || kindToken === "static" ? "constant" : "class";
+      const kind: CodeSymbol["kind"] = kindToken === "const" || kindToken === "static" ? "constant" : "class";
       const endLine = findBlockEnd(sourceLines, index, "rust");
       symbols.push(
         makeSymbol(input, kind, name, index + 1, endLine + 1, {
@@ -601,16 +571,12 @@ function scanGo(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edges:
     if (!trimmed) continue;
 
     if (trimmed.startsWith("import ")) {
-      symbols.push(
-        makeSymbol(input, "import", trimmed, index + 1, index + 1, { signature: trimmed })
-      );
+      symbols.push(makeSymbol(input, "import", trimmed, index + 1, index + 1, { signature: trimmed }));
       continue;
     }
     if (trimmed.startsWith("const ") || trimmed.startsWith("var ")) {
       const name = trimmed.match(/^(?:const|var)\s+([A-Za-z_][\w]*)/)?.[1] ?? "constant";
-      symbols.push(
-        makeSymbol(input, "constant", name, index + 1, index + 1, { signature: trimmed })
-      );
+      symbols.push(makeSymbol(input, "constant", name, index + 1, index + 1, { signature: trimmed }));
       continue;
     }
     const typeMatch = trimmed.match(/^type\s+([A-Za-z_][\w]*)\s+(struct|interface)?/);
@@ -673,9 +639,7 @@ function scanSql(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edges
       const kindToken = (match[2] ?? "constant").toLowerCase();
       const name = (match[3] ?? "sql").replace(/["`]/g, "").split(".").pop() ?? "sql";
       const kind: CodeSymbol["kind"] =
-        kindToken === "table" || kindToken === "view" || kindToken === "type"
-          ? "class"
-          : "function";
+        kindToken === "table" || kindToken === "view" || kindToken === "type" ? "class" : "function";
       symbols.push(
         makeSymbol(input, kind, name, index + 1, index + 1, {
           signature: trimmed,
@@ -710,9 +674,7 @@ export function resolveLocalReference(path: string, specifier: string): string |
   if (!specifier.startsWith(".")) return null;
   const base = path.replace(/[^/]+$/, "");
   const normalized = `${base}${specifier}`.replace(/\/\.\//g, "/");
-  return (
-    localFilePathVariants(normalized).find((candidate) => /\.[a-z0-9]+$/i.test(candidate)) ?? null
-  );
+  return localFilePathVariants(normalized).find((candidate) => /\.[a-z0-9]+$/i.test(candidate)) ?? null;
 }
 
 export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeIntelligenceResult {
@@ -768,18 +730,14 @@ export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeInt
 
   const path = input.path.toLowerCase();
   const hasRouteSymbol = result.symbols.some((s) => s.kind === "route" || /route/i.test(s.name));
-  const hasMiddlewareSymbol = result.symbols.some(
-    (s) => s.kind === "middleware" || /middleware/i.test(s.name)
-  );
+  const hasMiddlewareSymbol = result.symbols.some((s) => s.kind === "middleware" || /middleware/i.test(s.name));
   const hasDbSymbol =
-    result.symbols.some((s) => s.kind === "class" && /db|repository|store/i.test(s.name)) ||
-    path.endsWith(".sql");
+    result.symbols.some((s) => s.kind === "class" && /db|repository|store/i.test(s.name)) || path.endsWith(".sql");
 
   const graphHints = {
     routeFiles: hasRouteSymbol || /route|router|api|server|handler/i.test(path) ? [input.path] : [],
     middlewareFiles: hasMiddlewareSymbol || /middleware|auth|guard/i.test(path) ? [input.path] : [],
-    dbFiles:
-      hasDbSymbol || /db|migration|schema|sql|prisma|drizzle/i.test(path) ? [input.path] : [],
+    dbFiles: hasDbSymbol || /db|migration|schema|sql|prisma|drizzle/i.test(path) ? [input.path] : [],
     authPaths: /auth|session|jwt|tenant|login/i.test(path) ? [input.path] : [],
   };
 
@@ -866,9 +824,7 @@ export function buildProjectContextGraph(input: {
   const uniquePaths = Array.from(new Set(input.paths));
   const routeFiles = uniquePaths.filter((path) => /route|router|api|server|handler/i.test(path));
   const middlewareFiles = uniquePaths.filter((path) => /middleware|auth|guard/i.test(path));
-  const dbFiles = uniquePaths.filter((path) =>
-    /db|migration|schema|sql|prisma|drizzle/i.test(path)
-  );
+  const dbFiles = uniquePaths.filter((path) => /db|migration|schema|sql|prisma|drizzle/i.test(path));
   const authPaths = uniquePaths.filter((path) => /auth|session|jwt|tenant|login/i.test(path));
   const packageBoundaries = uniquePaths
     .map((path) => path.split("/").slice(0, 2).join("/"))
@@ -900,9 +856,7 @@ export function buildProjectContextGraph(input: {
     .slice(0, 24);
   const notes = [
     routeFiles.length > 0 ? `route files: ${routeFiles.length}` : "no obvious route files",
-    middlewareFiles.length > 0
-      ? `middleware files: ${middlewareFiles.length}`
-      : "no obvious middleware files",
+    middlewareFiles.length > 0 ? `middleware files: ${middlewareFiles.length}` : "no obvious middleware files",
     dbFiles.length > 0 ? `db/migration files: ${dbFiles.length}` : "no obvious db files",
   ];
   return {
