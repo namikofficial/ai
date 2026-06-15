@@ -1,6 +1,9 @@
+import { Buffer as BufferCtor } from "node:buffer";
 import { mkdir } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
 import * as path from "node:path";
-import fastify from "fastify";
+import express, { type Request, type Response } from "express";
+import supertest from "supertest";
 import { parseDevRequest } from "../../../packages/agent-protocol/src/dev.ts";
 import { runAskWorkflow } from "../../../packages/ask-engine/src/index.ts";
 import type { ProjectContextGraph } from "../../../packages/code-intelligence/src/index.ts";
@@ -97,6 +100,19 @@ function escapeHtml(value: string): string {
     .replaceAll("'", "&#39;");
 }
 
+function toUrlEncodedBody(value: Record<string, unknown>): string {
+  const params = new URLSearchParams();
+  for (const [key, raw] of Object.entries(value)) {
+    if (raw == null) continue;
+    if (Array.isArray(raw)) {
+      for (const item of raw) params.append(key, String(item));
+    } else {
+      params.set(key, String(raw));
+    }
+  }
+  return params.toString();
+}
+
 function isHtmlRequest(req: any): boolean {
   const accept = String(req.headers?.accept ?? "");
   return (
@@ -104,28 +120,35 @@ function isHtmlRequest(req: any): boolean {
   );
 }
 
-async function readJsonBody(fastifyRequest: any, rawReq: any): Promise<unknown> {
-  let body = "";
-  if (typeof fastifyRequest?.body === "string" && fastifyRequest.body.length > 0) {
-    body = fastifyRequest.body;
-  } else if (typeof rawReq?.body === "string" && rawReq.body.length > 0) {
-    body = rawReq.body;
-  } else {
-    for await (const chunk of rawReq) {
-      body += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
-    }
+async function readJsonBody(expressRequest: any, rawReq: any): Promise<unknown> {
+  const parsedBody = expressRequest?.body ?? rawReq?.body;
+  if (parsedBody == null || parsedBody === "") return {};
+  if (parsedBody instanceof (BufferCtor as unknown as { new (...args: unknown[]): unknown })) {
+    const text = (parsedBody as { toString(encoding: string): string }).toString("utf8").trim();
+    return text.length > 0 ? JSON.parse(text) : {};
   }
-  if (body.trim().length === 0) return {};
-  return JSON.parse(body);
+  if (typeof parsedBody === "string") {
+    const text = parsedBody.trim();
+    return text.length > 0 ? JSON.parse(text) : {};
+  }
+  if (typeof parsedBody === "object") return parsedBody;
+
+  let body = "";
+  for await (const chunk of rawReq) {
+    body += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
+  }
+  return body.trim().length === 0 ? {} : JSON.parse(body);
 }
 
-async function readTextBody(fastifyRequest: any, rawReq: any): Promise<string> {
-  if (typeof fastifyRequest?.body === "string" && fastifyRequest.body.length > 0) {
-    return fastifyRequest.body;
+async function readTextBody(expressRequest: any, rawReq: any): Promise<string> {
+  const parsedBody = expressRequest?.body ?? rawReq?.body;
+  if (parsedBody == null) return "";
+  if (parsedBody instanceof (BufferCtor as unknown as { new (...args: unknown[]): unknown })) {
+    return (parsedBody as { toString(encoding: string): string }).toString("utf8");
   }
-  if (typeof rawReq?.body === "string" && rawReq.body.length > 0) {
-    return rawReq.body;
-  }
+  if (typeof parsedBody === "string") return parsedBody;
+  if (typeof parsedBody === "object") return toUrlEncodedBody(parsedBody as Record<string, unknown>);
+
   let body = "";
   for await (const chunk of rawReq) {
     body += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
@@ -1458,30 +1481,14 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     }
   };
 
-  const app = fastify({ logger: false });
-  app.removeAllContentTypeParsers();
-  app.addContentTypeParser("application/json", { parseAs: "string" }, (_request, body, done) => {
-    done(null, body);
-  });
-  app.addContentTypeParser("text/plain", { parseAs: "string" }, (_request, body, done) => {
-    done(null, body);
-  });
-  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_request, body, done) => {
-    done(null, body);
-  });
-  app.addContentTypeParser("multipart/form-data", (_request, payload, done) => {
-    const req = payload as { on: (event: string, listener: (...args: unknown[]) => void) => void };
-    let data = "";
-    req.on("data", (chunk: unknown) => {
-      data += typeof chunk === "string" ? chunk : (chunk as { toString(enc: string): string }).toString("utf8");
-    });
-    req.on("end", () => done(null, data));
-    req.on("error", (err: unknown) => done(err instanceof Error ? err : new Error(String(err))));
-  });
-  app.all("/*", async (request, reply) => {
-    reply.hijack();
-    const req: any = request.raw;
-    const res: any = reply.raw;
+  const app = express();
+  app.disable("x-powered-by");
+  app.use(express.json({ limit: "10mb", type: "application/json" }));
+  app.use(express.urlencoded({ extended: false, limit: "10mb", type: "application/x-www-form-urlencoded" }));
+  app.use(express.text({ limit: "10mb", type: ["text/plain", "multipart/form-data"] }));
+
+  app.use((request: Request, res: Response) => {
+    const req: any = request;
     let path = "/";
     void (async () => {
       const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -3222,33 +3229,43 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
       accept: "application/json",
       ...(input.body === undefined ? input.headers : { "content-type": "application/json", ...input.headers }),
     };
-    const method = input.method.toUpperCase() as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD";
-    const response = await app.inject({
-      method,
-      url: input.url,
-      headers,
-      payload: input.body === undefined ? undefined : JSON.stringify(input.body),
-    });
-    return { statusCode: response.statusCode, body: response.body };
+    const method = input.method.toLowerCase() as "get" | "post" | "put" | "patch" | "delete" | "options" | "head";
+    const agent = supertest(app);
+    const requestBuilder = agent[method](input.url).set(headers);
+    const response = input.body === undefined ? await requestBuilder : await requestBuilder.send(input.body as object);
+    return { statusCode: response.statusCode, body: response.text ?? JSON.stringify(response.body ?? null) };
   };
 
   if (options.inProcess) {
-    await app.ready();
     return {
       url: "http://in-process",
       inject,
-      close: () => app.close(),
+      close: async () => {},
     };
   }
 
   const port = config.apiPort;
-  await app.listen({ port, host: "127.0.0.1" });
-  const address = app.server.address();
+  const server: Server = createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      server.off("error", reject);
+      resolve();
+    });
+  });
+  const address = server.address();
   const actualPort = address && typeof address === "object" ? address.port : port;
 
   return {
     url: `http://127.0.0.1:${actualPort}`,
     inject,
-    close: () => app.close(),
+    close: async () => {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+    },
   };
 }
