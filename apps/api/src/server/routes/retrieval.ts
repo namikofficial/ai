@@ -3,7 +3,7 @@ import { resolveProjectConfig } from "../../../../../packages/config/src/index.t
 import { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
-import { renderRetrievalPage } from "./ssr.ts";
+import { renderRetrievalPage } from "../render-pages.ts";
 
 type Store = ReturnType<typeof createStore>;
 

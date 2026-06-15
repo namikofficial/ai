@@ -5,7 +5,7 @@ import { parseProjectCreateInput } from "../../../../../packages/shared/src/inde
 import type { EventEnvelope } from "../../../../../packages/shared/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, redirect, sendHtml, sendJson } from "../response.ts";
-import { renderProjectDetailPage, renderProjectsPage } from "./ssr.ts";
+import { renderProjectDetailPage, renderProjectsPage } from "../render-pages.ts";
 
 type Store = ReturnType<typeof createStore>;
 

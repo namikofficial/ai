@@ -4,7 +4,7 @@ import type { ModelCallRecordedHook } from "../../../../../packages/model-runtim
 import { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
-import { renderCompiledPromptPage, renderPromptsPage } from "./ssr.ts";
+import { renderCompiledPromptPage, renderPromptsPage } from "../render-pages.ts";
 
 type Store = ReturnType<typeof createStore>;
 

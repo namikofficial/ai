@@ -3,7 +3,7 @@ import { createStore } from "../../../../../packages/db/src/store.ts";
 import { createEvent } from "../../../../../packages/shared/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody, safeParseList } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
-import { renderTaskDetailPage, renderTasksPage } from "./ssr.ts";
+import { renderTaskDetailPage, renderTasksPage } from "../render-pages.ts";
 
 type Store = ReturnType<typeof createStore>;
 

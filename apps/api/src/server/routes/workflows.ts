@@ -9,7 +9,7 @@ import type { AskRequest, HandoffRequest, PlanRequest } from "../../../../../pac
 import { createEvent, parseAskRequest } from "../../../../../packages/shared/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
-import { renderAskPage, renderChecksPage, renderHandoffPage, renderPlannerPage, renderResearchPage, renderReviewDetailPage, renderReviewsPage } from "./ssr.ts";
+import { renderAskPage, renderChecksPage, renderHandoffPage, renderPlannerPage, renderResearchPage, renderReviewDetailPage, renderReviewsPage } from "../render-pages.ts";
 
 type Store = ReturnType<typeof createStore>;
 

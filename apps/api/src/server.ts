@@ -21,12 +21,8 @@ import { registerModelRoutes } from "./server/routes/models.ts";
 import { registerProjectRoutes } from "./server/routes/projects.ts";
 import { registerPromptRoutes } from "./server/routes/prompts.ts";
 import { registerRetrievalRoutes } from "./server/routes/retrieval.ts";
-import {
-  renderDashboard,
-  renderErrorPage,
-  renderNotFoundPage,
-  registerSsrRoutes,
-} from "./server/routes/ssr.ts";
+import { registerSsrRoutes } from "./server/routes/ssr.ts";
+import { renderDashboard, renderErrorPage, renderNotFoundPage } from "./server/render-pages.ts";
 import { registerSessionRoutes } from "./server/routes/sessions.ts";
 import { registerSettingsRoutes } from "./server/routes/settings.ts";
 import { registerSseRoutes } from "./server/routes/sse.ts";

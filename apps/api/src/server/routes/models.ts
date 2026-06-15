@@ -2,7 +2,7 @@ import type { Router } from "express";
 import { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
-import { renderModelsPage } from "./ssr.ts";
+import { renderModelsPage } from "../render-pages.ts";
 
 type Store = ReturnType<typeof createStore>;
 

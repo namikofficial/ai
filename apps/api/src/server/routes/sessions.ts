@@ -4,7 +4,7 @@ import { runAskWorkflow } from "../../../../../packages/ask-engine/src/index.ts"
 import { createModelRuntime } from "../../../../../packages/model-runtime/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
-import { renderSessionDetailPage, renderSessionsPage } from "./ssr.ts";
+import { renderSessionDetailPage, renderSessionsPage } from "../render-pages.ts";
 import type { Router } from "express";
 
 type Store = ReturnType<typeof createStore>;
