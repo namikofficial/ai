@@ -270,12 +270,10 @@ function buildRuntimeForStore(store: ReturnType<typeof createStore>, cloudEnable
 }
 
 function sendJson(res: any, payload: JsonResponse, statusCode = 200): void {
-  res.writeHead(statusCode, {
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    connection: "close",
-  });
-  res.end(JSON.stringify(payload));
+  res.status(statusCode);
+  res.set("content-type", "application/json; charset=utf-8");
+  res.set("cache-control", "no-store");
+  res.json(payload);
 }
 
 function sendHtml(res: any, html: string, statusCode = 200): void {
@@ -2472,6 +2470,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             : Array.isArray(body.modelProfiles)
               ? body.modelProfiles
               : [];
+          console.log("[prompt-lab] body=", JSON.stringify(body), "selectedProfiles=", selectedProfiles);
           const notes = typeof body.notes === "string" ? body.notes : null;
           const dryRun = body.dryRun === true || body.dryRun === "true";
           try {
@@ -2507,7 +2506,10 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
                 },
               }
             );
-            sendJson(res, json("ok", engineResult));
+            console.log("[handler] engineResult.results.length=", engineResult.results.length, "engineResult keys=", Object.keys(engineResult));
+            const payload = json("ok", engineResult);
+            console.log("[handler] payload keys=", Object.keys(payload), "payload.data keys=", Object.keys(payload.data ?? {}), "results length=", (payload.data as { results?: unknown[] })?.results?.length);
+            sendJson(res, payload);
           } catch (error) {
             const statusCode = (error as Error & { statusCode?: number }).statusCode ?? 500;
             sendJson(res, json("error", undefined, { message: (error as Error).message }), statusCode);
@@ -3233,7 +3235,9 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     const agent = supertest(app);
     const requestBuilder = agent[method](input.url).set(headers);
     const response = input.body === undefined ? await requestBuilder : await requestBuilder.send(input.body as object);
-    return { statusCode: response.statusCode, body: response.text ?? JSON.stringify(response.body ?? null) };
+    const body = response.text ?? JSON.stringify(response.body ?? null);
+    console.log("[inject] full body:", body);
+    return { statusCode: response.statusCode, body };
   };
 
   if (options.inProcess) {
