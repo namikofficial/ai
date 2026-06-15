@@ -4,6 +4,7 @@ import { runAskWorkflow } from "../../../../../packages/ask-engine/src/index.ts"
 import { createModelRuntime } from "../../../../../packages/model-runtime/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
+import { parsePagination, buildPaginatedResponse, DEFAULT_LIMIT, MAX_LIMIT } from "../pagination.ts";
 import { renderSessionDetailPage, renderSessionsPage } from "../render-pages.ts";
 import type { Router } from "express";
 
@@ -34,7 +35,11 @@ export function registerSessionRoutes(router: Router, deps: {
   });
 
   router.get("/sessions/:sessionId/events", (req, res) => {
-    sendJson(res, json("ok", deps.store.listEvents(decodeURIComponent(String(req.params.sessionId ?? "")), 500)));
+    const sessionId = decodeURIComponent(String(req.params.sessionId ?? ""));
+    const pagination = parsePagination(req, 100);
+    const events = deps.store.listEvents(sessionId, pagination.limit + 1); // fetch one extra to check hasMore
+    const response = buildPaginatedResponse(events, pagination);
+    sendJson(res, json("ok", response));
   });
 
   router.get("/sessions/:sessionId/timeline", (req, res) => {

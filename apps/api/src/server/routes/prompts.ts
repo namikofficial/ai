@@ -5,16 +5,18 @@ import { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
 import { renderCompiledPromptPage, renderPromptsPage } from "../render-pages.ts";
+import { parsePagination, buildPaginatedResponse } from "../pagination.ts";
 
 type Store = ReturnType<typeof createStore>;
 
 export function registerPromptRoutes(router: Router, deps: { store: Store; cloudEnabled: boolean }) {
   router.get("/prompts", (req, res) => {
     const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
-    const limit = Number(req.query.limit ?? 100) || 100;
-    const prompts = deps.store.listCompiledPrompts(sessionId, limit);
+    const pagination = parsePagination(req, 100);
+    const prompts = deps.store.listCompiledPrompts(sessionId, pagination.limit + 1);
+    const response = buildPaginatedResponse(prompts, pagination);
     if (!isHtmlRequest(req)) {
-      sendJson(res, json("ok", prompts));
+      sendJson(res, json("ok", response));
       return;
     }
     sendHtml(res, renderPromptsPage(deps.store, sessionId));

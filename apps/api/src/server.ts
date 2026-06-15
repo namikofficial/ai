@@ -204,7 +204,11 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   app.use(healthRouter);
 
   const sseRouter = express.Router();
-  registerSseRoutes(sseRouter, { listEvents: () => store.listEvents(undefined, 500), listeners });
+  registerSseRoutes(sseRouter, {
+    listEvents: () => store.listEvents(undefined, 500),
+    listEventsSince: (since: string) => store.listEventsSince(since, undefined, 500),
+    listeners,
+  });
   app.use(sseRouter);
 
   const projectRouter = express.Router();

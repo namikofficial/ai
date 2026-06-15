@@ -2,13 +2,17 @@ import type { Router } from "express";
 import { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, readJsonBody } from "../http.ts";
 import { json, sendJson } from "../response.ts";
+import { parsePagination, buildPaginatedResponse } from "../pagination.ts";
 
 type Store = ReturnType<typeof createStore>;
 
 export function registerAgentRoutes(router: Router, deps: { store: Store }) {
   router.get("/agents/runs", (req, res) => {
     const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
-    sendJson(res, json("ok", sessionId ? deps.store.agents.listRuns(sessionId, 200) : []));
+    const pagination = parsePagination(req, 50);
+    const runs = sessionId ? deps.store.agents.listRuns(sessionId, pagination.limit + 1) : [];
+    const response = buildPaginatedResponse(runs, pagination);
+    sendJson(res, json("ok", response));
   });
 
   router.get("/agents/runs/:id", (req, res) => {
@@ -27,7 +31,10 @@ export function registerAgentRoutes(router: Router, deps: { store: Store }) {
 
   router.get("/context/packs", (req, res) => {
     const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
-    sendJson(res, json("ok", sessionId ? deps.store.context.listPacksForSession(sessionId, 50) : []));
+    const pagination = parsePagination(req, 50);
+    const packs = sessionId ? deps.store.context.listPacksForSession(sessionId, pagination.limit + 1) : [];
+    const response = buildPaginatedResponse(packs, pagination);
+    sendJson(res, json("ok", response));
   });
 
   router.get("/context/packs/:id", (req, res) => {

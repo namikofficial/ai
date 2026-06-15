@@ -4,6 +4,7 @@ import { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
 import { renderRetrievalPage } from "../render-pages.ts";
+import { parsePagination, buildPaginatedResponse } from "../pagination.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -103,13 +104,15 @@ export function registerRetrievalRoutes(router: Router, deps: {
   router.get("/retrieval/queries", (req, res) => {
     const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
-    const limit = Number(req.query.limit ?? "50") || 50;
+    const pagination = parsePagination(req, 50);
+    const limit = pagination.limit + 1;
     const queries = sessionId
       ? deps.store.retrieval.listQueriesForSession(sessionId, limit)
       : projectId
         ? deps.store.retrieval.listQueriesForProject(projectId, limit)
         : deps.store.retrieval.listQueriesForProject(deps.store.listProjects()[0]?.id ?? "", limit).slice(0, 0);
-    sendJson(res, json("ok", queries));
+    const response = buildPaginatedResponse(queries, pagination);
+    sendJson(res, json("ok", response));
   });
 
   router.get("/retrieval/queries/:id", (req, res) => {

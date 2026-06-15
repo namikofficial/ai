@@ -4,13 +4,17 @@ import { createEvent } from "../../../../../packages/shared/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody, safeParseList } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
 import { renderTaskDetailPage, renderTasksPage } from "../render-pages.ts";
+import { parsePagination, buildPaginatedResponse } from "../pagination.ts";
 
 type Store = ReturnType<typeof createStore>;
 
 export function registerTaskRoutes(router: Router, deps: { store: Store }) {
   router.get("/tasks", (req, res) => {
+    const pagination = parsePagination(req, 50);
+    const tasks = deps.store.listRecentTasks(pagination.limit + 1);
+    const response = buildPaginatedResponse(tasks, pagination);
     if (!isHtmlRequest(req)) {
-      sendJson(res, json("ok", deps.store.listRecentTasks(100)));
+      sendJson(res, json("ok", response));
       return;
     }
     sendHtml(res, renderTasksPage(deps.store));

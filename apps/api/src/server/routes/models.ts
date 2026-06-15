@@ -3,6 +3,7 @@ import { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
 import { json, sendHtml, sendJson } from "../response.ts";
 import { renderModelsPage } from "../render-pages.ts";
+import { parsePagination, buildPaginatedResponse } from "../pagination.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -19,7 +20,12 @@ export function registerModelRoutes(router: Router, deps: { store: Store; config
     sendJson(res, json("ok", { providers: deps.store.models.listProviders(), profiles: deps.store.models.listProfiles() }));
   });
   router.get("/models/routes", (_req, res) => sendJson(res, json("ok", deps.store.listModelRoutes(100))));
-  router.get("/models/calls", (req, res) => sendJson(res, json("ok", deps.store.models.listAllCalls(Number(req.query.limit ?? "50") || 50))));
+  router.get("/models/calls", (req, res) => {
+    const pagination = parsePagination(req, 50);
+    const calls = deps.store.models.listAllCalls(pagination.limit + 1);
+    const response = buildPaginatedResponse(calls, pagination);
+    sendJson(res, json("ok", response));
+  });
 
   router.post("/models/route", asyncRoute(async (req, res) => {
     const body = (

@@ -652,6 +652,46 @@ export function createStore(db: DatabaseSync) {
         payload: JSON.parse(asString(row.payload_json)) as Record<string, unknown>,
       }));
     },
+    listEventsSince(since: string, sessionId?: string, limit = 500): EventEnvelope[] {
+      // Cursor can be an event ID or a timestamp.
+      // If it looks like an event ID (contains underscore, starts with alpha), look up its ts.
+      // Otherwise treat it as a raw timestamp.
+      let tsCursor: string;
+      if (/^[a-zA-Z][a-zA-Z0-9]*_/.test(since)) {
+        // Likely an event ID — look up the event's timestamp
+        const row = db
+          .prepare("SELECT ts FROM agent_events WHERE id = ?")
+          .get(since) as { ts: string } | undefined;
+        if (!row) {
+          // Cursor event not found; treat as timestamp directly
+          tsCursor = since;
+        } else {
+          tsCursor = row.ts;
+        }
+      } else {
+        tsCursor = since;
+      }
+      const rows = sessionId
+        ? (db
+            .prepare(
+              "SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC LIMIT ?"
+            )
+            .all(sessionId, tsCursor, limit) as Row[])
+        : (db
+            .prepare("SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC LIMIT ?")
+            .all(tsCursor, limit) as Row[]);
+      return rows.map((row) => ({
+        id: asString(row.id),
+        type: asString(row.type),
+        sessionId: row.session_id == null ? null : asString(row.session_id),
+        taskId: row.task_id == null ? null : asString(row.task_id),
+        projectId: row.project_id == null ? null : asString(row.project_id),
+        agent: row.agent == null ? null : asString(row.agent),
+        level: asString(row.level) as EventEnvelope["level"],
+        ts: asString(row.ts),
+        payload: JSON.parse(asString(row.payload_json)) as Record<string, unknown>,
+      }));
+    },
     listRecentLessons(limit = 20): Array<{
       id: string;
       projectId: string | null;
