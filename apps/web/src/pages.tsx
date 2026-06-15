@@ -2,16 +2,26 @@ import type { FormEvent, ReactNode } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
+  AgentRunRecord,
   AskResponse,
   CompiledPromptRecord,
+  ContextPackRecord,
   HandoffResponse,
+  MemoryCandidateRecord,
+  ModelCallRecord,
+  ModelProfileRecord,
+  ModelProviderRecord,
+  ModelRouteRecord,
   PlanResponse,
   ProjectSummary,
   PromptLabResultRecord,
   PromptLabRunRecord,
+  RetrievalQueryRecord,
   ReviewRecord,
   SessionRecord,
   SessionTimelineResponse,
+  SkillCandidateRecord,
+  SkillRecord,
   TaskRecord,
   TimelineItem,
 } from "../../../packages/shared/src/index.ts";
@@ -613,8 +623,8 @@ function PromptLabPage(): ReactNode {
     estimatedTokens: number;
   }>;
   const modelProviderData = resource.data?.[2].data ?? { providers: [], profiles: [] };
-  const profiles = (modelProviderData.profiles ?? []) as Array<Record<string, unknown>>;
-  const providers = (modelProviderData.providers ?? []) as Array<Record<string, unknown>>;
+  const profiles = modelProviderData.profiles ?? [];
+  const providers = modelProviderData.providers ?? [];
   const runs = (resource.data?.[3].data ?? []) as PromptLabRunRecord[];
   const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
   const [promptId, setPromptId] = useState(prompts[0]?.id ?? "");
@@ -1813,7 +1823,7 @@ function MemoryPage(): ReactNode {
   const resource = useResource(() =>
     Promise.all([api.listMemoryCandidates({ status: "pending" }), api.listMemoryEntries(), api.listProjects()])
   );
-  const candidates = (resource.data?.[0].data ?? []) as Array<Record<string, unknown>>;
+  const candidates = resource.data?.[0].data ?? [];
   const entries = (resource.data?.[1].data ?? []) as Array<Record<string, unknown>>;
   const projects = (resource.data?.[2].data ?? []) as ProjectSummary[];
   const [projectId, setProjectId] = useState("");
@@ -1932,14 +1942,14 @@ function RetrievalPage(): ReactNode {
   );
   const projects = (resource.data?.[0].data ?? []) as ProjectSummary[];
   const sessions = (resource.data?.[1].data ?? []) as SessionRecord[];
-  const misses = ((resource.data?.[2].data ?? []) as Array<Record<string, unknown>>).filter(
-    (c) => c.kind === "retrieval_miss"
+  const misses = (resource.data?.[2].data ?? []).filter(
+    (c: MemoryCandidateRecord) => c.kind === "retrieval_miss"
   );
   const [project, setProject] = useState(projects[0]?.id ?? "");
   const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<Array<Record<string, unknown>>>([]);
-  const [queries, setQueries] = useState<Array<Record<string, unknown>>>([]);
+  const [queries, setQueries] = useState<RetrievalQueryRecord[]>([]);
 
   useEffect(() => {
     if (!project && projects[0]?.id) setProject(projects[0].id);
@@ -2320,11 +2330,14 @@ function ModelsPage(): ReactNode {
     completionTokens: number;
     requests: number;
   }>;
-  const providers = (resource.data?.[1].data?.providers ?? []) as Array<Record<string, unknown>>;
-  const profiles = (resource.data?.[1].data?.profiles ?? []) as Array<Record<string, unknown>>;
-  const healthProviders = (resource.data?.[2].data?.providers ?? []) as Array<Record<string, unknown>>;
-  const calls = (resource.data?.[3].data ?? []) as Array<Record<string, unknown>>;
-  const routes = (resource.data?.[4].data ?? []) as Array<Record<string, unknown>>;
+  const providers = resource.data?.[1].data?.providers ?? [];
+  const profiles = resource.data?.[1].data?.profiles ?? [];
+  const healthProviders = resource.data?.[2].data?.providers ?? [];
+  const callsData = resource.data?.[3].data;
+  const calls = Array.isArray(callsData)
+    ? callsData
+    : (callsData?.data ?? []);
+  const routes = resource.data?.[4].data ?? [];
 
   return (
     <PageShell title="Models" subtitle="Local model routing, providers, and recent calls">
@@ -2334,8 +2347,8 @@ function ModelsPage(): ReactNode {
             providers.map((provider) => (
               <div className="list-item" key={String(provider.id)}>
                 <div className="row">
-                  <strong>{String(provider.name ?? provider.id)}</strong>
-                  <Badge tone="good">{String(provider.localOnly ? "local" : "cloud")}</Badge>
+                  <strong>{String(provider.displayName ?? provider.id)}</strong>
+                  <Badge tone="good">{provider.kind === "local_openai_compat" ? "local" : "cloud"}</Badge>
                 </div>
                 <div className="tiny">
                   kind {String(provider.kind ?? "?")} · {String(provider.baseUrl ?? "no base url")}
@@ -2395,7 +2408,7 @@ function ModelsPage(): ReactNode {
               return (
                 <div className="list-item" key={String(provider.id)}>
                   <div className="row">
-                    <strong>{String(provider.name ?? provider.id)}</strong>
+                    <strong>{String(provider.displayName ?? provider.id)}</strong>
                     <Badge tone={last ? "good" : "neutral"}>{last ? "called" : "idle"}</Badge>
                   </div>
                   <div className="tiny">
@@ -2416,12 +2429,12 @@ function ModelsPage(): ReactNode {
           {calls.length > 0 ? (
             calls.map((call) => (
               <div className="list-item" key={String(call.id)}>
-                <div className="row">
-                  <strong>{String(call.role ?? "call")}</strong>
-                  <Badge tone={call.success === false ? "bad" : "good"}>
-                    {String(call.success === false ? "failed" : "ok")}
-                  </Badge>
-                </div>
+                  <div className="row">
+                    <strong>{String(call.role ?? "call")}</strong>
+                    <Badge tone={call.status === "failed" ? "bad" : "good"}>
+                      {String(call.status === "failed" ? "failed" : call.status)}
+                    </Badge>
+                  </div>
                 <div className="tiny">
                   profile {String(call.profileId ?? "?")} · prompt {Number(call.promptTokens ?? 0)} · completion{" "}
                   {Number(call.completionTokens ?? 0)} · {Number(call.latencyMs ?? 0)}
@@ -2465,9 +2478,9 @@ function SkillsPage(): ReactNode {
       api.listSkillCandidates({ status: "rejected" }),
     ])
   );
-  const skills = (resource.data?.[0].data ?? []) as Array<Record<string, unknown>>;
-  const pending = (resource.data?.[1].data ?? []) as Array<Record<string, unknown>>;
-  const rejected = (resource.data?.[2].data ?? []) as Array<Record<string, unknown>>;
+  const skills = resource.data?.[0].data ?? [];
+  const pending = resource.data?.[1].data ?? [];
+  const rejected = resource.data?.[2].data ?? [];
   const accept = async (id: string) => {
     await api.acceptSkillCandidate(id);
     resource.refresh();
@@ -2487,7 +2500,7 @@ function SkillsPage(): ReactNode {
                   <strong>{String(skill.title ?? skill.id)}</strong>
                   <Badge tone="good">{String(skill.status ?? "active")}</Badge>
                 </div>
-                <div className="tiny">{String(skill.body ?? skill.description ?? "")}</div>
+                <div className="tiny">{skill.steps.join(" ")}</div>
                 <div className="tiny">
                   used {Number(skill.useCount ?? 0)} times · last {String(skill.lastUsedAt ?? "never")}
                 </div>
@@ -2507,7 +2520,7 @@ function SkillsPage(): ReactNode {
                   <strong>{String(candidate.title ?? candidate.id)}</strong>
                   <Badge tone="warn">pending</Badge>
                 </div>
-                <div className="tiny">{String(candidate.body ?? candidate.description ?? "")}</div>
+                <div className="tiny">{candidate.steps.join(" ")}</div>
                 <div className="row" style={{ marginTop: "0.4rem" }}>
                   <button type="button" onClick={() => accept(String(candidate.id))}>
                     Accept
@@ -2535,7 +2548,7 @@ function SkillsPage(): ReactNode {
                   <strong>{String(candidate.title ?? candidate.id)}</strong>
                   <Badge tone="bad">rejected</Badge>
                 </div>
-                <div className="tiny">{String(candidate.body ?? candidate.description ?? "")}</div>
+                <div className="tiny">{candidate.steps.join(" ")}</div>
               </div>
             ))
           ) : (
@@ -2669,8 +2682,8 @@ function AgentsPage(): ReactNode {
   const resource = useResource(() => api.listSessions());
   const sessions = (resource.data?.data ?? []) as SessionRecord[];
   const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
-  const [runs, setRuns] = useState<Array<Record<string, unknown>>>([]);
-  const [packs, setPacks] = useState<Array<Record<string, unknown>>>([]);
+  const [runs, setRuns] = useState<AgentRunRecord[]>([]);
+  const [packs, setPacks] = useState<ContextPackRecord[]>([]);
 
   useEffect(() => {
     if (!sessionId && sessions[0]?.id) setSessionId(sessions[0].id);

@@ -248,6 +248,22 @@ export interface SettingsSnapshot {
   projectCount: number;
 }
 
+export interface StatusSnapshot {
+  health: Record<string, unknown>;
+  config: ConfigSnapshot & { projects: number; activeSessions: number };
+  summary: {
+    projects: number;
+    activeSessions: number;
+    sessions: number;
+    lessons: number;
+    checks: number;
+  };
+  projects: ProjectSummary[];
+  sessions: SessionRecord[];
+  checks: CheckRunSummary[];
+  settings: SettingsSnapshot;
+}
+
 export interface ModelUsageEntry {
   day: string;
   modelName: string;

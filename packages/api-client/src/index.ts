@@ -1,5 +1,7 @@
 import type { ProjectContextGraph } from "../../code-intelligence/src/index.ts";
 import type {
+  AgentHandoffRecord,
+  AgentRunRecord,
   AskRequest,
   AskResponse,
   CheckRunSummary,
@@ -7,9 +9,17 @@ import type {
   CodeSymbolRecord,
   CompiledPromptRecord,
   ConfigSnapshot,
+  ContextPackRecord,
   EventEnvelope,
   HandoffRequest,
   HandoffResponse,
+  MemoryCandidateRecord,
+  ModelCallRecord,
+  ModelHealthCheckRecord,
+  ModelProfileRecord,
+  ModelProviderRecord,
+  ModelRouteRecord,
+  ModelUsageEntry,
   PlanRequest,
   PlanResponse,
   ProjectCreateInput,
@@ -18,6 +28,7 @@ import type {
   PromptLabRunRecord,
   PromptLabRunRequest,
   RetrievalChunk,
+  RetrievalQueryRecord,
   ReviewRecord,
   ReviewRequest,
   ReviewResponse,
@@ -26,6 +37,9 @@ import type {
   SessionReplayResponse,
   SessionTimelineResponse,
   SettingsSnapshot,
+  SkillCandidateRecord,
+  SkillRecord,
+  StatusSnapshot,
   TaskRecord,
 } from "../../shared/src/index.ts";
 
@@ -68,7 +82,7 @@ export function createApiClient(options: ApiClientOptions) {
     config(): Promise<{ status: "ok"; data: ConfigSnapshot }> {
       return requestJson(options.baseUrl, "/config");
     },
-    status(): Promise<{ status: "ok"; data: unknown }> {
+    status(): Promise<{ status: "ok"; data: StatusSnapshot }> {
       return requestJson(options.baseUrl, "/status");
     },
     listProjects(): Promise<{ status: "ok"; data: ProjectSummary[] }> {
@@ -306,15 +320,7 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getModels(): Promise<{
       status: "ok";
-      data: {
-        usage: Array<{
-          day: string;
-          modelName: string;
-          promptTokens: number;
-          completionTokens: number;
-          requests: number;
-        }>;
-      };
+      data: { usage: ModelUsageEntry[]; settings: SettingsSnapshot };
     }> {
       return requestJson(options.baseUrl, "/models");
     },
@@ -331,7 +337,7 @@ export function createApiClient(options: ApiClientOptions) {
       sessionId?: string;
       projectId?: string;
       limit?: number;
-    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    }): Promise<{ status: "ok"; data: RetrievalQueryRecord[] }> {
       const params = new URLSearchParams();
       if (input.sessionId) params.set("sessionId", input.sessionId);
       if (input.projectId) params.set("projectId", input.projectId);
@@ -339,27 +345,27 @@ export function createApiClient(options: ApiClientOptions) {
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/retrieval/queries${suffix}`);
     },
-    getRetrievalQuery(id: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    getRetrievalQuery(id: string): Promise<{ status: "ok"; data: RetrievalQueryRecord }> {
       return requestJson(options.baseUrl, `/retrieval/queries/${id}`);
     },
     listMemoryCandidates(input: {
       status?: "pending" | "accepted" | "rejected";
       projectId?: string;
-    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    }): Promise<{ status: "ok"; data: MemoryCandidateRecord[] }> {
       const params = new URLSearchParams();
       if (input.status) params.set("status", input.status);
       if (input.projectId) params.set("projectId", input.projectId);
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/memory/candidates${suffix}`);
     },
-    acceptMemoryCandidate(id: string, notes?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    acceptMemoryCandidate(id: string, notes?: string): Promise<{ status: "ok"; data: MemoryCandidateRecord }> {
       return requestJson(options.baseUrl, `/memory/candidates/${id}/accept`, {
         method: "POST",
         body: JSON.stringify({ notes: notes ?? null }),
         headers: { "content-type": "application/json" },
       });
     },
-    rejectMemoryCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    rejectMemoryCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: MemoryCandidateRecord }> {
       return requestJson(options.baseUrl, `/memory/candidates/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
@@ -384,32 +390,32 @@ export function createApiClient(options: ApiClientOptions) {
     },
     listSkillCandidates(input?: {
       status?: "pending" | "active" | "deprecated" | "rejected";
-    }): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    }): Promise<{ status: "ok"; data: SkillCandidateRecord[] }> {
       const params = new URLSearchParams();
       if (input?.status) params.set("status", input.status);
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/skills/candidates${suffix}`);
     },
-    acceptSkillCandidate(id: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    acceptSkillCandidate(id: string): Promise<{ status: "ok"; data: SkillRecord }> {
       return requestJson(options.baseUrl, `/skills/candidates/${id}/accept`, { method: "POST" });
     },
-    rejectSkillCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    rejectSkillCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: SkillCandidateRecord }> {
       return requestJson(options.baseUrl, `/skills/candidates/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null }),
         headers: { "content-type": "application/json" },
       });
     },
-    listSkills(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listSkills(): Promise<{ status: "ok"; data: SkillRecord[] }> {
       return requestJson(options.baseUrl, `/skills`);
     },
     getModelProviders(): Promise<{
       status: "ok";
-      data: { providers: Array<Record<string, unknown>>; profiles: Array<Record<string, unknown>> };
+      data: { providers: ModelProviderRecord[]; profiles: ModelProfileRecord[] };
     }> {
       return requestJson(options.baseUrl, `/models/providers`);
     },
-    getModelRoutes(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    getModelRoutes(): Promise<{ status: "ok"; data: ModelRouteRecord[] }> {
       return requestJson(options.baseUrl, `/models/routes`);
     },
     routeModel(input: {
@@ -423,7 +429,7 @@ export function createApiClient(options: ApiClientOptions) {
       reason?: string | null;
     }): Promise<{
       status: "ok";
-      data: { route: Record<string, unknown>; profile: Record<string, unknown> | null };
+      data: { route: ModelRouteRecord; profile: ModelProfileRecord | null };
     }> {
       return requestJson(options.baseUrl, `/models/route`, {
         method: "POST",
@@ -431,14 +437,15 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    getModelCalls(limit = 50): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
-      return requestJson(options.baseUrl, `/models/calls?limit=${limit}`);
+    getModelCalls(limit = 50): Promise<{ status: "ok"; data: ModelCallRecord[] | { data: ModelCallRecord[]; pagination: { limit: number; hasMore: boolean; nextCursor?: string } } }> {
+      const params = new URLSearchParams({ limit: String(limit) });
+      return requestJson(options.baseUrl, `/models/calls?${params}`);
     },
     getModelHealth(): Promise<{
       status: "ok";
       data: {
-        providers: Array<Record<string, unknown>>;
-        recentCalls: Array<Record<string, unknown>>;
+        providers: Array<ModelProviderRecord & { lastCall: ModelCallRecord | null }>;
+        recentCalls: ModelCallRecord[];
       };
     }> {
       return requestJson(options.baseUrl, `/models/health`);
@@ -449,27 +456,27 @@ export function createApiClient(options: ApiClientOptions) {
       status?: "healthy" | "degraded" | "unreachable" | "disabled";
       latencyMs?: number | null;
       detail?: string | null;
-    }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    }): Promise<{ status: "ok"; data: ModelHealthCheckRecord }> {
       return requestJson(options.baseUrl, `/models/health/check`, {
         method: "POST",
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },
       });
     },
-    listAgentRuns(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listAgentRuns(sessionId: string): Promise<{ status: "ok"; data: AgentRunRecord[] }> {
       return requestJson(options.baseUrl, `/agents/runs?sessionId=${encodeURIComponent(sessionId)}`);
     },
-    getAgentRun(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    getAgentRun(runId: string): Promise<{ status: "ok"; data: AgentRunRecord }> {
       return requestJson(options.baseUrl, `/agents/runs/${runId}`);
     },
-    listAgentHandoffs(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listAgentHandoffs(sessionId?: string): Promise<{ status: "ok"; data: AgentHandoffRecord[] }> {
       const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
       return requestJson(options.baseUrl, `/agents/handoffs${suffix}`);
     },
-    listContextPacks(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listContextPacks(sessionId: string): Promise<{ status: "ok"; data: ContextPackRecord[] }> {
       return requestJson(options.baseUrl, `/context/packs?sessionId=${encodeURIComponent(sessionId)}`);
     },
-    getContextPack(packId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    getContextPack(packId: string): Promise<{ status: "ok"; data: ContextPackRecord }> {
       return requestJson(options.baseUrl, `/context/packs/${packId}`);
     },
     listConversationMessages(sessionId: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
