@@ -13,6 +13,7 @@ export function registerSseRoutes(
     res.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
+      "x-accel-buffering": "no",
       connection: "keep-alive",
     });
     res.write(": connected\n\n");

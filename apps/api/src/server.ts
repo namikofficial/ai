@@ -189,6 +189,18 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   app.use(express.urlencoded({ extended: false, limit: "10mb", type: "application/x-www-form-urlencoded" }));
   app.use(express.text({ limit: "10mb", type: ["text/plain", "multipart/form-data"] }));
 
+  // Catch JSON parse errors from express.json() and return clean 400
+  app.use((err: unknown, req: Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) return;
+    const e = err as { type?: string; status?: number; message?: string };
+    if (e.type === "entity.parse.failed") {
+      res.status(400);
+      sendJson(res, json("error", undefined, { message: "Malformed JSON in request body" }), 400);
+      return;
+    }
+    next(err);
+  });
+
   const ssrRouter = express.Router();
   registerSsrRoutes(ssrRouter, { renderDashboard: () => renderDashboard(store) });
   app.use(ssrRouter);
