@@ -532,14 +532,6 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         projectId: input.project.id,
       },
     });
-    input.runtime.models.recordCall({
-      sessionId: input.sessionId,
-      profileId: "planner-balanced-local",
-      role: "planner",
-      status: "ok",
-      request: { kind: "dev-plan", runId: run.id },
-      response: { text: plannerResult.text },
-    });
 
     let plan = parseModelPlan(plannerResult.text);
     if (!plan) {
@@ -702,14 +694,6 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
             sessionId: input.sessionId,
             projectId: input.project.id,
           },
-        });
-        input.runtime.models.recordCall({
-          sessionId: input.sessionId,
-          profileId: "dev-repair-local",
-          role: "coder_handoff",
-          status: "ok",
-          request: { kind: "dev-repair", runId: run.id },
-          response: { text: repairResult.text },
         });
         const repairPlan = parseModelPlan(repairResult.text);
         if (!repairPlan || repairPlan.edits.length === 0) {

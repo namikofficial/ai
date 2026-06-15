@@ -23,7 +23,7 @@ test("migrations apply cleanly and create the new intelligence and trace tables"
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 6);
+    assert.equal(result.applied.length, 7);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -60,7 +60,7 @@ test("migrations are idempotent: second run skips all", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const first = runMigrations(db);
-    assert.ok(first.applied.length >= 6);
+    assert.ok(first.applied.length >= 7);
     const second = runMigrations(db);
     assert.equal(second.applied.length, 0);
     assert.equal(second.skipped.length, first.applied.length);

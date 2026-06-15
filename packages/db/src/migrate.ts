@@ -1,4 +1,3 @@
-// @ts-expect-error - node:fs types in this workspace are incomplete; runtime works.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";

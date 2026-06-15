@@ -15,7 +15,6 @@
 // is mixed sync/async and we keep this contract stable).
 
 import { createHash } from "node:crypto";
-// @ts-expect-error - this workspace's node type surface does not expose node:module, but the runtime does.
 import { createRequire } from "node:module";
 
 import type { RetrievalChunk } from "../../shared/src/index.ts";

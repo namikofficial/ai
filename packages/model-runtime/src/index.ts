@@ -376,6 +376,68 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
         const latencyMs = Date.now() - started;
         const message = error instanceof Error ? error.message : String(error);
 
+        const fallbackId = options?.fallbackProfileId ?? profile.fallbackProfileId;
+        if (provider?.kind === "local_openai_compat") {
+          if (fallbackId && fallbackId !== profileId) {
+            return this.invoke(fallbackId, request, options);
+          }
+          if (profile.providerId) {
+            const heuristic = new HeuristicAdapter(profile.providerId);
+            const fallbackStarted = Date.now();
+            const fallbackResult = await heuristic.invoke({
+              ...request,
+              modelName: request.modelName ?? profile.modelName,
+            });
+            recordCallSafely(
+              {
+                profileId,
+                role: request.role,
+                promptTokens: fallbackResult.promptTokens,
+                completionTokens: fallbackResult.completionTokens,
+                latencyMs: Date.now() - fallbackStarted,
+                status: "fallback",
+                request: { ...request, metadata: redactMetadata(request.metadata) },
+                response: {
+                  text: fallbackResult.text.slice(0, 1000),
+                  usage: fallbackResult.usage,
+                  fallbackFrom: message,
+                },
+                error: message,
+                sessionId: options?.sessionId,
+                taskId: options?.taskId,
+                retrievalQueryId: options?.retrievalQueryId,
+              },
+              options
+            );
+            return {
+              ...fallbackResult,
+              profileId,
+              providerId: profile.providerId,
+              status: "fallback",
+              latencyMs: Date.now() - fallbackStarted,
+            };
+          }
+        }
+        if (fallbackId && fallbackId !== profileId) {
+          recordCallSafely(
+            {
+              profileId,
+              role: request.role,
+              promptTokens: 0,
+              completionTokens: 0,
+              latencyMs,
+              status: "failed",
+              request: { ...request, metadata: redactMetadata(request.metadata) },
+              response: { error: message },
+              error: message,
+              sessionId: options?.sessionId,
+              taskId: options?.taskId,
+              retrievalQueryId: options?.retrievalQueryId,
+            },
+            options
+          );
+          return this.invoke(fallbackId, request, options);
+        }
         recordCallSafely(
           {
             profileId,
@@ -393,11 +455,6 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
           },
           options
         );
-
-        const fallbackId = options?.fallbackProfileId ?? profile.fallbackProfileId;
-        if (fallbackId && fallbackId !== profileId) {
-          return this.invoke(fallbackId, request, options);
-        }
         if (profile.providerId) {
           const heuristic = new HeuristicAdapter(profile.providerId);
           const fallbackStarted = Date.now();

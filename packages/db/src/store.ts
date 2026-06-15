@@ -1,6 +1,5 @@
 import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
-// @ts-expect-error - this workspace's node type surface does not expose node:module, but the runtime does.
 import { createRequire } from "node:module";
 import { basename, extname, join, normalize, relative, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";

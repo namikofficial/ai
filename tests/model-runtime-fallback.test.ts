@@ -173,3 +173,61 @@ test("model-runtime: invoke with failing cloud falls back to local profile and m
     )
   );
 });
+
+test("model-runtime: adapter failure fallback records a single logical call for the fallback profile", async () => {
+  const localFallbackProfiles = [
+    {
+      id: "ask-heuristic-local",
+      providerId: "provider_missing",
+      role: "answer" as const,
+      modelName: "ask-heuristic-local",
+      displayName: null,
+      contextWindow: 8192,
+      maxOutputTokens: 2048,
+      localOnly: true,
+      enabled: true,
+      fallbackProfileId: null,
+      qualityScore: 0.7,
+      latencyScore: 0.8,
+      costScore: 0.9,
+      meta: {},
+      createdAt: "2024-01-01",
+      updatedAt: "2024-01-01",
+    },
+    {
+      id: "ask-extended-local",
+      providerId: "provider_local",
+      role: "answer" as const,
+      modelName: "ask-extended-local",
+      displayName: null,
+      contextWindow: 8192,
+      maxOutputTokens: 2048,
+      localOnly: true,
+      enabled: true,
+      fallbackProfileId: "ask-heuristic-local",
+      qualityScore: 0.7,
+      latencyScore: 0.8,
+      costScore: 0.9,
+      meta: {},
+      createdAt: "2024-01-01",
+      updatedAt: "2024-01-01",
+    },
+  ];
+  const calls: Array<{ profileId: string; status: string }> = [];
+  const runtime = createModelRuntime({
+    providers,
+    profiles: localFallbackProfiles,
+    cloudEnabled: true,
+    recordCall: (payload) => {
+      calls.push({ profileId: payload.profileId, status: payload.status });
+    },
+  });
+  const result = await runtime.invoke("ask-extended-local", {
+    role: "answer",
+    messages: [{ role: "user", content: "fallback please" }],
+  });
+  assert.ok(result.text.length > 0);
+  const localCalls = calls.filter((call) => call.profileId === "ask-heuristic-local");
+  assert.equal(localCalls.length, 1);
+  assert.ok(localCalls[0] && (localCalls[0].status === "ok" || localCalls[0].status === "fallback"));
+});
