@@ -27,6 +27,7 @@ import type {
 } from "../../../packages/shared/src/index.ts";
 import { api } from "./api.ts";
 import { Badge, EmptyState, KeyValueList, Panel, StatCard } from "./components.tsx";
+import { executeTaskAction } from "./hooks.ts";
 import { useWorkbenchStore } from "./store.ts";
 import { getTimelineCounts, getTimelineItems } from "./timeline.ts";
 
@@ -48,6 +49,7 @@ function useResource<T>(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const loaderRef = useRef(loader);
+  const controllerRef = useRef<AbortController | null>(null);
   loaderRef.current = loader;
 
   const refresh = useCallback(() => {
@@ -55,6 +57,8 @@ function useResource<T>(
   }, []);
 
   useEffect(() => {
+    controllerRef.current?.abort();
+    controllerRef.current = new AbortController();
     let active = true;
     setLoading(true);
     setError(null);
@@ -67,15 +71,17 @@ function useResource<T>(
         }
       })
       .catch((cause: unknown) => {
-        if (active) {
+        if (active && !(cause instanceof DOMException && cause.name === "AbortError")) {
           setError(cause instanceof Error ? cause.message : String(cause));
           setLoading(false);
         }
       });
     return () => {
       active = false;
+      controllerRef.current?.abort();
     };
-  }, [options?.live ? liveTick : 0, reloadTick, ...deps]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveTick, reloadTick, ...deps]);
 
   return { data, loading, error, refresh };
 }
@@ -1378,12 +1384,11 @@ function TaskDetailPage(): ReactNode {
   }
 
   const action = async (kind: "start" | "complete" | "fail") => {
-    const response = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/${kind}`, {
-      method: "POST",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: JSON.stringify(kind === "complete" ? { result } : kind === "fail" ? { error } : {}),
+    const ok = await executeTaskAction(task.id, kind, {
+      result: kind === "complete" ? result : undefined,
+      error: kind === "fail" ? error : undefined,
     });
-    if (!response.ok) {
+    if (!ok) {
       throw new Error(`Failed to ${kind} task`);
     }
     resource.refresh();
@@ -2577,7 +2582,8 @@ function EvalPage(): ReactNode {
       setProjectOptions(response.data);
       if (!projectId && response.data[0]?.id) setProjectId(response.data[0].id);
     });
-  }, [projectId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2684,6 +2690,10 @@ function AgentsPage(): ReactNode {
   const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
   const [runs, setRuns] = useState<AgentRunRecord[]>([]);
   const [packs, setPacks] = useState<ContextPackRecord[]>([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState<string | null>(null);
+  const [packsLoading, setPacksLoading] = useState(false);
+  const [packsError, setPacksError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!sessionId && sessions[0]?.id) setSessionId(sessions[0].id);
@@ -2695,8 +2705,32 @@ function AgentsPage(): ReactNode {
       setPacks([]);
       return;
     }
-    api.listAgentRuns(sessionId).then((response) => setRuns(response.data));
-    api.listContextPacks(sessionId).then((response) => setPacks(response.data));
+    setRunsLoading(true);
+    setRunsError(null);
+    setPacksLoading(true);
+    setPacksError(null);
+
+    api
+      .listAgentRuns(sessionId)
+      .then((response) => {
+        setRuns(response.data);
+        setRunsLoading(false);
+      })
+      .catch((err) => {
+        setRunsError(err instanceof Error ? err.message : String(err));
+        setRunsLoading(false);
+      });
+
+    api
+      .listContextPacks(sessionId)
+      .then((response) => {
+        setPacks(response.data);
+        setPacksLoading(false);
+      })
+      .catch((err) => {
+        setPacksError(err instanceof Error ? err.message : String(err));
+        setPacksLoading(false);
+      });
   }, [sessionId]);
 
   return (
@@ -2715,9 +2749,13 @@ function AgentsPage(): ReactNode {
         </select>
       </Panel>
       <Panel title="Agent Runs" span={8}>
-        <div className="list">
-          {runs.length > 0 ? (
-            runs.map((run) => (
+        {runsError ? (
+          <EmptyState title="Failed to load runs" body={runsError} />
+        ) : runsLoading ? (
+          <EmptyState title="Loading runs" body="Fetching agent runs for this session." />
+        ) : runs.length > 0 ? (
+          <div className="list">
+            {runs.map((run) => (
               <a className="list-item" href={`/agents/runs/${String(run.id)}`} key={String(run.id)}>
                 <div className="row">
                   <strong>{String(run.agent ?? "?")}</strong>
@@ -2729,16 +2767,20 @@ function AgentsPage(): ReactNode {
                   role {String(run.modelRole ?? "?")} · {String(run.startedAt ?? "")}
                 </div>
               </a>
-            ))
-          ) : (
-            <EmptyState title="No runs" body="Asks and handoffs create agent runs." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No runs" body="Asks and handoffs create agent runs." />
+        )}
       </Panel>
       <Panel title="Context Packs" span={4}>
-        <div className="list">
-          {packs.length > 0 ? (
-            packs.map((pack) => (
+        {packsError ? (
+          <EmptyState title="Failed to load packs" body={packsError} />
+        ) : packsLoading ? (
+          <EmptyState title="Loading packs" body="Fetching context packs for this session." />
+        ) : packs.length > 0 ? (
+          <div className="list">
+            {packs.map((pack) => (
               <div className="list-item" key={String(pack.id)}>
                 <div className="row">
                   <strong>{String(pack.reason ?? "pack")}</strong>
@@ -2746,11 +2788,11 @@ function AgentsPage(): ReactNode {
                 </div>
                 <div className="tiny">budget {Number(pack.budgetTokens ?? 0)}</div>
               </div>
-            ))
-          ) : (
-            <EmptyState title="No packs" body="Context packs appear after retrieval." />
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No packs" body="Context packs appear after retrieval." />
+        )}
       </Panel>
     </PageShell>
   );
