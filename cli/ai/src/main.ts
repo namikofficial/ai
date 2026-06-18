@@ -51,6 +51,7 @@ function printUsage(): void {
   ai memory list [--scope <scope>]
   ai models list
   ai models health
+  ai models probe [--profile <profile-id>] [--prompt <text>]
   ai models route "<task>" [--mode <local|cloud|hybrid|any>] [--risk <low|medium|high>] [--depth <shallow|standard|deep>] [--question <text>] [--goal <text>]
   ai models call --role <role> --prompt "<text>" [--profile-id <id>]
   ai trace conversation <session-id>
@@ -890,6 +891,49 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
         routes: store.listModelRoutes(50),
         usageDaily: store.models.listUsageDaily(50),
       });
+      return;
+    }
+    if (sub === "probe") {
+      const profileArg = readCliArg(process.argv.slice(4), "profile");
+      const promptArg = readCliArg(process.argv.slice(4), "prompt") ?? "Reply with the single word PONG.";
+      const profiles = store.models.listProfiles();
+      const targets = profileArg
+        ? profiles.filter((profile) => profile.id === profileArg)
+        : profiles;
+      const results: Array<Record<string, unknown>> = [];
+      for (const profile of targets) {
+        const started = Date.now();
+        try {
+          const result = await runtime.invoke(profile.id, {
+            role: profile.role,
+            messages: [{ role: "user", content: promptArg }],
+            temperature: 0,
+            maxOutputTokens: 32,
+          });
+          results.push({
+            profileId: profile.id,
+            role: profile.role,
+            modelName: profile.modelName,
+            providerId: profile.providerId,
+            status: "ok",
+            latencyMs: Date.now() - started,
+            text: result.text.slice(0, 240),
+            promptTokens: result.promptTokens,
+            completionTokens: result.completionTokens,
+          });
+        } catch (error) {
+          results.push({
+            profileId: profile.id,
+            role: profile.role,
+            modelName: profile.modelName,
+            providerId: profile.providerId,
+            status: "failed",
+            latencyMs: Date.now() - started,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      printJson({ results });
       return;
     }
     if (sub === "route") {

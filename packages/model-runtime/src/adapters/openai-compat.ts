@@ -5,17 +5,43 @@ function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
+export interface OpenAICompatAdapterOptions {
+  baseUrl: string;
+  apiKey?: string | null;
+  /**
+   * Per-call timeout in milliseconds. When the request runs longer, the
+   * adapter aborts the fetch and throws an Error so the runtime can fall
+   * back to a cheaper profile. Defaults to 60s.
+   */
+  timeoutMs?: number;
+}
+
 export class OpenAICompatAdapter implements ModelProviderAdapter {
   readonly id: string;
   readonly kind: "openai_compat" | "llama_cpp";
   private readonly baseUrl: string;
   private readonly apiKey: string | null;
+  private readonly timeoutMs: number;
 
-  constructor(id: string, kind: "openai_compat" | "llama_cpp", baseUrl: string, apiKey?: string | null) {
+  constructor(id: string, kind: "openai_compat" | "llama_cpp", baseUrl: string, apiKey?: string | null);
+  constructor(id: string, kind: "openai_compat" | "llama_cpp", options: OpenAICompatAdapterOptions);
+  constructor(
+    id: string,
+    kind: "openai_compat" | "llama_cpp",
+    baseUrlOrOptions: string | OpenAICompatAdapterOptions,
+    apiKey?: string | null
+  ) {
     this.id = id;
     this.kind = kind;
-    this.baseUrl = baseUrl;
-    this.apiKey = apiKey ?? null;
+    if (typeof baseUrlOrOptions === "string") {
+      this.baseUrl = baseUrlOrOptions;
+      this.apiKey = apiKey ?? null;
+      this.timeoutMs = 60_000;
+    } else {
+      this.baseUrl = baseUrlOrOptions.baseUrl;
+      this.apiKey = baseUrlOrOptions.apiKey ?? null;
+      this.timeoutMs = baseUrlOrOptions.timeoutMs ?? 60_000;
+    }
   }
 
   private headers(): Record<string, string> {
@@ -26,19 +52,31 @@ export class OpenAICompatAdapter implements ModelProviderAdapter {
   }
 
   private async fetchJson(path: string, body?: Record<string, unknown>) {
-    const response = await fetch(new URL(path, this.baseUrl), {
-      method: body ? "POST" : "GET",
-      headers: body ? this.headers() : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    const text = await response.text();
-    let raw: unknown = text;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      raw = JSON.parse(text);
-    } catch {
-      // keep raw text
+      const response = await fetch(new URL(path, this.baseUrl), {
+        method: body ? "POST" : "GET",
+        headers: body ? this.headers() : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+        signal: controller.signal,
+      });
+      const text = await response.text();
+      let raw: unknown = text;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        // keep raw text
+      }
+      return { response, raw };
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        throw new Error(`request to ${path} timed out after ${this.timeoutMs}ms`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
     }
-    return { response, raw };
   }
 
   async health(): Promise<ModelHealthResult> {

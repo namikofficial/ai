@@ -154,6 +154,14 @@ function redactMetadata(metadata: Record<string, unknown> | undefined): Record<s
   }
 }
 
+function readModelTimeoutMs(): number {
+  const raw = process.env.AI_MODEL_TIMEOUT_MS;
+  if (typeof raw !== "string" || raw.trim().length === 0) return 60_000;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) return 60_000;
+  return Math.min(value, 10 * 60_000);
+}
+
 export type LegacyRouteMode = string;
 
 export interface LegacyRouteDetails {
@@ -235,12 +243,11 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
         break;
       case "openai_compat":
       case "llama_cpp":
-        adapter = new OpenAICompatAdapter(
-          provider.id,
-          kind,
-          provider.baseUrl ?? "http://127.0.0.1:11434",
-          provider.apiKeyEnv ? (process.env[provider.apiKeyEnv] ?? null) : null
-        );
+        adapter = new OpenAICompatAdapter(provider.id, kind, {
+          baseUrl: provider.baseUrl ?? "http://127.0.0.1:11434",
+          apiKey: provider.apiKeyEnv ? (process.env[provider.apiKeyEnv] ?? null) : null,
+          timeoutMs: readModelTimeoutMs(),
+        });
         break;
       default:
         adapter = new HeuristicAdapter(provider.id);
