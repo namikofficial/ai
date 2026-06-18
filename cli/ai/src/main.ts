@@ -62,6 +62,8 @@ function printUsage(): void {
   ai eval run --project <project> [--limit <n>]
   ai embeddings stats
   ai embeddings purge [--older-than <days>] [--provider <id>] [--model <name>]
+  ai tools list
+  ai tools call <name> --project <project> [--args <json>] [--allow-high-risk]
   ai status`);
 }
 
@@ -853,6 +855,48 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       return;
     }
     throw new Error(`unknown embeddings subcommand: ${sub}`);
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (process.argv[2] === "tools") {
+  withDirectStore(async (store) => {
+    const sub = process.argv[3] ?? "list";
+    if (sub === "list") {
+      const { createDefaultToolRegistry } = await import("../../../packages/tools/src/index.ts");
+      const registry = createDefaultToolRegistry();
+      printJson({ tools: registry.list() });
+      return;
+    }
+    if (sub === "call") {
+      const name = process.argv[4];
+      if (!name) {
+        throw new Error("tools call requires a tool name");
+      }
+      const projectArg = readCliArg(process.argv, "project");
+      if (!projectArg) {
+        throw new Error("tools call requires --project <name>");
+      }
+      const argsJson = readCliArg(process.argv, "args");
+      const allowHigh = process.argv.includes("--allow-high-risk");
+      const project = store.getProject(projectArg);
+      if (!project) {
+        throw new Error(`Unknown project: ${projectArg}`);
+      }
+      const parsedArgs = argsJson ? (JSON.parse(argsJson) as Record<string, unknown>) : {};
+      const { createDefaultToolRegistry } = await import("../../../packages/tools/src/index.ts");
+      const registry = createDefaultToolRegistry();
+      const started = Date.now();
+      const result = await registry.call(name, parsedArgs, {
+        projectPath: project.path,
+        projectId: project.id,
+        sessionId: "cli",
+        allowHighRisk: allowHigh,
+      });
+      printJson({ durationMs: Date.now() - started, ...result });
+      return;
+    }
+    throw new Error(`unknown tools subcommand: ${sub}`);
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);
