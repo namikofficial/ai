@@ -24,29 +24,53 @@ export interface DefaultProviderInput {
 export interface DefaultEnvOverrides {
   localBaseUrl?: string;
   modelFast?: string;
+  modelFast2?: string;
   modelDeep?: string;
   modelCoder?: string;
+  modelReasoner?: string;
+  modelRouter?: string;
+  modelTiny?: string;
+  modelTiny2?: string;
   embeddingModel?: string;
+  embeddingDimension?: number;
 }
 
 function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): DefaultEnvOverrides {
   return {
     localBaseUrl: env.AI_LOCAL_BASE_URL && env.AI_LOCAL_BASE_URL.length > 0 ? env.AI_LOCAL_BASE_URL : undefined,
     modelFast: env.AI_LOCAL_MODEL_FAST && env.AI_LOCAL_MODEL_FAST.length > 0 ? env.AI_LOCAL_MODEL_FAST : undefined,
+    modelFast2: env.AI_LOCAL_MODEL_FAST2 && env.AI_LOCAL_MODEL_FAST2.length > 0 ? env.AI_LOCAL_MODEL_FAST2 : undefined,
     modelDeep: env.AI_LOCAL_MODEL_DEEP && env.AI_LOCAL_MODEL_DEEP.length > 0 ? env.AI_LOCAL_MODEL_DEEP : undefined,
     modelCoder: env.AI_LOCAL_MODEL_CODER && env.AI_LOCAL_MODEL_CODER.length > 0 ? env.AI_LOCAL_MODEL_CODER : undefined,
+    modelReasoner:
+      env.AI_LOCAL_MODEL_REASONER && env.AI_LOCAL_MODEL_REASONER.length > 0 ? env.AI_LOCAL_MODEL_REASONER : undefined,
+    modelRouter:
+      env.AI_LOCAL_MODEL_ROUTER && env.AI_LOCAL_MODEL_ROUTER.length > 0 ? env.AI_LOCAL_MODEL_ROUTER : undefined,
+    modelTiny: env.AI_LOCAL_MODEL_TINY && env.AI_LOCAL_MODEL_TINY.length > 0 ? env.AI_LOCAL_MODEL_TINY : undefined,
+    modelTiny2: env.AI_LOCAL_MODEL_TINY2 && env.AI_LOCAL_MODEL_TINY2.length > 0 ? env.AI_LOCAL_MODEL_TINY2 : undefined,
     embeddingModel:
       env.AI_LOCAL_EMBEDDING_MODEL && env.AI_LOCAL_EMBEDDING_MODEL.length > 0
         ? env.AI_LOCAL_EMBEDDING_MODEL
+        : undefined,
+    embeddingDimension:
+      env.AI_LOCAL_EMBEDDING_DIM && env.AI_LOCAL_EMBEDDING_DIM.length > 0
+        ? Number(env.AI_LOCAL_EMBEDDING_DIM)
         : undefined,
   };
 }
 
 export const DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8080/v1";
-export const DEFAULT_FAST_MODEL = "qwen2.5-coder:7b";
-export const DEFAULT_DEEP_MODEL = "qwen2.5-coder:14b";
-export const DEFAULT_CODER_MODEL = "qwen2.5-coder:14b";
-export const DEFAULT_EMBEDDING_MODEL = "nomic-embed-text";
+// Defaults are tuned for the workstation's small/local llama-swap set.
+export const DEFAULT_FAST_MODEL = "qwen3-4b";
+export const DEFAULT_FAST2_MODEL = "gemma-3-4b";
+export const DEFAULT_DEEP_MODEL = "qwen3-8b";
+export const DEFAULT_CODER_MODEL = "qwen-coder-7b";
+export const DEFAULT_REASONER_MODEL = "deepseek-r1-7b";
+export const DEFAULT_ROUTER_MODEL = "qwen3-router";
+export const DEFAULT_TINY_MODEL = "llama-3b";
+export const DEFAULT_TINY2_MODEL = "phi-4-mini";
+export const DEFAULT_EMBEDDING_MODEL = "qwen3-4b";
+export const DEFAULT_EMBEDDING_DIMENSION = 512;
 
 export const DEFAULT_PROVIDER_ROWS: DefaultProviderInput[] = [
   {
@@ -92,39 +116,99 @@ export interface DefaultProfileInput {
 export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): DefaultProfileInput[] {
   const overrides = readEnvOverrides(env);
   const fastModel = overrides.modelFast ?? DEFAULT_FAST_MODEL;
+  const fastModel2 = overrides.modelFast2 ?? DEFAULT_FAST2_MODEL;
   const deepModel = overrides.modelDeep ?? DEFAULT_DEEP_MODEL;
   const coderModel = overrides.modelCoder ?? DEFAULT_CODER_MODEL;
+  const reasonerModel = overrides.modelReasoner ?? DEFAULT_REASONER_MODEL;
+  const routerModel = overrides.modelRouter ?? DEFAULT_ROUTER_MODEL;
+  const tinyModel = overrides.modelTiny ?? DEFAULT_TINY_MODEL;
+  const tinyModel2 = overrides.modelTiny2 ?? DEFAULT_TINY2_MODEL;
   const embeddingModel = overrides.embeddingModel ?? DEFAULT_EMBEDDING_MODEL;
   const local = "provider_llamacpp_local";
   return [
+    // --- tiny / fast models (used for cheap calls) ---
     {
       id: "intent-local",
       providerId: local,
       role: "intent",
-      modelName: fastModel,
-      displayName: "Intent classifier (local)",
+      modelName: tinyModel,
+      displayName: "Intent classifier (tiny)",
+      qualityScore: 0.55,
+      latencyScore: 0.95,
+    },
+    {
+      id: "tool-select-local",
+      providerId: local,
+      role: "tool_select",
+      modelName: tinyModel,
+      displayName: "Tool selector (tiny)",
+      qualityScore: 0.55,
+      latencyScore: 0.95,
+    },
+    {
+      id: "file-read-local",
+      providerId: local,
+      role: "file_read",
+      modelName: tinyModel2,
+      displayName: "File reader (tiny)",
+      qualityScore: 0.55,
+      latencyScore: 0.95,
+    },
+    {
+      id: "file-write-local",
+      providerId: local,
+      role: "file_write",
+      modelName: fastModel2,
+      displayName: "File writer (small)",
+      qualityScore: 0.6,
+      latencyScore: 0.9,
+    },
+    {
+      id: "file-edit-local",
+      providerId: local,
+      role: "file_edit",
+      modelName: coderModel,
+      displayName: "File editor (coder)",
+      qualityScore: 0.7,
+      latencyScore: 0.85,
+    },
+    {
+      id: "summarizer-local",
+      providerId: local,
+      role: "summarizer",
+      modelName: tinyModel2,
+      displayName: "Summarizer (small)",
+      qualityScore: 0.55,
+      latencyScore: 0.95,
     },
     {
       id: "query-rewrite-local",
       providerId: local,
       role: "query_rewrite",
-      modelName: fastModel,
-      displayName: "Query rewriter (local)",
+      modelName: fastModel2,
+      displayName: "Query rewriter (small)",
+      qualityScore: 0.6,
+      latencyScore: 0.9,
     },
     {
       id: "retrieval-judge-local",
       providerId: local,
       role: "retrieval_judge",
-      modelName: fastModel,
-      displayName: "Retrieval judge (local)",
+      modelName: fastModel2,
+      displayName: "Retrieval judge (small)",
+      qualityScore: 0.6,
+      latencyScore: 0.9,
     },
     {
       id: "reranker-local",
       providerId: local,
       role: "reranker",
-      modelName: fastModel,
-      displayName: "Reranker (local)",
+      modelName: tinyModel2,
+      displayName: "Reranker (small)",
+      qualityScore: 0.5,
+      latencyScore: 0.9,
     },
+    // --- embeddings ---
     {
       id: "embedding-local",
       providerId: local,
@@ -133,46 +217,55 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
       displayName: "Embedding (local)",
     },
     {
-      id: "summarizer-local",
+      id: "indexer-local",
       providerId: local,
-      role: "summarizer",
-      modelName: fastModel,
-      displayName: "Summarizer (local)",
+      role: "embedding",
+      modelName: embeddingModel,
+      displayName: "Indexer embedding (local)",
     },
+    // --- reviewers / reflection / checks ---
     {
       id: "reviewer-local",
       providerId: local,
       role: "reviewer",
-      modelName: fastModel,
-      displayName: "Reviewer (local)",
+      modelName: fastModel2,
+      displayName: "Reviewer (small)",
+    },
+    {
+      id: "checker-local",
+      providerId: local,
+      role: "reviewer",
+      modelName: fastModel2,
+      displayName: "Check summarizer (small)",
     },
     {
       id: "reflection-local",
       providerId: local,
       role: "reflection",
       modelName: deepModel,
-      displayName: "Reflection (local)",
+      displayName: "Reflection (deep)",
     },
     {
-      id: "indexer-local",
+      id: "fact-extract-local",
       providerId: local,
-      role: "embedding",
-      modelName: embeddingModel,
-      displayName: "Indexer (local)",
+      role: "fact_extract",
+      modelName: fastModel2,
+      displayName: "Fact extractor (small)",
     },
+    // --- answers ---
     {
       id: "ask-fast-local",
       providerId: local,
       role: "answer",
       modelName: fastModel,
-      displayName: "Fast answer (local)",
+      displayName: "Fast answer (small)",
     },
     {
       id: "ask-extended-local",
       providerId: local,
       role: "answer",
       modelName: deepModel,
-      displayName: "Extended answer (local)",
+      displayName: "Extended answer (deep)",
       contextWindow: 16_384,
       maxOutputTokens: 4_096,
     },
@@ -180,8 +273,8 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
       id: "ask-deep-local",
       providerId: local,
       role: "answer",
-      modelName: deepModel,
-      displayName: "Deep answer (local)",
+      modelName: reasonerModel,
+      displayName: "Deep reasoning answer (reasoner)",
       contextWindow: 32_768,
       maxOutputTokens: 4_096,
     },
@@ -189,8 +282,8 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
       id: "ask-hybrid-router",
       providerId: local,
       role: "answer",
-      modelName: fastModel,
-      displayName: "Hybrid answer router (local)",
+      modelName: routerModel,
+      displayName: "Hybrid answer router (router)",
     },
     {
       id: "ask-cloud-router",
@@ -201,49 +294,44 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
       localOnly: false,
       enabled: false,
     },
+    // --- planners ---
     {
       id: "planner-fast-local",
       providerId: local,
       role: "planner",
-      modelName: fastModel,
-      displayName: "Fast planner (local)",
+      modelName: fastModel2,
+      displayName: "Fast planner (small)",
     },
     {
       id: "planner-balanced-local",
       providerId: local,
       role: "planner",
       modelName: deepModel,
-      displayName: "Balanced planner (local)",
+      displayName: "Balanced planner (deep)",
     },
     {
       id: "planner-deep-local",
       providerId: local,
       role: "planner",
-      modelName: deepModel,
-      displayName: "Deep planner (local)",
+      modelName: reasonerModel,
+      displayName: "Deep planner (reasoner)",
       contextWindow: 32_768,
       maxOutputTokens: 4_096,
     },
+    // --- handoffs / dev editing ---
     {
       id: "handoff-local",
       providerId: local,
       role: "coder_handoff",
       modelName: coderModel,
-      displayName: "Handoff compiler (local)",
-    },
-    {
-      id: "checker-local",
-      providerId: local,
-      role: "reviewer",
-      modelName: fastModel,
-      displayName: "Check summarizer (local)",
+      displayName: "Handoff compiler (coder)",
     },
     {
       id: "dev-editor-local",
       providerId: local,
       role: "coder_handoff",
       modelName: coderModel,
-      displayName: "Dev editor (local)",
+      displayName: "Dev editor (coder)",
       contextWindow: 32_768,
       maxOutputTokens: 4_096,
     },
@@ -252,7 +340,7 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
       providerId: local,
       role: "coder_handoff",
       modelName: coderModel,
-      displayName: "Dev repair (local)",
+      displayName: "Dev repair (coder)",
       contextWindow: 32_768,
       maxOutputTokens: 4_096,
     },
@@ -330,24 +418,65 @@ export interface ModelCatalogRepo {
 export function seedDefaultModelCatalog(
   repo: ModelCatalogRepo,
   env: NodeJS.ProcessEnv = process.env
-): { providersAdded: number; profilesAdded: number; skipped: boolean; localBaseUrl: string } {
+): { providersAdded: number; profilesAdded: number; profilesUpgraded: number; skipped: boolean; localBaseUrl: string } {
   const overrides = readEnvOverrides(env);
   const localBaseUrl = overrides.localBaseUrl ?? DEFAULT_LOCAL_BASE_URL;
   const existing = repo.listProfiles();
-  if (existing.length > 0) {
-    return { providersAdded: 0, profilesAdded: 0, skipped: true, localBaseUrl };
+  const existingIds = new Set(existing.map((profile) => profile.id));
+  if (existing.length === 0) {
+    let providersAdded = 0;
+    for (const provider of DEFAULT_PROVIDER_ROWS) {
+      repo.upsertProvider(buildDefaultProvider(provider, localBaseUrl));
+      providersAdded += 1;
+    }
+    const profiles = buildDefaultProfileRows(env);
+    for (const profile of profiles) {
+      repo.upsertProfile(buildDefaultProfile(profile));
+    }
+    return {
+      providersAdded,
+      profilesAdded: profiles.length,
+      profilesUpgraded: 0,
+      skipped: false,
+      localBaseUrl,
+    };
   }
+  // Existing catalog: ensure every default provider is present and merge
+  // any new default profiles that did not exist before. We never overwrite
+  // a profile that the user (or an earlier seed) customised; we only add
+  // the missing default ids.
+  const existingProviderIds = new Set(repo.listProviders().map((provider) => provider.id));
+  let providersAdded = 0;
   for (const provider of DEFAULT_PROVIDER_ROWS) {
+    if (existingProviderIds.has(provider.id)) continue;
     repo.upsertProvider(buildDefaultProvider(provider, localBaseUrl));
+    providersAdded += 1;
   }
   const profiles = buildDefaultProfileRows(env);
+  let profilesAdded = 0;
+  let profilesUpgraded = 0;
   for (const profile of profiles) {
+    if (existingIds.has(profile.id)) {
+      const current = existing.find((entry) => entry.id === profile.id);
+      const built = buildDefaultProfile(profile);
+      // Upgrade the model name if the existing profile is still pointing
+      // at a placeholder (heuristic) or a model that no longer exists in
+      // the local llama-swap set. This is a soft upgrade: a profile that
+      // already has a real model name is left alone.
+      if (current && (current.modelName === "heuristic" || current.modelName === "ask-cloud-router")) {
+        repo.upsertProfile({ ...current, ...built, modelName: built.modelName });
+        profilesUpgraded += 1;
+      }
+      continue;
+    }
     repo.upsertProfile(buildDefaultProfile(profile));
+    profilesAdded += 1;
   }
   return {
-    providersAdded: DEFAULT_PROVIDER_ROWS.length,
-    profilesAdded: profiles.length,
-    skipped: false,
+    providersAdded,
+    profilesAdded,
+    profilesUpgraded,
+    skipped: providersAdded === 0 && profilesAdded === 0 && profilesUpgraded === 0,
     localBaseUrl,
   };
 }

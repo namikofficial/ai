@@ -717,6 +717,10 @@ export interface ModelProviderRecord {
 
 export type ModelRole =
   | "intent"
+  | "tool_select"
+  | "file_read"
+  | "file_write"
+  | "file_edit"
   | "query_rewrite"
   | "retrieval_judge"
   | "answer"
@@ -725,6 +729,7 @@ export type ModelRole =
   | "reviewer"
   | "reflection"
   | "summarizer"
+  | "fact_extract"
   | "embedding"
   | "reranker";
 
