@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { CodeEdgeRecord, CodeSymbolRecord } from "../../shared/src/index.ts";
+import { parseSource, type ParserSymbol } from "../../parser/src/index.ts";
 
 export type CodeSymbol = CodeSymbolRecord;
 export type CodeEdge = CodeEdgeRecord;
@@ -226,6 +227,83 @@ function collectDocComment(sourceLines: string[], startIndex: number, language: 
     break;
   }
   return comments.length > 0 ? comments.join("\n") : null;
+}
+
+const KIND_MAP: Record<string, CodeSymbol["kind"]> = {
+  function: "function",
+  arrow: "constant",
+  method: "method",
+  class: "class",
+  interface: "interface",
+  type: "type",
+  import: "import",
+};
+
+function scanWithParser(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edges: CodeEdge[] } {
+  const parsed = parseSource({ path: input.path, content: input.content, language: input.language ?? undefined });
+
+  // If the acorn/regex parser failed with errors, fall back to the
+  // legacy regex scanner so we still surface symbols from partially-
+  // broken or intentionally duplicate source files.
+  const hasErrors = parsed.diagnostics.some((d) => d.severity === "error");
+  if (hasErrors && parsed.symbols.length === 0) {
+    const lang = input.language;
+    if (lang === "typescript" || lang === "javascript") return scanTsJs(input);
+    if (lang === "python") return scanPython(input);
+  }
+
+  const sourceLines = lines(input.content);
+  const symbols: CodeSymbol[] = [];
+  const edges: CodeEdge[] = [];
+
+  const lang = guessFileLanguage(input.path, input.language);
+
+  for (const ps of parsed.symbols) {
+    const kind = KIND_MAP[ps.kind] ?? "constant";
+    const qualifiedName = `${input.path}#${ps.qualifiedName ?? ps.name}`;
+    const symbol = makeSymbol(input, kind, ps.name, ps.startLine, ps.endLine, {
+      qualifiedName,
+      signature: ps.signature,
+      doc: collectDocComment(sourceLines, ps.startLine - 1, lang),
+      metadata: {
+        exported: ps.exported,
+        parent: ps.parent,
+        modifiers: ps.modifiers,
+      },
+    });
+    symbols.push(symbol);
+  }
+
+  // Generate parent→child edges for methods inside classes.
+  for (const symbol of symbols) {
+    const parent = symbol.metadata?.parent as string | undefined;
+    if (!parent) continue;
+    const parentSymbol = symbols.find((s) => s.name === parent);
+    if (!parentSymbol) continue;
+    edges.push({
+      id: edgeId(input, parentSymbol.id, symbol.id, "defines"),
+      projectId: input.projectId,
+      fromSymbolId: parentSymbol.id,
+      toSymbolId: symbol.id,
+      kind: "defines",
+      confidence: 0.95,
+      metadata: { relation: "class-member" },
+    });
+  }
+
+  // Map imports to symbols.
+  for (const imp of parsed.imports) {
+    const modulePath = imp.source;
+    const imported = imp.specifiers.map((s) => s.alias ?? s.name).join(", ");
+    symbols.push(
+      makeSymbol(input, "import", modulePath, imp.startLine, imp.endLine, {
+        signature: `import { ${imported} } from '${modulePath}'`,
+        metadata: { modulePath, imported, kind: "import" },
+      })
+    );
+  }
+
+  return { symbols: dedupe(symbols), edges };
 }
 
 function scanTsJs(input: ExtractCodeSymbolsInput): { symbols: CodeSymbol[]; edges: CodeEdge[] } {
@@ -683,10 +761,10 @@ export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeInt
   switch (language) {
     case "typescript":
     case "javascript":
-      result = scanTsJs({ ...input, language });
+      result = scanWithParser({ ...input, language });
       break;
     case "python":
-      result = scanPython({ ...input, language });
+      result = scanWithParser({ ...input, language });
       break;
     case "rust":
       result = scanRust({ ...input, language });
