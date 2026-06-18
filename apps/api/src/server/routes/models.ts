@@ -88,4 +88,25 @@ export function registerModelRoutes(router: Router, deps: { store: Store; config
       recentCalls,
     }));
   });
+
+  router.get("/embeddings/cache", (_req, res) => {
+    const cache = deps.store.embeddingCache;
+    sendJson(res, json("ok", { entryCount: cache.count(), stats: cache.stats() }));
+  });
+
+  router.post("/embeddings/cache/purge", asyncRoute(async (req, res) => {
+    const body = (
+      req.headers["content-type"]?.includes("application/json")
+        ? await readJsonBody(req)
+        : Object.fromEntries(new URLSearchParams(await readTextBody(req)))
+    ) as Record<string, unknown>;
+    const cache = deps.store.embeddingCache;
+    const removed = cache.purge({
+      olderThanDays:
+        body.olderThanDays == null ? undefined : Number(body.olderThanDays),
+      providerId: body.providerId ? String(body.providerId) : null,
+      modelName: body.modelName ? String(body.modelName) : null,
+    });
+    sendJson(res, json("ok", { removed, entryCount: cache.count() }));
+  }));
 }

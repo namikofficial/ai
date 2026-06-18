@@ -59,6 +59,8 @@ function printUsage(): void {
   ai skills reject <candidate-id> [--reason <text>]
   ai eval add --project <project> --query "<q>" --expected "<e>" [--kind <retrieval|answer>]
   ai eval run --project <project> [--limit <n>]
+  ai embeddings stats
+  ai embeddings purge [--older-than <days>] [--provider <id>] [--model <name>]
   ai status`);
 }
 
@@ -821,6 +823,35 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       return;
     }
     throw new Error(`unknown memory subcommand: ${sub}`);
+  }).catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+} else if (process.argv[2] === "embeddings") {
+  withDirectStore(async (store) => {
+    const sub = process.argv[3] ?? "stats";
+    if (sub === "stats") {
+      const repo = (store as unknown as { embeddingCache: { count(): number; stats(): unknown[] } }).embeddingCache;
+      printJson({
+        entryCount: repo.count(),
+        stats: repo.stats(),
+      });
+      return;
+    }
+    if (sub === "purge") {
+      const olderThan = process.argv.find((arg) => arg.startsWith("--older-than="))?.split("=")[1];
+      const provider = process.argv.find((arg) => arg.startsWith("--provider="))?.split("=")[1];
+      const model = process.argv.find((arg) => arg.startsWith("--model="))?.split("=")[1];
+      const repo = (store as unknown as { embeddingCache: { purge(opts: { olderThanDays?: number; modelName?: string | null; providerId?: string | null }): number } }).embeddingCache;
+      const removed = repo.purge({
+        olderThanDays: olderThan ? Number(olderThan) : undefined,
+        providerId: provider ?? null,
+        modelName: model ?? null,
+      });
+      printJson({ removed });
+      return;
+    }
+    throw new Error(`unknown embeddings subcommand: ${sub}`);
   }).catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

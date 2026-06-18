@@ -522,6 +522,20 @@ export function createApiClient(options: ApiClientOptions) {
       const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
       return requestJson(options.baseUrl, `/eval/outcomes${suffix}`);
     },
+    getEmbeddingCache(): Promise<{ status: "ok"; data: { entryCount: number; stats: Array<Record<string, unknown>> } }> {
+      return requestJson(options.baseUrl, `/embeddings/cache`);
+    },
+    purgeEmbeddingCache(input?: {
+      olderThanDays?: number | null;
+      providerId?: string | null;
+      modelName?: string | null;
+    }): Promise<{ status: "ok"; data: { removed: number; entryCount: number } }> {
+      return requestJson(options.baseUrl, `/embeddings/cache/purge`, {
+        method: "POST",
+        body: JSON.stringify(input ?? {}),
+        headers: { "content-type": "application/json" },
+      });
+    },
     streamEvents(onEvent: (event: EventEnvelope) => void): () => void {
       const controller = new AbortController();
       fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(async (response) => {

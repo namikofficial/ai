@@ -19,6 +19,7 @@ import { createModelRuntime, selectModelProfile } from "../../model-runtime/src/
 import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index.ts";
 import { compilePrompt } from "../../prompt-compiler/src/index.ts";
 import { reflect as reflectEngine } from "../../reflection-engine/src/index.ts";
+import { embedWithCache } from "../../embeddings-cache/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import {
   buildFtsQuery,
@@ -74,6 +75,7 @@ import {
   createContextRepo,
   createConversationRepo,
   createDevRunsRepo,
+  createEmbeddingCacheRepo,
   createEvalRepo,
   createExecutionRepo,
   createMemoryRepo,
@@ -313,6 +315,7 @@ export function createStore(db: DatabaseSync) {
   const promptRepo = createPromptRepo(db);
   const devRunsRepo = createDevRunsRepo(db);
   const executionRepo = createExecutionRepo(db);
+  const embeddingCacheRepo = createEmbeddingCacheRepo(db);
 
   seedDefaultModelCatalog(modelsRepo);
 
@@ -372,6 +375,7 @@ export function createStore(db: DatabaseSync) {
   const store = {
     db,
     invokeModel,
+    embeddingCache: embeddingCacheRepo,
     setIntelligenceStack(stack: typeof intelligenceStack): void {
       intelligenceStack = stack;
     },
@@ -2005,17 +2009,38 @@ export function createStore(db: DatabaseSync) {
         projectConfig,
         qdrant: qdrantClient,
         embedBatch: async (inputs) => {
-          return getRuntime().embed(
-            embeddingProfileId,
-            { input: inputs, modelName: embeddingConfig.model },
+          // Wrap the real embed call in a content-hash cache so
+          // reindexing a project (or re-running after a partial
+          // failure) only embeds chunks whose content actually
+          // changed since the last successful embed.
+          const effectiveModelName = embeddingProfile?.modelName ?? embeddingConfig.model;
+          const result = await embedWithCache(
+            inputs,
+            async (missing: string[]) =>
+              getRuntime().embed(
+                embeddingProfileId,
+                { input: missing, modelName: effectiveModelName },
+                {
+                  sessionId: session.id,
+                  taskId: task.id,
+                  recordCall: (call) => {
+                    modelsRepo.recordCall(call);
+                  },
+                }
+              ),
             {
-              sessionId: session.id,
-              taskId: task.id,
-              recordCall: (call) => {
-                modelsRepo.recordCall(call);
-              },
+              providerId: embeddingProfile?.providerId ?? "provider_heuristic_local",
+              modelName: effectiveModelName,
+              dimension: embeddingConfig.dimension,
+              cache: embeddingCacheRepo,
             }
           );
+          return {
+            embeddings: result.embeddings,
+            dimensions: result.dimensions,
+            modelName: result.modelName,
+            providerId: result.providerId,
+          };
         },
         embeddingModel: embeddingProfile?.modelName ?? embeddingConfig.model,
         embeddingProvider: embeddingProfile?.providerId ?? "provider_heuristic_local",

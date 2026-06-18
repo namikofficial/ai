@@ -3,11 +3,12 @@ export { type CodeIntelligenceRepo, createCodeIntelligenceRepo } from "./code-in
 export { type ContextRepo, createContextRepo } from "./context.ts";
 export { type ConversationRepo, createConversationRepo } from "./conversation.ts";
 export { createDevRunsRepo, type DevRunsRepo } from "./dev-runs.ts";
+export { createEmbeddingCacheRepo, type EmbeddingCacheRepo } from "./embedding-cache.ts";
 export { createEvalRepo, type EvalRepo } from "./eval.ts";
 export { createExecutionRepo, type ExecutionRepo } from "./execution.ts";
 export { createMemoryRepo, type MemoryRepo } from "./memory.ts";
 export { createModelsRepo, type ModelsRepo } from "./models.ts";
 export { createPromptLabRepo, type PromptLabRepo } from "./prompt-lab.ts";
 export { createPromptRepo, type PromptRepo } from "./prompts.ts";
-export { createRetrievalRepo, type RetrievalRepo } from "./retrieval.ts";
+export { type RetrievalRepo, createRetrievalRepo } from "./retrieval.ts";
 export { createSkillsRepo, type SkillsRepo } from "./skills.ts";
