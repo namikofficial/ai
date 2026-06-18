@@ -574,3 +574,118 @@ test("runAskWorkflow performs one repair attempt for JSON-like invalid rewrite/j
     await rm(fixture.workspace, { recursive: true, force: true });
   }
 });
+
+test("runAskWorkflow: groundedness retry triggers when confidence is low and symbol hints exist", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-ask-retry-"));
+  const repo = join(workspace, "retry-repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src/auth.ts"), "export function handleLogin() { return 1; }\n");
+  await writeFile(join(repo, "src/router.ts"), "export function getRoutes() { return []; }\n");
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "retry-repo" });
+  await store.indexProject(project.id);
+
+  const originalInvoke = store.invokeModel;
+  const originalSearchChunks = store.searchChunks;
+  let retrievalJudgeCalls = 0;
+  store.searchChunks = (projectId: string, query: string, options?: { limit?: number }) => {
+    if (query.includes("handleLogin")) {
+      return [
+        {
+          id: `chunk_retry_${Math.random().toString(36).slice(2, 8)}`,
+          projectId,
+          documentId: "doc_auth",
+          path: "src/auth.ts",
+          startLine: 1,
+          endLine: 3,
+          content: "export function handleLogin() { return 1; }",
+          tokenCount: 12,
+          score: 0.8,
+          metadata: {},
+        },
+      ];
+    }
+    return originalSearchChunks.call(store, projectId, query, options);
+  };
+  store.invokeModel = async (profileId, request, options) => {
+    const role = request.role;
+    const promptTokens = 12;
+    const completionTokens = 12;
+    let responseText = `mock:${role}`;
+
+    if (role === "query_rewrite") {
+      responseText = JSON.stringify({
+        rewrites: ["handleLogin function"],
+        pathHints: ["src/auth.ts"],
+        symbolHints: ["handleLogin"],
+      });
+    } else if (role === "retrieval_judge") {
+      retrievalJudgeCalls++;
+      if (retrievalJudgeCalls === 1) {
+        responseText = JSON.stringify({
+          confidence: 0.2,
+          confidenceNotes: ["chunks do not match the query well"],
+          miss: { path: "src/auth.ts", notes: "handleLogin not found in selected chunks" },
+        });
+      } else {
+        responseText = JSON.stringify({
+          confidence: 0.75,
+          confidenceNotes: ["symbol retry found relevant chunks"],
+          miss: null,
+        });
+      }
+    } else if (role === "answer") {
+      responseText = "handleLogin is in src/auth.ts";
+    }
+
+    const response = {
+      text: responseText,
+      usage: { promptTokens, completionTokens, totalTokens: promptTokens + completionTokens },
+    };
+    store.models.recordCall({
+      profileId,
+      role,
+      promptTokens,
+      completionTokens,
+      latencyMs: 1,
+      status: "ok",
+      request: { role, metadata: request.metadata ?? null },
+      response,
+      sessionId: options?.sessionId ?? null,
+      taskId: options?.taskId ?? null,
+      retrievalQueryId: options?.retrievalQueryId ?? null,
+    });
+    return {
+      text: responseText,
+      promptTokens,
+      completionTokens,
+      latencyMs: 1,
+      usage: response.usage,
+      profileId,
+      providerId: "provider_heuristic_local",
+      status: "ok",
+      raw: null,
+    };
+  };
+
+  try {
+    const response = await runAskWorkflow({
+      store,
+      runtime: createMockRuntime(),
+      cloudEnabled: false,
+      input: {
+        project: project.id,
+        question: "where is handleLogin?",
+        mode: "local",
+        depth: "standard",
+      },
+    });
+    assert.ok(retrievalJudgeCalls >= 2, `expected >=2 retrieval_judge calls, got ${retrievalJudgeCalls}`);
+    assert.ok(response.confidence >= 0.5, `expected confidence >=0.5, got ${response.confidence}`);
+  } finally {
+    store.invokeModel = originalInvoke;
+    store.searchChunks = originalSearchChunks;
+    store.db.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});

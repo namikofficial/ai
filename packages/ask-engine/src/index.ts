@@ -1093,6 +1093,143 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       notes: "no chunks returned from hybrid retrieval",
     });
   }
+
+  // --- groundedness-driven retry ---
+  // When the retrieval judge reports low confidence and the query
+  // rewriter produced symbol hints, do a targeted FTS lookup for
+  // those symbols.  If new chunks surface, re-run the retrieval
+  // judge once to see if confidence improves.
+  const RETRY_CONFIDENCE_THRESHOLD = 0.5;
+  const MAX_RETRY_SYMBOL_QUERIES = 3;
+  if (confidence < RETRY_CONFIDENCE_THRESHOLD && rewriteSymbolHints.length > 0) {
+    const seenChunkIds = new Set(selected.map((entry) => entry.chunk.id));
+    const retryChunks: RetrievalChunk[] = [];
+    for (const hint of rewriteSymbolHints.slice(0, MAX_RETRY_SYMBOL_QUERIES)) {
+      const results = input.store.searchChunks(project.id, hint, { limit: 4 });
+      for (const chunk of results) {
+        if (!seenChunkIds.has(chunk.id)) {
+          seenChunkIds.add(chunk.id);
+          retryChunks.push(chunk);
+        }
+      }
+    }
+    if (retryChunks.length > 0) {
+      const augmentedSelected: RankedChunk[] = [
+        ...selected,
+        ...retryChunks.map(
+          (chunk): RankedChunk => ({
+            chunk,
+            baseScore: 0.5,
+            rerankScore: 0.5,
+            finalScore: 0.5,
+            rerankReason: "symbol_retry",
+            boosters: ["symbol"],
+          })
+        ),
+      ];
+      const augmentedChunks = augmentedSelected.map((entry) => entry.chunk);
+      const retryJudgeProfileId =
+        input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
+      const retryJudgePrompt = compilePrompt({
+        ...buildAskRetrievalJudgePrompt({
+          question: input.input.question,
+          retrievalQueryId: retrievalQuery.id,
+          contextPackId: contextPack.id,
+          rewrittenQuery: selectedRewriteVariant,
+          mode,
+          depth,
+          retrievalChunks: augmentedChunks,
+          rankedCount: ranked.length,
+          selectedCount: augmentedSelected.length,
+          droppedCount: Math.max(0, dropped.length - retryChunks.length),
+        }),
+        idSuffix: "retry",
+      });
+      input.store.recordCompiledPrompt({
+        compiledPrompt: retryJudgePrompt,
+        sessionId: session.id,
+        taskId: retrievalAgentRun.id,
+        retrievalQueryId: retrievalQuery.id,
+        contextPackId: contextPack.id,
+      });
+      try {
+        input.store.appendEvent(
+          createEvent(
+            "model.called",
+            {
+              role: "retrieval_judge",
+              profileId: retryJudgeProfileId,
+              compiledId: retryJudgePrompt.id,
+              retry: true,
+              addedChunks: retryChunks.length,
+            },
+            { sessionId: session.id, projectId: project.id, agent: "retriever" }
+          )
+        );
+        const retryResult = await input.store.invokeModel(
+          retryJudgeProfileId,
+          {
+            role: "retrieval_judge",
+            messages: retryJudgePrompt.messages,
+            temperature: 0,
+            maxOutputTokens: input.store.models.getProfile(retryJudgeProfileId)?.maxOutputTokens ?? 512,
+            metadata: {
+              compiledPrompt: retryJudgePrompt,
+              retrievalQueryId: retrievalQuery.id,
+              contextPackId: contextPack.id,
+              retry: true,
+              addedChunks: retryChunks.length,
+            },
+          },
+          {
+            sessionId: session.id,
+            taskId: retrievalAgentRun.id,
+            retrievalQueryId: retrievalQuery.id,
+          }
+        );
+        const parseRetryJudge = (text: string): ReturnType<typeof parseRetrievalJudgeOutput> => {
+          try {
+            return parseRetrievalJudgeOutput(parseJsonFragment(text));
+          } catch {
+            return null;
+          }
+        };
+        const retryParsed = parseRetryJudge(retryResult.text);
+        if (retryParsed && retryParsed.confidence > confidence) {
+          confidence = retryParsed.confidence;
+          confidenceNotes = retryParsed.confidenceNotes;
+          if (retryParsed.miss?.path) {
+            resolvedMiss = { path: retryParsed.miss.path, notes: retryParsed.miss.notes };
+          } else if (retryParsed.miss === null) {
+            resolvedMiss = null;
+          }
+          // Update the selected set and chunks for answer synthesis.
+          selected.length = 0;
+          selected.push(...augmentedSelected);
+          chunks.length = 0;
+          chunks.push(...augmentedChunks);
+          // Rebuild citations for the answer.
+          citations.length = 0;
+          citations.push(...buildAskCitations(selected));
+        }
+        input.store.appendEvent(
+          createEvent(
+            "model.completed",
+            {
+              role: "retrieval_judge",
+              profileId: retryJudgeProfileId,
+              retry: true,
+              confidenceImproved: retryParsed ? retryParsed.confidence > RETRY_CONFIDENCE_THRESHOLD : false,
+            },
+            { sessionId: session.id, projectId: project.id, agent: "retriever" }
+          )
+        );
+      } catch {
+        // Retry failed — keep original confidence and chunks.
+      }
+    }
+  }
+
   input.store.agents.updateRun(retrievalAgentRun.id, {
     status: "completed",
     finishedAt: new Date().toISOString(),

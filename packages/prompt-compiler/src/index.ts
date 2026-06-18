@@ -78,6 +78,7 @@ export interface CompilePromptInput {
   outputSchema?: unknown;
   metadata?: Record<string, unknown>;
   tokenBudget?: number;
+  idSuffix?: string;
 }
 
 function estimateTokensFromText(text: string): number {
@@ -252,7 +253,7 @@ export function compilePrompt(input: CompilePromptInput): CompiledPrompt {
   const estimatedTokens = estimatePromptTokens(messages);
 
   return {
-    id: `prompt_${input.mode}_${input.role}_${Date.now()}`,
+    id: `prompt_${input.mode}_${input.role}_${Date.now()}${input.idSuffix ? `_${input.idSuffix}` : ""}`,
     mode: input.mode,
     role: input.role,
     messages,
