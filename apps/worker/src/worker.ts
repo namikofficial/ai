@@ -439,11 +439,14 @@ async function recordReflectionModelTrace(
 
 interface ReflectionCounts {
   memoryCandidates: number;
+  autoPromotedMemories: number;
   skillCandidates: number;
   facts: number;
   staleFacts: number;
   retrievalFeedback: number;
 }
+
+const AUTO_PROMOTE_THRESHOLD = 0.7;
 
 function applyReflectionOutput(
   store: ReturnType<typeof createStore>,
@@ -453,13 +456,15 @@ function applyReflectionOutput(
   const session = store.getSession(sessionId);
   const projectId = session?.projectId ?? null;
   let memoryCandidates = 0;
+  let autoPromotedMemories = 0;
   let skillCandidates = 0;
   let facts = 0;
+  let staleFactsHandled = 0;
   let retrievalFeedback = 0;
   store.db.exec("BEGIN");
   try {
     for (const candidate of output.memoryCandidates) {
-      store.memory.createCandidate({
+      const created = store.memory.createCandidate({
         projectId,
         sessionId,
         kind: candidate.kind,
@@ -470,6 +475,20 @@ function applyReflectionOutput(
         scope: candidate.scope,
       });
       memoryCandidates += 1;
+      // Auto-promote high-confidence candidates directly to active memories.
+      // Only project-scoped candidates with confidence >= threshold are promoted
+      // to keep global scope under human review.
+      if (candidate.scope === "project" && candidate.confidence >= AUTO_PROMOTE_THRESHOLD) {
+        try {
+          store.memory.acceptCandidate(
+            created.id,
+            `auto-promoted by reflection (confidence=${candidate.confidence.toFixed(2)})`
+          );
+          autoPromotedMemories += 1;
+        } catch {
+          // Accept can fail if candidate was already accepted; safe to ignore.
+        }
+      }
     }
     for (const candidate of output.skillCandidates) {
       store.skills.createCandidate({
@@ -504,6 +523,17 @@ function applyReflectionOutput(
       });
       facts += 1;
     }
+    // Handle stale facts: mark them as "stale" so future retrievals know
+    // to discount them, but keep the row for audit.  A refresh produces a
+    // new "fresh" fact with the same key when the reflection supplies one.
+    for (const stale of output.staleFacts) {
+      try {
+        store.memory.markFactStatus(stale.factId, "stale");
+        staleFactsHandled += 1;
+      } catch {
+        // Fact may have been deleted; safe to skip.
+      }
+    }
     for (const feedback of output.retrievalFeedback) {
       store.retrieval.recordFeedback({
         retrievalQueryId: feedback.retrievalQueryId,
@@ -521,9 +551,10 @@ function applyReflectionOutput(
   }
   return {
     memoryCandidates,
+    autoPromotedMemories,
     skillCandidates,
     facts,
-    staleFacts: output.staleFacts.length,
+    staleFacts: staleFactsHandled,
     retrievalFeedback,
   };
 }
@@ -550,6 +581,7 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       });
       let counts: ReflectionCounts = {
         memoryCandidates: 0,
+        autoPromotedMemories: 0,
         skillCandidates: 0,
         facts: 0,
         staleFacts: 0,
@@ -614,6 +646,7 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       const prompt = typeof payload.prompt === "string" ? payload.prompt : "";
       let counts: ReflectionCounts = {
         memoryCandidates: 0,
+        autoPromotedMemories: 0,
         skillCandidates: 0,
         facts: 0,
         staleFacts: 0,
@@ -712,6 +745,7 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
       const sessionId = review.sessionId;
       let counts: ReflectionCounts = {
         memoryCandidates: 0,
+        autoPromotedMemories: 0,
         skillCandidates: 0,
         facts: 0,
         staleFacts: 0,

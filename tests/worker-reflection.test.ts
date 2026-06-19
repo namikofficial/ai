@@ -137,7 +137,11 @@ test("worker session.reflect creates a retrieval_miss memory candidate for misse
   const missCandidate = candidates.find((c) => c.kind === "retrieval_miss");
   assert.ok(missCandidate, "a retrieval_miss memory candidate should be created");
   assert.match(missCandidate!.title, /src\/missing\.ts/);
-  assert.equal(missCandidate!.status, "pending");
+  // retrieval_miss proposals have confidence 0.7, which meets the auto-promote
+  // threshold; the candidate should be immediately accepted into a memory entry.
+  assert.equal(missCandidate!.status, "accepted");
+  const entries = store.memory.listEntries(project.id, undefined, 20);
+  assert.ok(entries.some((e) => e.title.includes("src/missing.ts")));
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -323,7 +327,7 @@ test("worker session.reflect parses valid model JSON and records parseStatus", a
           kind: "user_preference",
           title: "Preference: explicit small functions",
           body: "Prefer explicit small functions and predictable control flow.",
-          confidence: 0.9,
+          confidence: 0.5,
           scope: "project",
           evidence: [],
         },
@@ -366,6 +370,102 @@ test("worker session.reflect parses valid model JSON and records parseStatus", a
     assert.equal((reflectedEvent!.payload as { parseStatus?: string }).parseStatus, "parsed");
     const candidates = store.memory.listCandidates("pending", project.id, 20);
     assert.ok(candidates.some((c) => c.title.includes("explicit small functions")));
+  } finally {
+    store.invokeModel = originalInvoke;
+    store.db.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("worker session.reflect auto-promotes high-confidence candidates and marks stale facts", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-worker-reflect-autopromote-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src", "x.ts"), "export const x = 1;\n");
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "repo" });
+  const session = store.createSession({
+    projectId: project.id,
+    title: "auto promote",
+    userGoal: "test auto-promotion",
+    mode: "local",
+    source: "test",
+  });
+
+  // Seed a stale fact so reflection has something to mark.
+  const staleFact = store.memory.recordFact({
+    projectId: project.id,
+    key: "old_model_profile",
+    value: "qwen2.5-7b",
+    kind: "usage",
+    confidence: 0.5,
+    sourceKind: "model_call",
+    sources: [{ kind: "session", ref: "old", excerpt: "old usage" }],
+  });
+  // Backdate lastVerifiedAt so detectStaleFacts picks it up.
+  store.db.prepare("UPDATE facts SET last_verified_at = ? WHERE id = ?").run(
+    new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
+    staleFact.id
+  );
+
+  store.enqueueJob({
+    type: "session.reflect",
+    payload: { sessionId: session.id },
+  });
+
+  const originalInvoke = store.invokeModel;
+  store.invokeModel = async (profileId, request, options) => {
+    const text = JSON.stringify({
+      memoryCandidates: [
+        {
+          kind: "user_preference",
+          title: "Strong preference: use ts strict",
+          body: "Always use TypeScript strict mode.",
+          confidence: 0.85,
+          scope: "project",
+          evidence: [],
+        },
+      ],
+      skillCandidates: [],
+      facts: [],
+      staleFacts: [{ factId: staleFact.id, reason: "older than ttl", evidence: [] }],
+      retrievalFeedback: [],
+      notes: ["auto-promote test"],
+    });
+    store.models.recordCall({
+      profileId,
+      role: request.role,
+      promptTokens: 7,
+      completionTokens: 9,
+      latencyMs: 1,
+      status: "ok",
+      request: { role: request.role, metadata: request.metadata ?? null },
+      response: { text },
+      sessionId: options?.sessionId ?? null,
+      taskId: options?.taskId ?? null,
+      retrievalQueryId: options?.retrievalQueryId ?? null,
+    });
+    return {
+      text,
+      promptTokens: 7,
+      completionTokens: 9,
+      latencyMs: 1,
+      status: "ok",
+      profileId,
+      providerId: "provider_heuristic_local",
+      usage: { promptTokens: 7, completionTokens: 9, totalTokens: 16 },
+    };
+  };
+
+  try {
+    assert.equal(await processNextJob(store), true);
+    const entries = store.memory.listEntries(project.id, undefined, 20);
+    assert.equal(entries.length, 1, "high-confidence candidate should be auto-promoted to entry");
+    assert.match(entries[0]!.title, /Strong preference/);
+    const refreshed = store.memory.listFacts(project.id, 20);
+    const updated = refreshed.find((f) => f.id === staleFact.id);
+    assert.equal(updated?.status, "stale", "stale fact should be marked as stale");
   } finally {
     store.invokeModel = originalInvoke;
     store.db.close();
