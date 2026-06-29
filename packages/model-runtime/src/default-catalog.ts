@@ -82,6 +82,14 @@ export const DEFAULT_PROVIDER_ROWS: DefaultProviderInput[] = [
     enabled: true,
   },
   {
+    id: "provider_fastembed_local",
+    kind: "fastembed",
+    displayName: "Local Fastembed (OpenAI-compatible)",
+    baseUrl: "http://127.0.0.1:8080/v1",
+    apiKeyEnv: null,
+    enabled: false,
+  },
+  {
     id: "provider_heuristic_local",
     kind: "heuristic",
     displayName: "Heuristic fallback (mock only)",
@@ -222,6 +230,14 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
       role: "embedding",
       modelName: embeddingModel,
       displayName: "Indexer embedding (local)",
+    },
+    // --- fastembed embeddings ---
+    {
+      id: "embedding-fastembed-local",
+      providerId: "provider_fastembed_local",
+      role: "embedding",
+      modelName: "fastembed-default",
+      displayName: "Fastembed embedding (local)",
     },
     // --- reviewers / reflection / checks ---
     {

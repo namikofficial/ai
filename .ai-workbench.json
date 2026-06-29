@@ -1,0 +1,12 @@
+{
+  "checks": {
+    "typecheck": "pnpm typecheck",
+    "test": "pnpm test",
+    "lint": "pnpm lint"
+  },
+  "dev": {
+    "defaultChecks": ["typecheck"],
+    "maxRepairLoops": 1,
+    "requireApprovalFor": ["env", "migrations", "auth", "db", "package"]
+  }
+}

@@ -522,6 +522,45 @@ export function createApiClient(options: ApiClientOptions) {
       const suffix = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : "";
       return requestJson(options.baseUrl, `/eval/outcomes${suffix}`);
     },
+    devRun(input: {
+      project: string;
+      goal: string;
+      mode?: string;
+      approvalPolicy?: string;
+      approveEdits?: boolean;
+      checks?: string[];
+      maxRepairs?: number;
+    }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, "/dev/run", {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    listDevRuns(projectId?: string, limit = 50): Promise<{ status: "ok"; data: { runs: Record<string, unknown>[] } }> {
+      const suffix = projectId ? `?projectId=${encodeURIComponent(projectId)}&limit=${limit}` : `?limit=${limit}`;
+      return requestJson(options.baseUrl, `/dev/runs${suffix}`);
+    },
+    getDevRun(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/dev/runs/${encodeURIComponent(runId)}`);
+    },
+    getDevRunDiff(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/dev/runs/${encodeURIComponent(runId)}/diff`);
+    },
+    approveDevRun(runId: string, notes?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/dev/runs/${encodeURIComponent(runId)}/approve`, {
+        method: "POST",
+        body: JSON.stringify(notes ? { notes } : {}),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    cancelDevRun(runId: string, reason?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/dev/runs/${encodeURIComponent(runId)}/cancel`, {
+        method: "POST",
+        body: JSON.stringify(reason ? { reason } : {}),
+        headers: { "content-type": "application/json" },
+      });
+    },
     getEmbeddingCache(): Promise<{ status: "ok"; data: { entryCount: number; stats: Array<Record<string, unknown>> } }> {
       return requestJson(options.baseUrl, `/embeddings/cache`);
     },

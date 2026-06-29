@@ -1,0 +1,122 @@
+[
+  {
+    "id": "retrieval-q1",
+    "question": "where is auth handled?",
+    "expectedFiles": ["**/auth*", "**/login*", "**/session*"],
+    "expectedAnswerContains": "auth",
+    "difficulty": "standard",
+    "tags": ["auth", "routing", "lookup"]
+  },
+  {
+    "id": "retrieval-q2",
+    "question": "how does the embedding cache work?",
+    "expectedFiles": ["**/embeddings-cache/**", "**/embedding-cache*"],
+    "expectedAnswerContains": "cache",
+    "difficulty": "standard",
+    "tags": ["embeddings", "cache", "lookup"]
+  },
+  {
+    "id": "retrieval-q3",
+    "question": "what is the model routing logic?",
+    "expectedFiles": ["**/model-runtime/**", "**/router*"],
+    "expectedAnswerContains": "route",
+    "difficulty": "standard",
+    "tags": ["model", "routing", "lookup"]
+  },
+  {
+    "id": "retrieval-q4",
+    "question": "find the query rewrite implementation",
+    "expectedFiles": ["**/retrieval-engine/**", "**/prompt-compiler/**"],
+    "expectedAnswerContains": "rewrite",
+    "difficulty": "standard",
+    "tags": ["retrieval", "query", "lookup"]
+  },
+  {
+    "id": "retrieval-q5",
+    "question": "where are the database migrations?",
+    "expectedFiles": ["**/migrations/**", "**/*.sql"],
+    "expectedAnswerContains": "migration",
+    "difficulty": "easy",
+    "tags": ["db", "schema", "lookup"]
+  },
+  {
+    "id": "retrieval-q6",
+    "question": "how does context packing work?",
+    "expectedFiles": ["**/context-engine/**"],
+    "expectedAnswerContains": "context",
+    "difficulty": "standard",
+    "tags": ["context", "retrieval", "explain"]
+  },
+  {
+    "id": "retrieval-q7",
+    "question": "what is the reflection engine?",
+    "expectedFiles": ["**/reflection-engine/**"],
+    "expectedAnswerContains": "reflection",
+    "difficulty": "standard",
+    "tags": ["reflection", "learning", "explain"]
+  },
+  {
+    "id": "retrieval-q8",
+    "question": "how does the dev workflow work?",
+    "expectedFiles": ["**/dev-agent/**", "**/execution-engine/**"],
+    "expectedAnswerContains": "dev",
+    "difficulty": "standard",
+    "tags": ["dev", "workflow", "explain"]
+  },
+  {
+    "id": "retrieval-q9",
+    "question": "find the qdrant integration",
+    "expectedFiles": ["**/retrieval-engine/**", "**/qdrant*"],
+    "expectedAnswerContains": "qdrant",
+    "difficulty": "easy",
+    "tags": ["vector", "retrieval", "lookup"]
+  },
+  {
+    "id": "retrieval-q10",
+    "question": "what agents are registered?",
+    "expectedFiles": ["**/agent-protocol/**"],
+    "expectedAnswerContains": "agent",
+    "difficulty": "standard",
+    "tags": ["agent", "registry", "lookup"]
+  },
+  {
+    "id": "retrieval-q11",
+    "question": "where is the ask pipeline implemented?",
+    "expectedFiles": ["**/ask-engine/**"],
+    "expectedAnswerContains": "ask",
+    "difficulty": "standard",
+    "tags": ["ask", "pipeline", "lookup"]
+  },
+  {
+    "id": "retrieval-q12",
+    "question": "how does the SSE event stream work?",
+    "expectedFiles": ["**/events*", "**/sse*"],
+    "expectedAnswerContains": "event",
+    "difficulty": "standard",
+    "tags": ["events", "sse", "explain"]
+  },
+  {
+    "id": "retrieval-q13",
+    "question": "what MCP tools exist?",
+    "expectedFiles": ["**/mcp/**", "**/tools.ts"],
+    "expectedAnswerContains": "mcp",
+    "difficulty": "easy",
+    "tags": ["mcp", "tools", "lookup"]
+  },
+  {
+    "id": "retrieval-q14",
+    "question": "find the prompt compiler",
+    "expectedFiles": ["**/prompt-compiler/**"],
+    "expectedAnswerContains": "prompt",
+    "difficulty": "easy",
+    "tags": ["prompt", "compiler", "lookup"]
+  },
+  {
+    "id": "retrieval-q15",
+    "question": "how does the safety module work?",
+    "expectedFiles": ["**/safety/**"],
+    "expectedAnswerContains": "safety",
+    "difficulty": "standard",
+    "tags": ["safety", "guard", "explain"]
+  }
+]

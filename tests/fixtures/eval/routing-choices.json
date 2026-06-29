@@ -1,0 +1,137 @@
+[
+  {
+    "id": "routing-q1",
+    "question": "where is auth handled?",
+    "expectedIntent": "lookup",
+    "expectedDepth": "standard",
+    "expectedProfile": "ask-fast-local",
+    "difficulty": "standard",
+    "tags": ["auth", "lookup"]
+  },
+  {
+    "id": "routing-q2",
+    "question": "explain how the embedding cache works",
+    "expectedIntent": "explain",
+    "expectedDepth": "standard",
+    "expectedProfile": "ask-extended-local",
+    "difficulty": "standard",
+    "tags": ["embeddings", "explain"]
+  },
+  {
+    "id": "routing-q3",
+    "question": "debug: why is the router returning the wrong profile?",
+    "expectedIntent": "debug",
+    "expectedDepth": "deep",
+    "expectedProfile": "ask-deep-local",
+    "difficulty": "hard",
+    "tags": ["debug", "model", "deep"]
+  },
+  {
+    "id": "routing-q4",
+    "question": "plan: add fastembed support to the embedding system",
+    "expectedIntent": "plan",
+    "expectedDepth": "standard",
+    "expectedProfile": "planner-balanced-local",
+    "difficulty": "standard",
+    "tags": ["plan", "embeddings"]
+  },
+  {
+    "id": "routing-q5",
+    "question": "review the reflection engine for missing candidate types",
+    "expectedIntent": "review",
+    "expectedDepth": "standard",
+    "expectedProfile": "reviewer-local",
+    "difficulty": "standard",
+    "tags": ["review", "reflection"]
+  },
+  {
+    "id": "routing-q6",
+    "question": "summarize the retrieval pipeline",
+    "expectedIntent": "summary",
+    "expectedDepth": "standard",
+    "expectedProfile": "summarizer-local",
+    "difficulty": "easy",
+    "tags": ["summary", "retrieval"]
+  },
+  {
+    "id": "routing-q7",
+    "question": "add a new MCP tool for listing skill candidates",
+    "expectedIntent": "plan",
+    "expectedDepth": "standard",
+    "expectedProfile": "planner-fast-local",
+    "difficulty": "standard",
+    "tags": ["plan", "mcp"]
+  },
+  {
+    "id": "routing-q8",
+    "question": "find where model calls are recorded",
+    "expectedIntent": "lookup",
+    "expectedDepth": "standard",
+    "expectedProfile": "ask-fast-local",
+    "difficulty": "easy",
+    "tags": ["model", "lookup"]
+  },
+  {
+    "id": "routing-q9",
+    "question": "why is the qdrant dimension mismatch not being handled?",
+    "expectedIntent": "debug",
+    "expectedDepth": "deep",
+    "expectedProfile": "ask-deep-local",
+    "difficulty": "hard",
+    "tags": ["debug", "qdrant", "deep"]
+  },
+  {
+    "id": "routing-q10",
+    "question": "what is the current embedding provider configuration?",
+    "expectedIntent": "lookup",
+    "expectedDepth": "standard",
+    "expectedProfile": "ask-fast-local",
+    "difficulty": "easy",
+    "tags": ["config", "embeddings", "lookup"]
+  },
+  {
+    "id": "routing-q11",
+    "question": "how should we refactor store.ts to reduce its size?",
+    "expectedIntent": "plan",
+    "expectedDepth": "standard",
+    "expectedProfile": "planner-balanced-local",
+    "difficulty": "standard",
+    "tags": ["plan", "refactor", "store"]
+  },
+  {
+    "id": "routing-q12",
+    "question": "show me the context pack for the last ask session",
+    "expectedIntent": "explain",
+    "expectedDepth": "standard",
+    "expectedProfile": "ask-extended-local",
+    "difficulty": "standard",
+    "tags": ["context", "explain"]
+  },
+  {
+    "id": "routing-q13",
+    "question": "verify the agent executor retry logic is correct",
+    "expectedIntent": "review",
+    "expectedDepth": "standard",
+    "expectedProfile": "reviewer-local",
+    "difficulty": "standard",
+    "tags": ["review", "agent", "executor"]
+  },
+  {
+    "id": "routing-q14",
+    "question": "what checks are defined in the ai workbench config?",
+    "expectedIntent": "lookup",
+    "expectedDepth": "standard",
+    "expectedProfile": "ask-fast-local",
+    "difficulty": "easy",
+    "tags": ["config", "checks", "lookup"]
+  },
+  {
+    "id": "routing-q15",
+    "question": "how does the safety module validate cloud guard?",
+    "expectedIntent": "explain",
+    "expectedDepth": "standard",
+    "expectedProfile": "ask-extended-local",
+    "difficulty": "standard",
+    "tags": ["safety", "cloud", "explain"]
+  }
+]

@@ -2948,12 +2948,281 @@ function SettingsPage(): ReactNode {
   );
 }
 
+function DevPage(): ReactNode {
+  const resource = useResource(() => api.listProjects());
+  const projects = (resource.data?.data ?? []) as Array<{ id: string; name: string }>;
+
+  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+  const [goal, setGoal] = useState("");
+  const [mode, setMode] = useState<"local" | "hybrid" | "cloud">("local");
+  const [approvalPolicy, setApprovalPolicy] = useState<"auto" | "manual" | "high_risk_only">("manual");
+  const [approveEdits, setApproveEdits] = useState(false);
+  const [checks, setChecks] = useState("typecheck");
+  const [maxRepairs, setMaxRepairs] = useState(1);
+
+  const [runResult, setRunResult] = useState<Record<string, unknown> | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  const [runDetail, setRunDetail] = useState<Record<string, unknown> | null>(null);
+  const [runDiff, setRunDiff] = useState<Record<string, unknown> | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (projects[0]?.id) setProjectId(projects[0].id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projects.length]);
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!goal.trim() || !projectId) return;
+    setSubmitting(true);
+    setError(null);
+    setRunResult(null);
+    setRunDetail(null);
+    setRunDiff(null);
+    setRunId(null);
+    try {
+      const result = await api.devRun({
+        project: projectId,
+        goal: goal.trim(),
+        mode,
+        approvalPolicy,
+        approveEdits,
+        checks: checks.split(",").map((c) => c.trim()).filter(Boolean),
+        maxRepairs,
+      });
+      setRunResult(result.data);
+      const runIdVal = String((result.data as Record<string, unknown>)?.runId ?? "");
+      if (runIdVal) {
+        setRunId(runIdVal);
+        const [detail, diff] = await Promise.all([
+          api.getDevRun(runIdVal),
+          api.getDevRunDiff(runIdVal),
+        ]);
+        setRunDetail(detail.data);
+        setRunDiff(diff.data);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    if (!runId) return;
+    try {
+      await api.approveDevRun(runId);
+      const detail = await api.getDevRun(runId);
+      setRunDetail(detail.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleCancel = async () => {
+    if (!runId) return;
+    try {
+      await api.cancelDevRun(runId);
+      const detail = await api.getDevRun(runId);
+      setRunDetail(detail.data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const run = (runDetail as Record<string, unknown>)?.run as Record<string, unknown> | undefined;
+  const status = String(run?.status ?? "queued");
+  const workspace = (runDetail as Record<string, unknown>)?.workspace as Record<string, unknown> | undefined;
+  const edits = ((runDetail as Record<string, unknown>)?.edits as Array<Record<string, unknown>>) ?? [];
+
+  return (
+    <PageShell title="Dev" subtitle="goal → plan → edit → check → approve">
+      <Panel title="New Dev Run" span={6}>
+        <form className="stack" onSubmit={submit}>
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.currentTarget.value)}
+            disabled={submitting}
+          >
+            {projects.length > 0 ? (
+              projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))
+            ) : (
+              <option value="">Add a project first</option>
+            )}
+          </select>
+          <textarea
+            value={goal}
+            onChange={(e) => setGoal(e.currentTarget.value)}
+            placeholder="add fastembed adapter to the embedding system"
+            rows={3}
+            disabled={submitting}
+          />
+          <div className="row">
+            <select
+              value={mode}
+              onChange={(e) => setMode(e.currentTarget.value as typeof mode)}
+              disabled={submitting}
+            >
+              <option value="local">local</option>
+              <option value="hybrid">hybrid</option>
+              <option value="cloud">cloud</option>
+            </select>
+            <select
+              value={approvalPolicy}
+              onChange={(e) => setApprovalPolicy(e.currentTarget.value as typeof approvalPolicy)}
+              disabled={submitting}
+            >
+              <option value="auto">auto approve</option>
+              <option value="manual">manual</option>
+              <option value="high_risk_only">high-risk only</option>
+            </select>
+          </div>
+          <div className="row">
+            <label className="row">
+              <input
+                type="checkbox"
+                checked={approveEdits}
+                onChange={(e) => setApproveEdits(e.currentTarget.checked)}
+                disabled={submitting}
+              />
+              <span>auto-approve edits</span>
+            </label>
+          </div>
+          <div className="row">
+            <input
+              value={checks}
+              onChange={(e) => setChecks(e.currentTarget.value)}
+              placeholder="typecheck,test"
+              disabled={submitting}
+            />
+            <input
+              type="number"
+              value={maxRepairs}
+              min={0}
+              max={5}
+              onChange={(e) => setMaxRepairs(Number(e.currentTarget.value) || 1)}
+              disabled={submitting}
+            />
+          </div>
+          {error ? <div className="error">{error}</div> : null}
+          <button type="submit" disabled={submitting || !goal.trim()}>
+            {submitting ? "Running..." : "Start Dev Run"}
+          </button>
+        </form>
+      </Panel>
+
+      <Panel title="Run Status" span={6}>
+        {run ? (
+          <div className="stack">
+            <div className="row">
+              <strong>{status}</strong>
+              <Badge
+                tone={
+                  status === "completed" ? "good" :
+                  status === "failed" ? "bad" :
+                  status === "awaiting_approval" ? "warn" : "neutral"
+                }
+              >
+                {status}
+              </Badge>
+            </div>
+            <div className="tiny">run {String(run.id)}</div>
+            {run.durationMs != null ? (
+              <div className="tiny">{Number(run.durationMs)}ms</div>
+            ) : null}
+            {workspace ? (
+              <div className="tiny">workspace: {String(workspace.path ?? workspace.id ?? "—")}</div>
+            ) : null}
+            {run.checks && Array.isArray(run.checks) ? (
+              <div className="list">
+                {(run.checks as Array<Record<string, unknown>>).map((c, i) => (
+                  <div className="tiny" key={String(c.name ?? c.id ?? i)}>
+                    {String(c.name ?? c)} — {String(c.status ?? "—")}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+            {status === "awaiting_approval" && (
+              <div className="row">
+                <button type="button" onClick={handleApprove} disabled={submitting}>Approve</button>
+                <button type="button" onClick={handleCancel} disabled={submitting}>Cancel</button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <EmptyState title="No run yet" body="Start a dev run to see its status here." />
+        )}
+      </Panel>
+
+      <Panel title="Proposed Edits" span={6}>
+        {edits.length > 0 ? (
+          <div className="list">
+            {edits.map((edit, i) => (
+              <div className="list-item" key={String(edit.path ?? i)}>
+                <div className="row">
+                  <strong>{String(edit.path ?? "—")}</strong>
+                  <Badge tone={edit.status === "applied" ? "good" : edit.status === "rejected" ? "bad" : "neutral"}>
+                    {String(edit.status ?? "proposed")}
+                  </Badge>
+                </div>
+                <div className="tiny">{String(edit.reason ?? "")}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No edits yet" body="Proposed edits will appear here." />
+        )}
+      </Panel>
+
+      <Panel title="Diff" span={6}>
+        {runDiff && runDiff.diffText ? (
+          <pre className="diff-view">{String(runDiff.diffText)}</pre>
+        ) : (
+          <EmptyState title="No diff" body="Diff output will appear after the run completes." />
+        )}
+      </Panel>
+
+      <Panel title="Checks" span={6}>
+        {run && Array.isArray(run.checks) && run.checks.length > 0 ? (
+          <div className="list">
+            {(run.checks as Array<Record<string, unknown>>).map((c, i) => (
+              <div className="list-item" key={String(c.name ?? `check-${i}`)}>
+                <div className="row">
+                  <strong>{String(c.name ?? "check")}</strong>
+                  <Badge tone={c.status === "passed" ? "good" : "bad"}>
+                    {String(c.status ?? "unknown")}
+                  </Badge>
+                </div>
+                <div className="tiny">{String(c.output ?? c.error ?? "")}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState title="No checks" body="Checks will run after planning." />
+        )}
+      </Panel>
+
+      <Panel title="Result Summary" span={12}>
+        {runResult ? (
+          <pre>{JSON.stringify(runResult, null, 2)}</pre>
+        ) : (
+          <EmptyState title="No result yet" body="The run result will appear here." />
+        )}
+      </Panel>
+    </PageShell>
+  );
+}
+
 export {
   AgentRunDetailPage,
   AgentsPage,
   AskPage,
   ChecksPage,
   DashboardPage,
+  DevPage,
   EvalPage,
   HandoffPage,
   McpCallDetailPage,

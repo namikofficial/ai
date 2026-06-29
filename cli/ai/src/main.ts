@@ -62,6 +62,12 @@ function printUsage(): void {
   ai eval run --project <project> [--limit <n>]
   ai embeddings stats
   ai embeddings purge [--older-than <days>] [--provider <id>] [--model <name>]
+  ai dev "<goal>" --project <project> [--mode local|hybrid|cloud] [--approve-edits] [--checks <checks>] [--max-repairs <n>]
+  ai dev runs
+  ai dev show <run-id>
+  ai dev diff <run-id>
+  ai dev approve <run-id>
+  ai dev cancel <run-id>
   ai tools list
   ai tools call <name> --project <project> [--args <json>] [--allow-high-risk]
   ai status`);
@@ -698,6 +704,69 @@ async function run(): Promise<void> {
       return;
     }
     await startMcpServer();
+    return;
+  }
+
+  if (command === "dev") {
+    const subcommand = positionals[0];
+    const runIdOrGoal = positionals[1];
+
+    // ai dev runs — list all runs
+    if (subcommand === "runs") {
+      printJson(await client.listDevRuns(undefined, 50));
+      return;
+    }
+
+    // ai dev show <run-id>
+    if (subcommand === "show") {
+      if (!runIdOrGoal) throw new Error("ai dev show <run-id>");
+      printJson(await client.getDevRun(runIdOrGoal));
+      return;
+    }
+
+    // ai dev diff <run-id>
+    if (subcommand === "diff") {
+      if (!runIdOrGoal) throw new Error("ai dev diff <run-id>");
+      printJson(await client.getDevRunDiff(runIdOrGoal));
+      return;
+    }
+
+    // ai dev approve <run-id>
+    if (subcommand === "approve") {
+      if (!runIdOrGoal) throw new Error("ai dev approve <run-id>");
+      printJson(await client.approveDevRun(runIdOrGoal));
+      return;
+    }
+
+    // ai dev cancel <run-id>
+    if (subcommand === "cancel") {
+      if (!runIdOrGoal) throw new Error("ai dev cancel <run-id>");
+      printJson(await client.cancelDevRun(runIdOrGoal));
+      return;
+    }
+
+    // ai dev "<goal>" — start a new dev run
+    if (subcommand) {
+      const project = options.project;
+      if (!project) throw new Error("ai dev \"<goal>\" --project <project> [...]");
+      const mode = options.mode === "cloud" || options.mode === "hybrid" ? options.mode : "local";
+      const approveEdits = options["approve-edits"] === "true" || options["approve-edits"] === "1";
+      const checks = options.checks ? options.checks.split(",").map((c: string) => c.trim()).filter(Boolean) : undefined;
+      const maxRepairs = Number(options["max-repairs"] ?? 1) || 1;
+      printJson(
+        await client.devRun({
+          project,
+          goal: subcommand,
+          mode,
+          approveEdits,
+          checks,
+          maxRepairs,
+        })
+      );
+      return;
+    }
+
+    printUsage();
     return;
   }
 

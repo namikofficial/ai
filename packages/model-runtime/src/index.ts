@@ -6,6 +6,7 @@ import type {
   ModelProviderRecord,
   ModelRole,
 } from "../../shared/src/index.ts";
+import { FastembedAdapter } from "./adapters/fastembed.ts";
 import { HeuristicAdapter } from "./adapters/heuristic.ts";
 import { MockAdapter } from "./adapters/mock.ts";
 import { OpenAICompatAdapter } from "./adapters/openai-compat.ts";
@@ -218,6 +219,7 @@ export function normalizeProviderKind(kind: string): ModelProviderAdapter["kind"
   if (kind === "cloud_openai_compat" || kind === "openai_compat") return "openai_compat";
   if (kind === "local_openai_compat" || kind === "llama_cpp") return "llama_cpp";
   if (kind === "mock") return "mock";
+  if (kind === "fastembed") return "fastembed";
   return "heuristic";
 }
 
@@ -240,6 +242,9 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
     switch (kind) {
       case "mock":
         adapter = new MockAdapter(provider.id);
+        break;
+      case "fastembed":
+        adapter = new FastembedAdapter(provider.id, provider.baseUrl ?? "http://127.0.0.1:8080", readModelTimeoutMs());
         break;
       case "openai_compat":
       case "llama_cpp":

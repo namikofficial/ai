@@ -7,6 +7,7 @@ import {
   AskPage,
   ChecksPage,
   DashboardPage,
+  DevPage,
   EvalPage,
   HandoffPage,
   McpCallDetailPage,
@@ -49,6 +50,7 @@ const navItems = [
   ["/skills", "Skills"],
   ["/eval", "Eval"],
   ["/reviews", "Reviews"],
+  ["/dev", "Dev"],
   ["/models", "Models"],
   ["/mcp", "MCP"],
   ["/settings", "Settings"],
@@ -276,6 +278,7 @@ export function App() {
           <Route path="/eval" element={<EvalPage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/reviews/:reviewId" element={<ReviewDetailPage />} />
+          <Route path="/dev" element={<DevPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/mcp/calls/:callId" element={<McpCallDetailPage />} />

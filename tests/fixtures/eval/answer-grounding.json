@@ -1,0 +1,122 @@
+[
+  {
+    "id": "grounding-q1",
+    "question": "where is auth handled?",
+    "expectedAnswerContains": ["auth", "login", "session"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["auth", "grounded"]
+  },
+  {
+    "id": "grounding-q2",
+    "question": "how does the embedding cache work?",
+    "expectedAnswerContains": ["cache", "embed"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["embeddings", "grounded"]
+  },
+  {
+    "id": "grounding-q3",
+    "question": "what is the model routing logic?",
+    "expectedAnswerContains": ["route", "model"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["model", "grounded"]
+  },
+  {
+    "id": "grounding-q4",
+    "question": "find the query rewrite implementation",
+    "expectedAnswerContains": ["rewrite", "query"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["retrieval", "grounded"]
+  },
+  {
+    "id": "grounding-q5",
+    "question": "how does context packing work?",
+    "expectedAnswerContains": ["context", "pack"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["context", "grounded"]
+  },
+  {
+    "id": "grounding-q6",
+    "question": "what is the reflection engine?",
+    "expectedAnswerContains": ["reflection", "candidate"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["reflection", "grounded"]
+  },
+  {
+    "id": "grounding-q7",
+    "question": "how does the dev workflow work?",
+    "expectedAnswerContains": ["dev", "workflow"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["dev", "grounded"]
+  },
+  {
+    "id": "grounding-q8",
+    "question": "find the qdrant integration code",
+    "expectedAnswerContains": ["qdrant", "vector"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["qdrant", "grounded"]
+  },
+  {
+    "id": "grounding-q9",
+    "question": "what agents are registered in the agent protocol?",
+    "expectedAnswerContains": ["agent", "registry"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["agent", "grounded"]
+  },
+  {
+    "id": "grounding-q10",
+    "question": "where is the ask pipeline implemented?",
+    "expectedAnswerContains": ["ask", "pipeline"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["ask", "grounded"]
+  },
+  {
+    "id": "grounding-q11",
+    "question": "how does the SSE event stream work?",
+    "expectedAnswerContains": ["event", "stream"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["events", "grounded"]
+  },
+  {
+    "id": "grounding-q12",
+    "question": "what MCP tools are available?",
+    "expectedAnswerContains": ["mcp", "tool"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["mcp", "grounded"]
+  },
+  {
+    "id": "grounding-q13",
+    "question": "find the prompt compiler source",
+    "expectedAnswerContains": ["prompt", "compiler"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["prompt", "grounded"]
+  },
+  {
+    "id": "grounding-q14",
+    "question": "how does the safety module block cloud calls?",
+    "expectedAnswerContains": ["safety", "cloud", "guard"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["safety", "grounded"]
+  },
+  {
+    "id": "grounding-q15",
+    "question": "what is the workspace configuration?",
+    "expectedAnswerContains": ["workspace", "config"],
+    "minCitations": 1,
+    "difficulty": "standard",
+    "tags": ["config", "grounded"]
+  }
+]

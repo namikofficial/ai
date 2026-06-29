@@ -1,4 +1,5 @@
 import { redactSecrets } from "../../safety/src/index.ts";
+import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
 import type {
   MemoryEntryRecord,
   ProjectRuleRecord,
@@ -488,6 +489,130 @@ export function generateRewrites(input: {
   }
   rewrites.sort((left, right) => right.score - left.score);
   return rewrites.slice(0, 5);
+}
+
+/**
+ * Model-backed query rewrite that produces multiple validated rewrite variants.
+ *
+ * Uses the prompt-compiler to build a query_rewrite prompt, invokes the model
+ * via the provided runtime, and parses JSON output with a repair-once retry
+ * before falling back to the deterministic generateRewrites() output.
+ *
+ * This is the production rewrite path; generateRewrites() remains available
+ * as a pure-heuristic fallback when no runtime is available.
+ */
+export async function rewriteQueryWithModel(
+  input: {
+    query: string;
+    analysis: QueryAnalysis;
+    feedback?: RetrievalFeedbackRecord[];
+    facts?: Array<{ key: string; value: string }>;
+    memoryEntries?: MemoryEntryRecord[];
+    profileId?: string;
+  },
+  invoke: (profileId: string, request: {
+    role: string;
+    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+    temperature?: number;
+    maxOutputTokens?: number;
+    metadata?: Record<string, unknown>;
+  }) => Promise<{ text: string; usage?: { promptTokens: number; completionTokens: number } }>
+): Promise<{
+  rewrites: RewriteCandidate[];
+  parseStatus: "parsed" | "repaired" | "heuristic";
+}> {
+  const profileId = input.profileId ?? "query-rewrite-local";
+  const constraints: string[] = [
+    `Intent: ${input.analysis.notes.join(", ") || "lookup"}`,
+  ];
+  if (input.analysis.pathHints.length > 0) constraints.push(`Path hints: ${input.analysis.pathHints.join(", ")}`);
+  if (input.analysis.symbolHints.length > 0) constraints.push(`Symbol hints: ${input.analysis.symbolHints.join(", ")}`);
+  constraints.push("Return ONLY valid JSON matching the output schema. No markdown fences.");
+
+  const systemMessages: Array<{ role: "system" | "user" | "assistant"; content: string }> = [
+    {
+      role: "system",
+      content: `You are a local-first engineering assistant. Generate ${constraints.length > 3 ? "5" : "4"} retrieval rewrites for the user query.\n\nOutput schema:\n{\n  "rewrites": ["rewrite variant 1", "rewrite variant 2", "..."],\n  "pathHints": ["path hint 1", "..."],\n  "symbolHints": ["symbol hint 1", "..."]\n}\n\nRules:\n- rewrites must be focused search queries (not answers)\n- pathHints should be relative file paths or directory patterns\n- symbolHints should be function/type/variable identifiers\n- Aim for diversity: base term, path-biased, symbol-biased, miss-biased, fact-anchored`,
+    },
+  ];
+  const userMessage = {
+    role: "user" as const,
+    content: `Query: ${input.query}\n\nConstraints:\n${constraints.join("\n")}`,
+  };
+
+  let parseStatus: "parsed" | "repaired" | "heuristic" = "heuristic";
+
+  try {
+    const result = await invoke(profileId, {
+      role: "query_rewrite",
+      messages: [...systemMessages, userMessage],
+      temperature: 0,
+      maxOutputTokens: 512,
+    });
+
+    const parseOutput = (text: string): { rewrites: string[]; pathHints: string[]; symbolHints: string[] } | null => {
+      const raw = parseJsonFragment(text);
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+      const obj = raw as Record<string, unknown>;
+      if (!Array.isArray(obj.rewrites)) return null;
+      return {
+        rewrites: obj.rewrites as string[],
+        pathHints: Array.isArray(obj.pathHints) ? (obj.pathHints as string[]) : [],
+        symbolHints: Array.isArray(obj.symbolHints) ? (obj.symbolHints as string[]) : [],
+      };
+    };
+
+    let parsed = parseOutput(result.text);
+    if (!parsed && isLikelyJsonOutput(result.text)) {
+      // Repair: try once with a fixed message
+      const repairResult = await invoke(profileId, {
+        role: "query_rewrite",
+        messages: [...systemMessages, userMessage, { role: "assistant" as const, content: result.text }, { role: "user" as const, content: "Return ONLY valid JSON matching the output schema. No markdown fences." }],
+        temperature: 0,
+        maxOutputTokens: 512,
+      });
+      parsed = parseOutput(repairResult.text);
+      if (parsed) parseStatus = "repaired";
+    } else if (parsed) {
+      parseStatus = "parsed";
+    }
+
+    if (parsed) {
+      // Build RewriteCandidates from model output, then fill remaining slots with heuristic rewrites
+      const heuristic = generateRewrites({
+        query: input.query,
+        analysis: input.analysis,
+        feedback: input.feedback ?? [],
+        facts: input.facts ?? [],
+        memory: input.memoryEntries ?? [],
+      });
+
+      const modelCandidates: RewriteCandidate[] = parsed.rewrites.slice(0, 5).map((variant, i) => ({
+        variant,
+        terms: input.analysis.terms,
+        pathHints: typeof parsed!.pathHints[i] === "string" ? [parsed!.pathHints[i]] : input.analysis.pathHints,
+        symbolHints: typeof parsed!.symbolHints[i] === "string" ? [parsed!.symbolHints[i]] : input.analysis.symbolHints,
+        reason: `model-backed rewrite ${i + 1}`,
+        score: 1.0 - i * 0.05,
+      }));
+
+      // Merge model candidates with heuristic ones to fill up to 5
+      const seen = new Set(modelCandidates.map((c) => c.variant));
+      for (const h of heuristic) {
+        if (modelCandidates.length >= 5) break;
+        if (!seen.has(h.variant)) {
+          modelCandidates.push({ ...h, score: h.score * 0.9 });
+          seen.add(h.variant);
+        }
+      }
+
+      return { rewrites: modelCandidates.slice(0, 5), parseStatus };
+    }
+  } catch {
+    // fall through to heuristic
+  }
+
+      return { rewrites: generateRewrites({ query: input.query, analysis: input.analysis, feedback: input.feedback ?? [], facts: input.facts ?? [], memory: input.memoryEntries ?? [] }), parseStatus };
 }
 
 export interface HybridChunkSource {

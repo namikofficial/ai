@@ -10,6 +10,18 @@ export interface EmbeddingConfig {
   expectedCollection: string;
 }
 
+export interface ChecksConfig {
+  defaultChecks: string[];
+  requireApprovalFor: string[];
+  maxRepairLoops: number;
+}
+
+export interface DevConfig {
+  defaultChecks: string[];
+  maxRepairLoops: number;
+  requireApprovalFor: string[];
+}
+
 export interface ProjectConfig {
   sourcePath: string | null;
   ignore: string[];
@@ -29,6 +41,8 @@ export interface ProjectConfig {
     answer: string | null;
     embedding: string | null;
   };
+  checks: ChecksConfig;
+  dev: DevConfig;
   raw: Record<string, unknown>;
 }
 
@@ -177,6 +191,28 @@ export function resolveProjectConfig(projectPath: string): ProjectConfig {
     models: {
       answer: hasConfig ? readString((raw.models as Record<string, unknown> | undefined)?.answer) : null,
       embedding: hasConfig ? readString((raw.models as Record<string, unknown> | undefined)?.embedding) : null,
+    },
+    checks: {
+      defaultChecks: hasConfig
+        ? readStringArray((raw.checks as Record<string, unknown> | undefined)?.defaultChecks ?? ["typecheck"])
+        : ["typecheck"],
+      requireApprovalFor: hasConfig
+        ? readStringArray((raw.checks as Record<string, unknown> | undefined)?.requireApprovalFor ?? [])
+        : [],
+      maxRepairLoops: hasConfig
+        ? readNumber((raw.checks as Record<string, unknown> | undefined)?.maxRepairLoops, 1)
+        : 1,
+    },
+    dev: {
+      defaultChecks: hasConfig
+        ? readStringArray((raw.dev as Record<string, unknown> | undefined)?.defaultChecks ?? ["typecheck"])
+        : ["typecheck"],
+      maxRepairLoops: hasConfig
+        ? readNumber((raw.dev as Record<string, unknown> | undefined)?.maxRepairLoops, 1)
+        : 1,
+      requireApprovalFor: hasConfig
+        ? readStringArray((raw.dev as Record<string, unknown> | undefined)?.requireApprovalFor ?? ["env", "migrations", "auth", "db", "package"])
+        : ["env", "migrations", "auth", "db", "package"],
     },
     raw,
   };

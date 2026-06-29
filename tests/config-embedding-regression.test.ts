@@ -66,6 +66,8 @@ test("config: projectPathMatchesConfig handles include/ignore", () => {
     codeIntelligence: { enabled: false },
     retrieval: { boostPaths: [], authHints: [] },
     models: { answer: null, embedding: null },
+    checks: { defaultChecks: ["typecheck"], requireApprovalFor: [], maxRepairLoops: 1 },
+    dev: { defaultChecks: ["typecheck"], maxRepairLoops: 1, requireApprovalFor: ["env", "migrations", "auth", "db", "package"] },
     sourcePath: null,
     raw: {},
   };
@@ -83,6 +85,8 @@ test("config: boostWeightForPath returns expected boost", () => {
     codeIntelligence: { enabled: false },
     retrieval: { boostPaths: ["src/core/**"], authHints: [] },
     models: { answer: null, embedding: null },
+    checks: { defaultChecks: ["typecheck"], requireApprovalFor: [], maxRepairLoops: 1 },
+    dev: { defaultChecks: ["typecheck"], maxRepairLoops: 1, requireApprovalFor: ["env", "migrations", "auth", "db", "package"] },
     sourcePath: null,
     raw: {},
   };

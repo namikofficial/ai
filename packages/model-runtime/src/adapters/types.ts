@@ -16,7 +16,7 @@ export interface ModelHealthResult {
 
 export interface ModelProviderAdapter {
   id: string;
-  kind: "heuristic" | "openai_compat" | "llama_cpp" | "mock";
+  kind: "heuristic" | "openai_compat" | "llama_cpp" | "fastembed" | "mock";
   health(): Promise<ModelHealthResult>;
   invoke(request: ModelInvokeRequest): Promise<ModelInvokeResult>;
   embed?(request: EmbeddingRequest): Promise<EmbeddingResult>;
