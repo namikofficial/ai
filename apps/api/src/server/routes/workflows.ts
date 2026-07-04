@@ -286,7 +286,19 @@ export function registerWorkflowRoutes(router: Router, deps: {
       sendJson(res, json("error", undefined, { message: "dev run not found" }), 404);
       return;
     }
-    sendJson(res, json("ok", { runId: run.id, diff: run.workspace?.path ? "" : "", diffText: "", summary: run.summary }));
+    sendJson(
+      res,
+      json("ok", {
+        runId: run.id,
+        status: run.status,
+        diff: run.diffText,
+        diffText: run.diffText,
+        diffSummary: run.diffSummary,
+        summary: run.summary,
+        filesEdited: run.filesEdited,
+        filesCreated: run.filesCreated,
+      })
+    );
   });
 
   router.post("/dev/runs/:runId/approve", asyncRoute(async (req, res) => {

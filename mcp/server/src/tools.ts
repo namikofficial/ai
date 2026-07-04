@@ -3,6 +3,9 @@ import { resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import type { ConfigSnapshot, ProjectSummary, SessionRecord, TaskRecord } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
 import { readProjectChecksConfig, runAllowedChecks } from "../../../packages/execution-engine/src/index.ts";
+import { parseDevRequest } from "../../../packages/agent-protocol/src/dev.ts";
+import { cancelDevRun, runDevWorkflow } from "../../../packages/dev-agent/src/index.ts";
+import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -244,6 +247,58 @@ function toolDescriptors(): ToolDescriptor[] {
           sessionId: { type: "string" },
         },
         required: ["name"],
+      },
+    },
+    {
+      name: "ai_dev_start",
+      description:
+        "Start a safe local dev-agent run. Creates an isolated workspace, runs allowlisted checks, and stops for approval unless policy allows apply.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          project: { type: "string" },
+          goal: { type: "string" },
+          mode: { type: "string", enum: ["local", "hybrid", "cloud"] },
+          approvalPolicy: { type: "string", enum: ["auto", "manual", "high_risk_only"] },
+          approveEdits: { type: "boolean" },
+          checks: { type: "array", items: { type: "string" } },
+          maxRepairs: { type: "number" },
+        },
+        required: ["project", "goal"],
+      },
+    },
+    {
+      name: "ai_dev_status",
+      description: "Return a dev run with edits, workspace, approvals, patches, and command records.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          runId: { type: "string" },
+        },
+        required: ["runId"],
+      },
+    },
+    {
+      name: "ai_dev_diff",
+      description: "Return the stored diff for a dev run.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          runId: { type: "string" },
+        },
+        required: ["runId"],
+      },
+    },
+    {
+      name: "ai_dev_cancel",
+      description: "Cancel a dev run without applying changes to the original project.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          runId: { type: "string" },
+          reason: { type: "string" },
+        },
+        required: ["runId"],
       },
     },
     {
@@ -626,6 +681,103 @@ async function handleTool(
         parsedErrors: result.parsedErrors,
         affectedFiles: result.affectedFiles,
       };
+    }
+    case "ai_dev_start": {
+      const devRequest = parseDevRequest({
+        project: asString(args.project),
+        goal: asString(args.goal),
+        mode: args.mode,
+        approvalPolicy: args.approvalPolicy,
+        approveEdits: args.approveEdits === true,
+        checks: Array.isArray(args.checks) ? args.checks : undefined,
+        maxRepairs: typeof args.maxRepairs === "number" ? args.maxRepairs : undefined,
+      });
+      const project = store.getProject(devRequest.project);
+      if (!project) {
+        throw new Error(`Unknown project: ${devRequest.project}`);
+      }
+      const session = store.createSession({
+        projectId: project.id,
+        title: devRequest.goal.slice(0, 80),
+        userGoal: devRequest.goal,
+        mode: "dev",
+        source: "mcp",
+        modelProfile: "dev-editor-local",
+      });
+      await store.ensureRuntimeDirs(config.runtimeDir);
+      const result = await runDevWorkflow({
+        request: devRequest,
+        project: {
+          id: project.id,
+          name: project.name,
+          path: project.path,
+          config: resolveProjectConfig(project.path).raw,
+        },
+        runtime: {
+          devRuns: store.dev,
+          execution: store.execution,
+          retrieval: store.retrieval,
+          models: store.models,
+          conversation: store.conversation,
+          modelRuntime: createModelRuntime({
+            providers: store.models.listProviders().map((provider) => ({
+              id: provider.id,
+              kind: provider.kind,
+              displayName: provider.displayName,
+              baseUrl: provider.baseUrl,
+              apiKeyEnv: provider.apiKeyEnv,
+              enabled: provider.enabled,
+            })),
+            profiles: store.models.listProfiles(),
+            cloudEnabled: config.cloudEnabled,
+          }),
+        },
+        runtimeDir: config.runtimeDir,
+        sessionId: session.id,
+        source: "mcp",
+      });
+      return result.result;
+    }
+    case "ai_dev_status": {
+      const runId = asString(args.runId);
+      const run = store.dev.getRunWithEdits(runId);
+      if (!run) {
+        throw new Error(`Unknown dev run: ${runId}`);
+      }
+      return {
+        run,
+        workspace: store.execution.getWorkspaceForRun(run.id),
+        approvals: store.execution.listApprovals(run.id),
+        patches: store.execution.listPatches(run.id),
+        commands: store.execution.listCommands(run.id),
+      };
+    }
+    case "ai_dev_diff": {
+      const runId = asString(args.runId);
+      const run = store.dev.getRun(runId);
+      if (!run) {
+        throw new Error(`Unknown dev run: ${runId}`);
+      }
+      return {
+        runId: run.id,
+        status: run.status,
+        summary: run.summary,
+        diffSummary: run.diffSummary,
+        diffText: run.diffText,
+        filesEdited: run.filesEdited,
+        filesCreated: run.filesCreated,
+      };
+    }
+    case "ai_dev_cancel": {
+      const outcome = await cancelDevRun({
+        runId: asString(args.runId),
+        runtime: { devRuns: store.dev, execution: store.execution },
+        reason: typeof args.reason === "string" ? args.reason : "cancelled from MCP",
+      });
+      if (!outcome.ok) {
+        throw new Error(outcome.error ?? "cancel failed");
+      }
+      return outcome.run;
     }
     case "ai_get_context_pack": {
       const packId = asString(args.contextPackId);

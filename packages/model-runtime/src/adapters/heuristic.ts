@@ -33,6 +33,27 @@ function hashEmbedding(input: string, dim: number): number[] {
   return magnitude > 0 ? vector.map((value) => value / magnitude) : vector;
 }
 
+function buildHeuristicDevPlan(prompt: string): string {
+  const fileMatches = Array.from(prompt.matchAll(/^FILE:\s+(.+)$/gm)).map((match) => match[1]?.trim()).filter(Boolean);
+  const readme = fileMatches.find((file) => /^README\.md$/i.test(file ?? "")) ?? "README.md";
+  const note = prompt.toLowerCase().includes("status")
+    ? "Workbench status: local dev-agent run prepared this change.\n"
+    : "Workbench note: local dev-agent run prepared this change.\n";
+  return JSON.stringify({
+    summary: `Append a small workbench note to ${readme}.`,
+    edits: [
+      {
+        path: readme,
+        reason: "Provide a minimal deterministic local dev-agent edit when no coding model is available.",
+        newText: `\n${note}`,
+        changeType: "append",
+      },
+    ],
+    checks: [],
+    risk: "low",
+  });
+}
+
 export class HeuristicAdapter implements ModelProviderAdapter {
   readonly kind = "heuristic";
   readonly id: string;
@@ -52,7 +73,11 @@ export class HeuristicAdapter implements ModelProviderAdapter {
     const lastUserMessage = request.messages.filter((m) => m.role === "user").at(-1)?.content ?? prompt;
     let text: string;
 
-    switch (request.role) {
+    if (request.metadata?.kind === "dev-plan") {
+      text = buildHeuristicDevPlan(lastUserMessage);
+    } else if (request.metadata?.kind === "dev-repair") {
+      text = JSON.stringify({ summary: "No deterministic repair available.", edits: [], checks: [], risk: "low" });
+    } else switch (request.role) {
       case "summarizer":
         text = `Summary: ${lastUserMessage}`.slice(0, 800);
         break;

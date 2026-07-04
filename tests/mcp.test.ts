@@ -154,3 +154,112 @@ test("ai_run_check executes allowlisted project checks and blocks unknown checks
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("MCP dev tools start, inspect, diff, and cancel a dev run", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-mcp-dev-"));
+  const repo = join(workspace, "repo");
+  await mkdir(repo, { recursive: true });
+  await writeFile(join(repo, "README.md"), "# Repo\n");
+  await writeFile(
+    join(repo, ".ai-workbench.json"),
+    JSON.stringify({
+      checks: {
+        node_version: "node --version",
+      },
+      dev: {
+        defaultChecks: ["node_version"],
+        maxRepairLoops: 0,
+        requireApprovalFor: ["env", "migrations", "auth", "db", "package"],
+      },
+    })
+  );
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "repo" });
+  await store.indexProject(project.id);
+  const config = resolveConfig({
+    databasePath: join(workspace, "ai.db"),
+    runtimeDir: join(workspace, "runtime"),
+    apiUrl: "http://127.0.0.1:4242",
+    webPort: 4242,
+    apiPort: 4242,
+  });
+
+  try {
+    const startResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "ai_dev_start",
+        arguments: {
+          project: project.id,
+          goal: "append a status note to README",
+          checks: ["node_version"],
+          maxRepairs: 0,
+        },
+      },
+    });
+    const startResult = startResponse?.result as { content: Array<{ type: string; text: string }> };
+    const startPayload = JSON.parse(startResult.content[0].text) as {
+      runId: string;
+      status: string;
+      workspacePath: string | null;
+      diff: string;
+    };
+    assert.ok(startPayload.runId);
+    assert.equal(startPayload.status, "awaiting_approval");
+    assert.ok(startPayload.workspacePath?.includes("dev-runs"));
+    assert.match(startPayload.diff, /README\.md/);
+
+    const statusResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "ai_dev_status",
+        arguments: { runId: startPayload.runId },
+      },
+    });
+    const statusResult = statusResponse?.result as { content: Array<{ type: string; text: string }> };
+    const statusPayload = JSON.parse(statusResult.content[0].text) as {
+      run: { id: string; status: string };
+      workspace: { path: string } | null;
+      commands: Array<{ status: string; command: string }>;
+    };
+    assert.equal(statusPayload.run.id, startPayload.runId);
+    assert.equal(statusPayload.run.status, "awaiting_approval");
+    assert.ok(statusPayload.workspace?.path.includes("workspace"));
+    assert.ok(statusPayload.commands.some((command) => command.command === "node --version"));
+
+    const diffResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "ai_dev_diff",
+        arguments: { runId: startPayload.runId },
+      },
+    });
+    const diffResult = diffResponse?.result as { content: Array<{ type: string; text: string }> };
+    const diffPayload = JSON.parse(diffResult.content[0].text) as { diffText: string };
+    assert.match(diffPayload.diffText, /README\.md/);
+
+    const cancelResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "ai_dev_cancel",
+        arguments: { runId: startPayload.runId, reason: "test cleanup" },
+      },
+    });
+    const cancelResult = cancelResponse?.result as { content: Array<{ type: string; text: string }> };
+    const cancelPayload = JSON.parse(cancelResult.content[0].text) as { status: string; errorMessage: string };
+    assert.equal(cancelPayload.status, "cancelled");
+    assert.match(cancelPayload.errorMessage, /test cleanup/);
+  } finally {
+    store.db.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
