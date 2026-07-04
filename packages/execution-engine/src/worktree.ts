@@ -305,35 +305,34 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
 
 async function tryGitDiff(input: CollectDiffInput): Promise<CollectDiffResult | null> {
   const { workspace, originalRoot, paths } = input;
-  const nonEmpty = paths.filter(Boolean);
-  if (nonEmpty.length === 0) return null;
+  if (paths.length === 0) return null;
 
-  let diffOutput: string | null = null;
+  let raw: string | null = null;
 
   try {
     if (workspace.isGitWorktree) {
       // git diff HEAD -- <paths> inside the worktree gives us changes vs the base commit.
       const { stdout } = await execFileAsync(
         "git",
-        ["diff", "--no-color", "HEAD", "--", ...nonEmpty],
+        ["diff", "--no-color", "HEAD", "--", ...paths],
         { cwd: workspace.path, timeout: 30_000 }
       );
-      diffOutput = stdout;
+      raw = stdout;
     } else {
-      // safe_copy: diff original against workspace using git diff --no-index.
-      // git diff --no-index exits 1 when differences are found, which is expected.
+      // safe_copy: git diff --no-index original workspace compares two directory trees.
+      // Exit code 1 = differences found (expected). We also accept non-zero codes
+      // where git wrote diff output to stdout.
       try {
         const { stdout } = await execFileAsync(
           "git",
-          ["diff", "--no-color", "--no-index", originalRoot, workspace.path, "--", ...nonEmpty],
+          ["diff", "--no-color", "--no-index", originalRoot, workspace.path],
           { cwd: originalRoot, timeout: 30_000 }
         );
-        diffOutput = stdout;
+        raw = stdout;
       } catch (error) {
-        // Exit code 1 = differences found; parse from error's stdout/stderr.
         const execError = error as { code?: number; stdout?: unknown; stderr?: unknown };
-        if (execError.code === 1) {
-          diffOutput = String(execError.stdout ?? execError.stderr ?? "");
+        if (execError.code === 1 || execError.code === 0) {
+          raw = String(execError.stdout ?? execError.stderr ?? "");
         } else {
           return null;
         }
@@ -343,81 +342,50 @@ async function tryGitDiff(input: CollectDiffInput): Promise<CollectDiffResult | 
     return null;
   }
 
-  if (diffOutput == null || diffOutput.trim().length === 0) return null;
-  return parseGitDiffOutput(diffOutput, nonEmpty);
+  if (raw == null || raw.trim().length === 0) return null;
+  return parseGitDiffOutput(raw, paths);
 }
 
-function parseGitDiffOutput(raw: string, paths: string[]): CollectDiffResult {
+/**
+ * Parse a raw unified diff into structured file lists.
+ * Preserves the complete raw diff output for review/patch use.
+ */
+function parseGitDiffOutput(raw: string, requestedPaths: string[]): CollectDiffResult {
+  const pathSet = new Set(requestedPaths);
   const changed: string[] = [];
   const added: string[] = [];
   const removed: string[] = [];
-  const pathSet = new Set(paths);
+
   const diffLines = raw.split("\n");
   let currentFile: string | null = null;
-  let inAdded = false;
-  let inRemoved = false;
-  const diffParts: string[] = [];
-  let i = 0;
 
-  while (i < diffLines.length) {
-    const line = diffLines[i]!;
-    // git diff header: diff --git a/path b/path
+  for (const line of diffLines) {
     const diffHeader = line.match(/^diff --git a\/(.+) b\/(.+)$/);
     if (diffHeader) {
-      if (currentFile !== null && pathSet.has(currentFile)) {
-        // Close previous file
-      }
       currentFile = diffHeader[2]!;
-      inAdded = false;
-      inRemoved = false;
-      i++;
       continue;
     }
-    // File mode line: new file mode
     if (line.startsWith("new file mode") || line.startsWith("new file")) {
-      if (currentFile) added.push(currentFile);
-      i++;
+      if (currentFile && pathSet.has(currentFile) && !added.includes(currentFile)) {
+        added.push(currentFile);
+      }
       continue;
     }
-    // Deleted file mode
     if (line.startsWith("deleted file mode")) {
-      if (currentFile) removed.push(currentFile);
-      i++;
+      if (currentFile && pathSet.has(currentFile) && !removed.includes(currentFile)) {
+        removed.push(currentFile);
+      }
       continue;
     }
-    // Hunk header: @@ -N,N +N,N @@
-    if (line.startsWith("@@")) {
-      if (currentFile && pathSet.has(currentFile) && !changed.includes(currentFile)) {
-        changed.push(currentFile);
-      }
-      diffParts.push(line);
-      inAdded = false;
-      inRemoved = false;
-      i++;
-      continue;
-    }
-    // Context or diff content
-    if (currentFile && pathSet.has(currentFile)) {
-      diffParts.push(line);
-      if (line.startsWith("+") && !line.startsWith("+++")) inAdded = true;
-      if (line.startsWith("-") && !line.startsWith("---")) inRemoved = true;
-    }
-    i++;
-  }
-
-  // Also handle files that were added (detected via "new file mode" header)
-  // Run a second pass to detect simple new files
-  for (const p of paths) {
-    if (!changed.includes(p) && !added.includes(p) && !removed.includes(p)) {
-      // Check if this path appears as "new file" in raw output
-      if (raw.includes(`new file mode`) && raw.includes(`a/${p}`) && raw.includes(`b/${p}`)) {
-        if (!added.includes(p)) added.push(p);
-      }
+    // A hunk header means the file has content changes.
+    if (line.startsWith("@@") && currentFile && pathSet.has(currentFile) && !changed.includes(currentFile)) {
+      changed.push(currentFile);
     }
   }
 
   return {
-    diff: diffParts.join("\n"),
+    // Return the raw diff as-is so it is suitable for review and for use as a patch.
+    diff: raw,
     filesChanged: changed,
     filesAdded: added,
     filesRemoved: removed,

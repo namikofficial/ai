@@ -342,18 +342,25 @@ function shouldRequireApproval(input: {
   risk: RiskLevel;
   approveEdits: boolean;
 }): { required: boolean; reason: string } {
-  if (input.policy === "auto" && input.approveEdits) {
-    return { required: false, reason: "auto policy and approve-edits set" };
-  }
-  if (input.policy === "high_risk_only" && input.risk === "low" && input.approveEdits) {
-    return { required: false, reason: "low-risk with approve-edits" };
-  }
-  if (input.policy === "auto") {
-    return { required: false, reason: "auto policy" };
-  }
+  // High-risk edits always require approval, regardless of policy or approveEdits.
   if (input.risk === "high") {
     return { required: true, reason: "high risk" };
   }
+
+  // If edits are not approved for direct application, require approval.
+  if (!input.approveEdits) {
+    return { required: true, reason: "approveEdits=false" };
+  }
+
+  // For approved edits, policy determines whether to skip the approval gate.
+  if (input.policy === "auto") {
+    return { required: false, reason: "auto policy for non-high-risk run" };
+  }
+
+  if (input.policy === "high_risk_only" && input.risk === "low") {
+    return { required: false, reason: "low-risk with approve-edits" };
+  }
+
   return { required: true, reason: `${input.policy} policy` };
 }
 

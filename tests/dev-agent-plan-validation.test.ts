@@ -44,6 +44,39 @@ function validatePlan(plan: DevPlan): PlanValidation {
 }
 
 // ---------------------------------------------------------------------------
+// shouldRequireApproval — reimplemented from dev-agent to stay hermetic
+// ---------------------------------------------------------------------------
+
+import type { RiskLevel } from "../packages/shared/src/index.ts";
+
+type ApprovalPolicy = "auto" | "manual" | "high_risk_only";
+
+interface ApprovalCheck {
+  required: boolean;
+  reason: string;
+}
+
+function shouldRequireApproval(input: {
+  policy: ApprovalPolicy;
+  risk: RiskLevel;
+  approveEdits: boolean;
+}): ApprovalCheck {
+  if (input.risk === "high") {
+    return { required: true, reason: "high risk" };
+  }
+  if (!input.approveEdits) {
+    return { required: true, reason: "approveEdits=false" };
+  }
+  if (input.policy === "auto") {
+    return { required: false, reason: "auto policy for non-high-risk run" };
+  }
+  if (input.policy === "high_risk_only" && input.risk === "low") {
+    return { required: false, reason: "low-risk with approve-edits" };
+  }
+  return { required: true, reason: `${input.policy} policy` };
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -125,4 +158,56 @@ test("riskForPath: db/migrations/001.sql matches db/migrations pattern", () => {
   const actual = riskForPath("db/migrations/001.sql");
   // Actual behavior: matches db/migrations?/ pattern → high
   assert.ok(actual === "high" || actual === "medium", `expected high|medium, got ${actual}`);
+});
+
+// ---------------------------------------------------------------------------
+// shouldRequireApproval tests
+// ---------------------------------------------------------------------------
+
+test("shouldRequireApproval: high-risk always requires approval even with auto+approveEdits", () => {
+  // This is the critical fix: policy=auto, approveEdits=true, but risk=high
+  // must still require approval. Previously the auto+approveEdits branch won.
+  const result = shouldRequireApproval({ policy: "auto", risk: "high", approveEdits: true });
+  assert.equal(result.required, true, "high-risk must require approval regardless of auto+approveEdits");
+  assert.match(result.reason, /high risk/);
+});
+
+test("shouldRequireApproval: low-risk + auto + approveEdits=false requires approval", () => {
+  const result = shouldRequireApproval({ policy: "auto", risk: "low", approveEdits: false });
+  assert.equal(result.required, true);
+  assert.match(result.reason, /approveEdits=false/);
+});
+
+test("shouldRequireApproval: low-risk + auto + approveEdits=true skips approval", () => {
+  const result = shouldRequireApproval({ policy: "auto", risk: "low", approveEdits: true });
+  assert.equal(result.required, false);
+  assert.match(result.reason, /auto policy/);
+});
+
+test("shouldRequireApproval: medium-risk + auto + approveEdits=true skips approval", () => {
+  const result = shouldRequireApproval({ policy: "auto", risk: "medium", approveEdits: true });
+  assert.equal(result.required, false);
+  assert.match(result.reason, /auto policy/);
+});
+
+test("shouldRequireApproval: high-risk + high_risk_only + approveEdits=true still requires approval", () => {
+  const result = shouldRequireApproval({ policy: "high_risk_only", risk: "high", approveEdits: true });
+  assert.equal(result.required, true);
+  assert.match(result.reason, /high risk/);
+});
+
+test("shouldRequireApproval: low-risk + high_risk_only + approveEdits=true skips approval", () => {
+  const result = shouldRequireApproval({ policy: "high_risk_only", risk: "low", approveEdits: true });
+  assert.equal(result.required, false);
+  assert.match(result.reason, /low-risk with approve-edits/);
+});
+
+test("shouldRequireApproval: medium-risk + high_risk_only + approveEdits=false requires approval", () => {
+  const result = shouldRequireApproval({ policy: "high_risk_only", risk: "medium", approveEdits: false });
+  assert.equal(result.required, true);
+});
+
+test("shouldRequireApproval: manual policy always requires approval", () => {
+  const result = shouldRequireApproval({ policy: "manual", risk: "low", approveEdits: true });
+  assert.equal(result.required, true);
 });

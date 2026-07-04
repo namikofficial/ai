@@ -5,6 +5,7 @@ import { resolveProjectConfig } from "../../../../../packages/config/src/index.t
 import { createStore } from "../../../../../packages/db/src/store.ts";
 import { applyApprovedDevRun, approveDevRun, cancelDevRun, runDevWorkflow } from "../../../../../packages/dev-agent/src/index.ts";
 import { createModelRuntime } from "../../../../../packages/model-runtime/src/index.ts";
+import { readProjectChecksConfig, runAllowedChecks } from "../../../../../packages/execution-engine/src/index.ts";
 import type { AskRequest, HandoffRequest, PlanRequest } from "../../../../../packages/shared/src/index.ts";
 import { createEvent, parseAskRequest } from "../../../../../packages/shared/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody } from "../http.ts";
@@ -133,11 +134,46 @@ export function registerWorkflowRoutes(router: Router, deps: {
     sendHtml(res, renderChecksPage(deps.store));
   });
 
-  // NOTE: /checks/run currently records check results only — it does not execute
-  // checks in a real workspace. Real check execution happens inside dev-run workflows
-  // via execution-engine.runAllowedChecks() with an isolated workspace.
-  // TODO: add real execution by resolving project workspace and calling runAllowedChecks
-  router.post("/checks/run", asyncRoute(async (req, res) => {
+  // POST /checks/run — backward-compatible alias for /checks/record.
+  // POST /checks/record — records a check result without executing it.
+  // Real check execution lives inside dev-run workflows.
+  for (const path of ["/checks/run", "/checks/record"]) {
+    router.post(path, asyncRoute(async (req, res) => {
+      const body = (
+        req.headers["content-type"]?.includes("application/json")
+          ? await readJsonBody(req)
+          : Object.fromEntries(new URLSearchParams(await readTextBody(req)))
+      ) as Record<string, unknown>;
+      const name = String(body.name ?? "");
+      const projectId = body.projectId ? String(body.projectId) : null;
+      const allowed = new Set(["typecheck", "tests", "build", "lint"]);
+      const check = deps.store.createCheckRun({
+        name,
+        projectId,
+        status: allowed.has(name) ? "completed" : "blocked",
+        command: name,
+        output: allowed.has(name) ? `Recorded allowlisted check ${name}.` : null,
+        errorOutput: allowed.has(name) ? null : `Check ${name} is not allowlisted.`,
+        exitCode: allowed.has(name) ? 0 : 1,
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+      });
+      if (!allowed.has(name)) {
+        deps.store.appendEvent(createEvent("tool.blocked", { tool: name, reason: "check not allowlisted" }, { projectId, agent: "checks" }));
+      } else {
+        deps.store.appendEvent(createEvent("check.completed", { name }, { projectId, agent: "checks" }));
+      }
+      if (isHtmlRequest(req)) {
+        sendHtml(res, renderChecksPage(deps.store));
+        return;
+      }
+      sendJson(res, json("ok", check));
+    }));
+  }
+
+  // POST /checks/execute — runs a check in the project's actual directory via
+  // execution-engine.runAllowedChecks(). Requires projectId.
+  router.post("/checks/execute", asyncRoute(async (req, res) => {
     const body = (
       req.headers["content-type"]?.includes("application/json")
         ? await readJsonBody(req)
@@ -145,23 +181,44 @@ export function registerWorkflowRoutes(router: Router, deps: {
     ) as Record<string, unknown>;
     const name = String(body.name ?? "");
     const projectId = body.projectId ? String(body.projectId) : null;
-    const allowed = new Set(["typecheck", "tests", "build", "lint"]);
+
+    if (!projectId) {
+      sendJson(res, json("error", { message: "projectId is required for /checks/execute" }), 400);
+      return;
+    }
+
+    const project = deps.store.listProjects().find((p) => p.id === projectId);
+    if (!project) {
+      sendJson(res, json("error", { message: `project ${projectId} not found` }), 404);
+      return;
+    }
+
+    const projectConfig = readProjectChecksConfig(resolveProjectConfig(project.path).raw);
+
+    const results = await runAllowedChecks({
+      cwd: project.path,
+      commandNames: [name],
+      projectConfig,
+      timeoutMs: 10 * 60_000,
+    });
+
+    const result = results[0];
     const check = deps.store.createCheckRun({
       name,
       projectId,
-      status: allowed.has(name) ? "completed" : "blocked",
-      command: name,
-      output: allowed.has(name) ? `Recorded allowlisted check ${name}.` : null,
-      errorOutput: allowed.has(name) ? null : `Check ${name} is not allowlisted.`,
-      exitCode: allowed.has(name) ? 0 : 1,
+      status: result?.status ?? "blocked",
+      command: result?.command ?? name,
+      output: result?.stdout ?? null,
+      errorOutput: result?.stderr ?? null,
+      exitCode: result?.exitCode ?? null,
       startedAt: new Date().toISOString(),
       finishedAt: new Date().toISOString(),
     });
-    if (!allowed.has(name)) {
-      deps.store.appendEvent(createEvent("tool.blocked", { tool: name, reason: "check not allowlisted" }, { projectId, agent: "checks" }));
-    } else {
-      deps.store.appendEvent(createEvent("check.completed", { name }, { projectId, agent: "checks" }));
-    }
+
+    deps.store.appendEvent(
+      createEvent(result?.status === "blocked" ? "tool.blocked" : "check.completed", { tool: name }, { projectId, agent: "checks" })
+    );
+
     if (isHtmlRequest(req)) {
       sendHtml(res, renderChecksPage(deps.store));
       return;
