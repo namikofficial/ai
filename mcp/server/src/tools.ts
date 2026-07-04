@@ -1,6 +1,8 @@
 import type { createStore } from "../../../packages/db/src/store.ts";
+import { resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import type { ConfigSnapshot, ProjectSummary, SessionRecord, TaskRecord } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
+import { readProjectChecksConfig, runAllowedChecks } from "../../../packages/execution-engine/src/index.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -554,20 +556,76 @@ async function handleTool(
       };
     }
     case "ai_run_check": {
-      const allowlisted = new Set(["typecheck", "tests", "build", "lint"]);
       const nameValue = asString(args.name);
-      return store.createCheckRun({
-        name: nameValue,
-        projectId: args.projectId ? asString(args.projectId) : null,
-        sessionId: args.sessionId ? asString(args.sessionId) : null,
-        status: allowlisted.has(nameValue) ? "completed" : "blocked",
-        command: nameValue,
-        output: allowlisted.has(nameValue) ? `Recorded allowlisted check ${nameValue}.` : null,
-        errorOutput: allowlisted.has(nameValue) ? null : `Check ${nameValue} is not allowlisted.`,
-        exitCode: allowlisted.has(nameValue) ? 0 : 1,
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
+      const projectIdentifier = args.projectId ? asString(args.projectId) : "";
+      const sessionId = args.sessionId ? asString(args.sessionId) : null;
+      const session = sessionId ? store.getSession(sessionId) : null;
+      const project = projectIdentifier
+        ? store.getProject(projectIdentifier)
+        : session?.projectId
+          ? store.getProject(session.projectId)
+          : null;
+      if (!project) {
+        const startedAt = new Date().toISOString();
+        return store.createCheckRun({
+          name: nameValue,
+          projectId: projectIdentifier || null,
+          sessionId,
+          status: "blocked",
+          command: nameValue,
+          output: null,
+          errorOutput: "ai_run_check requires a resolvable projectId or a sessionId linked to a project.",
+          exitCode: null,
+          startedAt,
+          finishedAt: new Date().toISOString(),
+        });
+      }
+      const projectConfig = readProjectChecksConfig(resolveProjectConfig(project.path).raw);
+      const [result] = await runAllowedChecks({
+        cwd: project.path,
+        commandNames: [nameValue],
+        projectConfig,
+        timeoutMs: 10 * 60_000,
       });
+      if (!result) {
+        throw new Error(`No check result for ${nameValue}`);
+      }
+      const check = store.createCheckRun({
+        name: nameValue,
+        projectId: project.id,
+        sessionId,
+        status: result.status,
+        command: result.command,
+        output: result.stdout,
+        errorOutput: result.stderr || result.blockedReason,
+        exitCode: result.exitCode,
+        startedAt: result.startedAt,
+        finishedAt: result.finishedAt,
+      });
+      if (sessionId) {
+        store.appendEvent(
+          createEvent(
+            result.status === "completed" ? "check.completed" : "check.failed",
+            {
+              checkId: check.id,
+              name: check.name,
+              command: check.command,
+              status: check.status,
+              exitCode: check.exitCode,
+              durationMs: result.durationMs,
+              parsedErrors: result.parsedErrors,
+              affectedFiles: result.affectedFiles,
+            },
+            { sessionId, projectId: project.id, agent: "mcp", level: result.status === "completed" ? "info" : "warn" }
+          )
+        );
+      }
+      return {
+        ...check,
+        durationMs: result.durationMs,
+        parsedErrors: result.parsedErrors,
+        affectedFiles: result.affectedFiles,
+      };
     }
     case "ai_get_context_pack": {
       const packId = asString(args.contextPackId);
