@@ -1,4 +1,9 @@
 import { checkCloudGuard, redactSecrets } from "../../safety/src/index.ts";
+import {
+  PROFILE_PLANNER_BALANCED,
+  PROFILE_PLANNER_DEEP,
+  PROFILE_PLANNER_FAST,
+} from "../../shared/src/model-profiles.ts";
 import type {
   ModelCallStatus,
   ModelHealthStatus,
@@ -177,9 +182,9 @@ export function selectModelProfile(mode: LegacyRouteMode, details: LegacyRouteDe
   if (mode === "hybrid") return "ask-hybrid-router";
   if (mode === "index") return "indexer-local";
   if (mode === "plan") {
-    if (details.risk === "high") return "planner-deep-local";
-    if (details.risk === "medium") return "planner-balanced-local";
-    return "planner-fast-local";
+    if (details.risk === "high") return PROFILE_PLANNER_DEEP;
+    if (details.risk === "medium") return PROFILE_PLANNER_BALANCED;
+    return PROFILE_PLANNER_FAST;
   }
   if (mode === "ask") {
     if (details.depth === "deep") return "ask-deep-local";

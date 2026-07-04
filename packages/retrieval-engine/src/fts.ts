@@ -13,26 +13,10 @@ import type { DatabaseSync } from "node:sqlite";
 import type { RetrievalChunk } from "../../shared/src/index.ts";
 import { rankChunk } from "./index.ts";
 
+// Re-use row helpers from search.ts so there is one canonical implementation
+import { asString, safeParseJson, toNumber } from "./search.ts";
+
 type Row = Record<string, unknown>;
-
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function toNumber(value: unknown): number {
-  if (typeof value === "number") return value;
-  if (typeof value === "string" && value.length > 0) return Number(value);
-  return 0;
-}
-
-function safeParseJson(value: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
 
 export function tryEnableSearchIndex(db: DatabaseSync): boolean {
   try {

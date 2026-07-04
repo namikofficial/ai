@@ -1,5 +1,6 @@
 import { redactSecrets } from "../../safety/src/index.ts";
 import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
+import { PROFILE_QUERY_REWRITE } from "../../shared/src/model-profiles.ts";
 import type {
   MemoryEntryRecord,
   ProjectRuleRecord,
@@ -433,6 +434,8 @@ export function generateRewrites(input: {
 }): RewriteCandidate[] {
   const base = rewriteQuery(input.query, input.analysis);
   const rewrites: RewriteCandidate[] = [{ ...base, score: 1.0 }];
+
+  // Produce up to 5 additional variants ( PLAN.md §24.5: "Rewrite query into 2-6 variants" )
   if (input.analysis.pathHints.length > 0) {
     const variant = `${input.query} ${input.analysis.pathHints.join(" ")}`.trim();
     rewrites.push({
@@ -487,8 +490,21 @@ export function generateRewrites(input: {
       score: 0.6,
     });
   }
+
   rewrites.sort((left, right) => right.score - left.score);
-  return rewrites.slice(0, 5);
+
+  // Return at least 2 variants when the query has substance; cap at 6 per PLAN.md
+  const hasSubstance = input.query.trim().length >= 3;
+  if (rewrites.length < 2 && hasSubstance) {
+    // Fall back to a second variant: duplicate base with reordered terms
+    rewrites.push({
+      ...base,
+      variant: (base.terms.length > 1 ? `${base.terms.slice(1).join(" ")} ${base.terms[0]}` : base.variant).trim(),
+      reason: "term-reorder",
+      score: 0.5,
+    });
+  }
+  return rewrites.slice(0, 6);
 }
 
 /**
@@ -521,7 +537,7 @@ export async function rewriteQueryWithModel(
   rewrites: RewriteCandidate[];
   parseStatus: "parsed" | "repaired" | "heuristic";
 }> {
-  const profileId = input.profileId ?? "query-rewrite-local";
+  const profileId = input.profileId ?? PROFILE_QUERY_REWRITE;
   const constraints: string[] = [
     `Intent: ${input.analysis.notes.join(", ") || "lookup"}`,
   ];
@@ -733,7 +749,6 @@ export interface RetrievalPipelineInput {
   rules: ProjectRuleRecord[];
   priorSessionPaths: string[];
   budgetTokens: number;
-  secretTerms: string[];
 }
 
 export interface RetrievalPipelineOutput {

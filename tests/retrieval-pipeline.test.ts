@@ -248,7 +248,6 @@ test("retrieval-pipeline: low-confidence retrieval records a miss", () => {
     rules: [],
     priorSessionPaths: [],
     budgetTokens: 2048,
-    secretTerms: [],
   });
   assert.ok(result.confidence < 0.3);
   assert.ok(result.miss);
@@ -337,7 +336,6 @@ test("retrieval-pipeline: pathBoosts re-rank chunks when feedback is sparse", ()
     rules: [],
     priorSessionPaths: [],
     budgetTokens: 4096,
-    secretTerms: [],
   });
   const alphaBase = baseOutput.ranked.find((r) => r.chunk.id === "chunk_alpha");
   const betaBase = baseOutput.ranked.find((r) => r.chunk.id === "chunk_beta");
@@ -365,7 +363,6 @@ test("retrieval-pipeline: pathBoosts re-rank chunks when feedback is sparse", ()
     rules: [],
     priorSessionPaths: [],
     budgetTokens: 4096,
-    secretTerms: [],
   });
   const alphaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_alpha")!;
   const betaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_beta")!;

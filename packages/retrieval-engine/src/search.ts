@@ -2,95 +2,25 @@ import type { DatabaseSync } from "node:sqlite";
 import type { RetrievalChunk } from "../../shared/src/index.ts";
 import { ftsSearch } from "./fts.ts";
 import { embedQueryForQdrant, type QdrantRuntimeSettings, searchQdrantChunksSync } from "./qdrant.ts";
+import { buildFtsQuery, rankChunk, tokenize } from "./index.ts";
 
-function tokenize(text: string): string[] {
-  return Array.from(
-    new Set(
-      text
-        .toLowerCase()
-        .split(/[^a-z0-9_]+/g)
-        .filter((term) => term.length >= 3)
-    )
-  );
-}
-
-function buildFtsQuery(question: string): string | null {
-  const terms = tokenize(question);
-  if (terms.length === 0) {
-    return null;
-  }
-  return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND ");
-}
-
-function rankChunk(question: string, path: string, content: string, startLine: number, endLine: number): number {
-  const haystack = `${path}\n${content}`.toLowerCase();
-  const terms = tokenize(question);
-  let score = 0;
-  if (question.trim().length > 0 && haystack.includes(question.toLowerCase().trim())) {
-    score += 5;
-  }
-  for (const term of terms) {
-    if (haystack.includes(term)) {
-      score += term.length >= 6 ? 3 : 1;
-    }
-  }
-  const pathParts = path
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter(Boolean);
-  for (const term of terms) {
-    if (pathParts.includes(term)) {
-      score += 2;
-    }
-  }
-  if (terms.some((term) => pathParts.some((part) => part.startsWith(term) || term.startsWith(part)))) {
-    score += 1;
-  }
-  if (/auth|login|session|token/i.test(path)) score += 2;
-  if (/test|spec/i.test(path)) score += 1;
-  if (/readme|docs?|notes?/i.test(path)) score += 1;
-  if (/index|overview|summary/i.test(path)) score += 0.5;
-  if (terms.some((term) => content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `))) {
-    score += 1;
-  }
-  if (
-    content
-      .split("\n")[0]
-      ?.toLowerCase()
-      .includes(terms[0] ?? "")
-  ) {
-    score += 0.5;
-  }
-  score += Math.max(0, 5 - Math.min(5, Math.abs(endLine - startLine) / 40));
-  return score;
-}
-
-function asString(value: unknown): string {
+// Shared row helpers — exported so fts.ts can re-use them without duplication
+export function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-function toNumber(value: unknown): number {
+export function toNumber(value: unknown): number {
   if (typeof value === "number") return value;
   if (typeof value === "string" && value.length > 0) return Number(value);
   return 0;
 }
 
-function safeParseJson(value: string): Record<string, unknown> {
+export function safeParseJson(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value);
     return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
-  }
-}
-
-function safeParseArray(value: unknown): unknown[] {
-  if (typeof value !== "string" || value.trim().length === 0) return [];
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
   }
 }
 

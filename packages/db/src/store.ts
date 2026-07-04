@@ -30,6 +30,11 @@ import {
   tryEnableSearchIndex,
 } from "../../retrieval-engine/src/index.ts";
 import { searchProjectChunks } from "../../retrieval-engine/src/search.ts";
+import {
+  PROFILE_PLANNER_BALANCED,
+  PROFILE_PLANNER_DEEP,
+  PROFILE_PLANNER_FAST,
+} from "../../shared/src/model-profiles.ts";
 import type {
   AskMode,
   AskRequest,
@@ -1311,7 +1316,7 @@ export function createStore(db: DatabaseSync) {
             goal: input.goal,
             contextTokens: Math.max(2048, Math.min(32_768, input.goal.length * 64)),
           },
-          fallbackProfileId: "planner-balanced-local",
+          fallbackProfileId: PROFILE_PLANNER_BALANCED,
         },
         selectModelProfile("plan", { risk, goal: input.goal })
       );
@@ -1351,7 +1356,7 @@ export function createStore(db: DatabaseSync) {
           checks: ["typecheck", "tests"],
         },
       ];
-      const plannerProfileId = session.modelProfile ?? "planner-balanced-local";
+      const plannerProfileId = session.modelProfile ?? PROFILE_PLANNER_BALANCED;
       const compiledPlanner = compilePrompt({
         mode: "planner",
         role: "planner",
@@ -1383,7 +1388,7 @@ export function createStore(db: DatabaseSync) {
       let likelyFiles = files.slice(0, 8);
       let checks = ["typecheck", "tests"];
       let modelRecommendation =
-        risk === "high" ? "planner-deep-local" : risk === "medium" ? "planner-balanced-local" : "planner-fast-local";
+        risk === "high" ? PROFILE_PLANNER_DEEP : risk === "medium" ? PROFILE_PLANNER_BALANCED : PROFILE_PLANNER_FAST;
       let plannerModelCallId: string | null = null;
       try {
         store.appendEvent(
@@ -1454,7 +1459,7 @@ export function createStore(db: DatabaseSync) {
           taskGraphDraft = parsedPlanner.taskGraph;
           likelyFiles = parsedPlanner.likelyFiles.length > 0 ? parsedPlanner.likelyFiles.slice(0, 8) : likelyFiles;
           checks = parsedPlanner.checks.length > 0 ? parsedPlanner.checks : checks;
-          modelRecommendation = parsedPlanner.modelRecommendation ?? modelRecommendation;
+          modelRecommendation = (parsedPlanner.modelRecommendation ?? modelRecommendation) as typeof modelRecommendation;
         }
         plannerModelCallId =
           modelsRepo

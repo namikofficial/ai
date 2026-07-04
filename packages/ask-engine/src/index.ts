@@ -15,6 +15,10 @@ import {
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import { analyzeQuery, classifyIntent, rewriteQuery, runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
 import { buildRetrievalPipelineInput, type RetrievalPipelineSource } from "../../retrieval-engine/src/pipeline.ts";
+import {
+  PROFILE_QUERY_REWRITE,
+  PROFILE_RETRIEVAL_JUDGE,
+} from "../../shared/src/model-profiles.ts";
 import type {
   AskRequest,
   AskResponse,
@@ -584,7 +588,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     risk: "low",
     input: { question: input.input.question, retrievalQueryId: retrievalQuery.id, intent, mode },
   });
-  const queryRewriteProfileId = input.store.models.getProfile("query-rewrite-local")?.id ?? "query-rewrite-local";
+  const queryRewriteProfileId = input.store.models.getProfile(PROFILE_QUERY_REWRITE)?.id ?? PROFILE_QUERY_REWRITE;
   const queryRewritePrompt = compilePrompt(
     buildAskQueryRewritePrompt({
       question: input.input.question,
@@ -920,7 +924,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     ? { path: pipelineOutput.miss.path, notes: pipelineOutput.miss.notes }
     : null;
   let retrievalJudgeParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
-  const retrievalJudgeProfileId = input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
+  const retrievalJudgeProfileId = input.store.models.getProfile(PROFILE_RETRIEVAL_JUDGE)?.id ?? PROFILE_RETRIEVAL_JUDGE;
   const retrievalJudgePrompt = compilePrompt(
     buildAskRetrievalJudgePrompt({
       question: input.input.question,
@@ -1129,7 +1133,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       ];
       const augmentedChunks = augmentedSelected.map((entry) => entry.chunk);
       const retryJudgeProfileId =
-        input.store.models.getProfile("retrieval-judge-local")?.id ?? "retrieval-judge-local";
+        input.store.models.getProfile(PROFILE_RETRIEVAL_JUDGE)?.id ?? PROFILE_RETRIEVAL_JUDGE;
       const retryJudgePrompt = compilePrompt({
         ...buildAskRetrievalJudgePrompt({
           question: input.input.question,

@@ -338,7 +338,8 @@ async function tryGitDiff(input: CollectDiffInput): Promise<CollectDiffResult | 
         }
       }
     }
-  } catch {
+  } catch (error) {
+    console.warn("[worktree] tryGitDiff failed:", error instanceof Error ? error.message : String(error));
     return null;
   }
 
@@ -402,6 +403,7 @@ async function safeReadText(filePath: string, maxBytes: number): Promise<{ value
     }
     return { value: await readFile(filePath, { encoding: "utf8" }), truncated: false };
   } catch (error) {
+    console.warn("[worktree] safeReadText failed:", error instanceof Error ? error.message : String(error));
     return { value: "", truncated: false };
   }
 }

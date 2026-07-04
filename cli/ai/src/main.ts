@@ -9,6 +9,7 @@ import { createApiClient } from "../../../packages/api-client/src/index.ts";
 import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { runRetrievalExplain } from "../../../packages/db/src/retrieval-explain.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
+import type { EmbeddingCacheRepo } from "../../../packages/db/src/repositories/embedding-cache.ts";
 import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
@@ -910,7 +911,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
   withDirectStore(async (store) => {
     const sub = process.argv[3] ?? "stats";
     if (sub === "stats") {
-      const repo = (store as unknown as { embeddingCache: { count(): number; stats(): unknown[] } }).embeddingCache;
+      const repo = store.embeddingCache;
       printJson({
         entryCount: repo.count(),
         stats: repo.stats(),
@@ -921,7 +922,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       const olderThan = process.argv.find((arg) => arg.startsWith("--older-than="))?.split("=")[1];
       const provider = process.argv.find((arg) => arg.startsWith("--provider="))?.split("=")[1];
       const model = process.argv.find((arg) => arg.startsWith("--model="))?.split("=")[1];
-      const repo = (store as unknown as { embeddingCache: { purge(opts: { olderThanDays?: number; modelName?: string | null; providerId?: string | null }): number } }).embeddingCache;
+      const repo = store.embeddingCache;
       const removed = repo.purge({
         olderThanDays: olderThan ? Number(olderThan) : undefined,
         providerId: provider ?? null,

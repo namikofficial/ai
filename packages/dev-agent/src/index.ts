@@ -48,6 +48,10 @@ import type {
 } from "../../shared/src/index.ts";
 import { createId } from "../../shared/src/index.ts";
 import { extractJsonFragment } from "../../shared/src/model-output.ts";
+import {
+  PROFILE_DEV_REPAIR,
+  PROFILE_PLANNER_BALANCED,
+} from "../../shared/src/model-profiles.ts";
 
 export interface RunDevWorkflowInput {
   request: DevRequest;
@@ -643,9 +647,9 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       "never touch .env, secrets, migrations, auth, or db files without flagging high risk",
     ];
 
-    const plannerResult = await input.runtime.modelRuntime.invoke("planner-balanced-local", {
+    const plannerResult = await input.runtime.modelRuntime.invoke(PROFILE_PLANNER_BALANCED, {
       role: "planner",
-      modelName: "planner-balanced-local",
+      modelName: PROFILE_PLANNER_BALANCED,
       messages: [
         { role: "system", content: "You are the workbench dev planner. Output JSON only." },
         {
@@ -685,9 +689,9 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       if (!validation.valid) {
         // Retry once with a stricter prompt.
         emit({ kind: "review.rejected", level: "warn", message: validation.reason ?? "plan invalid" });
-        const retryResult = await input.runtime.modelRuntime.invoke("planner-balanced-local", {
+        const retryResult = await input.runtime.modelRuntime.invoke(PROFILE_PLANNER_BALANCED, {
           role: "planner",
-          modelName: "planner-balanced-local",
+          modelName: PROFILE_PLANNER_BALANCED,
           messages: [
             {
               role: "system",
@@ -868,9 +872,9 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         data: { stderr: failedCheck.stderr.slice(0, 500) },
       });
       try {
-        const repairResult = await input.runtime.modelRuntime.invoke("dev-repair-local", {
+        const repairResult = await input.runtime.modelRuntime.invoke(PROFILE_DEV_REPAIR, {
           role: "coder_handoff",
-          modelName: "dev-repair-local",
+          modelName: PROFILE_DEV_REPAIR,
           messages: [
             {
               role: "system",

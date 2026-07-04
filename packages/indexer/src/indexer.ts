@@ -92,7 +92,8 @@ function readExistingFile(db: DatabaseSync, projectId: string, path: string): Ex
       .prepare("SELECT id, path, content_hash, is_indexed FROM files WHERE project_id = ? AND path = ? LIMIT 1")
       .get(projectId, path) as ExistingFileRow | undefined;
     return row ?? null;
-  } catch {
+  } catch (error) {
+    console.warn("[indexer] readExistingFile failed:", error instanceof Error ? error.message : String(error));
     return null;
   }
 }
@@ -103,7 +104,8 @@ function readExistingDocument(db: DatabaseSync, projectId: string, path: string)
       .prepare("SELECT id, file_id FROM rag_documents WHERE project_id = ? AND path = ? LIMIT 1")
       .get(projectId, path) as ExistingDocumentRow | undefined;
     return row ?? null;
-  } catch {
+  } catch (error) {
+    console.warn("[indexer] readExistingDocument failed:", error instanceof Error ? error.message : String(error));
     return null;
   }
 }

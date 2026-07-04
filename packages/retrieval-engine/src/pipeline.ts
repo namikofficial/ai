@@ -65,7 +65,6 @@ export function buildRetrievalPipelineInput(
   rules: ProjectRuleRecord[];
   priorSessionPaths: string[];
   budgetTokens: number;
-  secretTerms: string[];
 } {
   const ftsChunks = source.searchChunks(args.projectId, args.query, { limit: args.ftsLimit });
   const vectorChunks =
@@ -94,6 +93,11 @@ export function buildRetrievalPipelineInput(
   for (const boost of source.retrieval.listPathBoosts(args.projectId, 200)) {
     pathBoosts.set(boost.path, boost.weight);
   }
+  // Derive budgetTokens from depth to match selectTopByTokenBudget() item counts.
+  // avgChunkTokens ≈ 150; use 200 as a safe upper estimate per chunk.
+  const budgetTokens =
+    args.depth === "deep" ? 12 * 200 : args.depth === "shallow" ? 4 * 200 : 8 * 200;
+
   return {
     query: args.query,
     intent: args.intent,
@@ -110,7 +114,6 @@ export function buildRetrievalPipelineInput(
     facts,
     rules,
     priorSessionPaths: recentSessionPaths,
-    budgetTokens: 4096,
-    secretTerms: [],
+    budgetTokens,
   };
 }

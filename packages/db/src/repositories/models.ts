@@ -490,42 +490,26 @@ export function createModelsRepo(db: DatabaseSync) {
     }): void {
       const day = input.day ?? now().slice(0, 10);
       const ts = now();
-      const updated = db
-        .prepare(
-          `UPDATE model_usage_daily
-           SET prompt_tokens = prompt_tokens + ?,
-               completion_tokens = completion_tokens + ?,
-               requests = requests + ?,
-               updated_at = ?
-         WHERE day = ? AND model_name = ?`
-        )
-        .run(input.promptTokens ?? 0, input.completionTokens ?? 0, input.requests ?? 0, ts, day, input.modelName);
-      if (updated.changes === 0) {
-        try {
-          db.prepare(
-            `INSERT INTO model_usage_daily (
-              day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-          ).run(
-            day,
-            input.modelName,
-            input.promptTokens ?? 0,
-            input.completionTokens ?? 0,
-            input.requests ?? 0,
-            ts,
-            ts
-          );
-        } catch {
-          db.prepare(
-            `UPDATE model_usage_daily
-               SET prompt_tokens = prompt_tokens + ?,
-                   completion_tokens = completion_tokens + ?,
-                   requests = requests + ?,
-                   updated_at = ?
-             WHERE day = ? AND model_name = ?`
-          ).run(input.promptTokens ?? 0, input.completionTokens ?? 0, input.requests ?? 0, ts, day, input.modelName);
-        }
-      }
+      // Use UPSERT (INSERT ON CONFLICT DO UPDATE) to avoid race condition between
+      // concurrent requests that both find no existing row and try to insert.
+      db.prepare(
+        `INSERT INTO model_usage_daily (
+          day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(day, model_name) DO UPDATE SET
+          prompt_tokens = prompt_tokens + excluded.prompt_tokens,
+          completion_tokens = completion_tokens + excluded.completion_tokens,
+          requests = requests + excluded.requests,
+          updated_at = excluded.updated_at`
+      ).run(
+        day,
+        input.modelName,
+        input.promptTokens ?? 0,
+        input.completionTokens ?? 0,
+        input.requests ?? 0,
+        ts,
+        ts
+      );
     },
     listUsageDaily(limit = 50): Array<{
       day: string;
