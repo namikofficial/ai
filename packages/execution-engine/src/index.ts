@@ -14,13 +14,16 @@ import type { EventLevel, ExecutionEvent, ExecutionEventKind } from "../../share
 import { createId } from "../../shared/src/index.ts";
 import {
   applyEdit,
+  applyStructuredPatch,
   buildSimpleUnifiedDiff,
   fileExists,
   guardPath,
   isHighRiskPath,
   isSecretFile,
+  listProjectFiles,
   readProjectFile,
   removeProjectFile,
+  searchProjectText,
   writeProjectFile,
 } from "./files.ts";
 import {
@@ -91,6 +94,7 @@ export function riskForPath(relativePath: string): "low" | "medium" | "high" {
 
 export const engine = {
   applyEdit,
+  applyStructuredPatch,
   buildSimpleUnifiedDiff,
   applyWorkspaceToOriginal,
   collectDiff,
@@ -101,6 +105,7 @@ export const engine = {
   guardPath,
   isCommandSafe,
   isGitRepository,
+  listProjectFiles,
   listBuiltinCommands,
   listGitBranches,
   getCurrentBranch,
@@ -114,6 +119,7 @@ export const engine = {
   checksAllPassed,
   removeProjectFile,
   riskForPath,
+  searchProjectText,
   writeProjectFile,
   createEventEmitter,
 };

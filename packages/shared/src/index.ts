@@ -1180,6 +1180,8 @@ export interface DevCheckResult {
   stdout: string;
   stderr: string;
   durationMs: number;
+  parsedErrors: string[];
+  affectedFiles: string[];
   startedAt: string;
   finishedAt: string;
 }

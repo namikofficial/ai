@@ -30,6 +30,8 @@ interface CommandRow {
   stdout: string;
   stderr: string;
   duration_ms: number;
+  parsed_errors_json: string;
+  affected_files_json: string;
   started_at: string | null;
   finished_at: string | null;
   blocked_reason: string | null;
@@ -96,6 +98,8 @@ export interface ExecutionCommandRecord {
   stdout: string;
   stderr: string;
   durationMs: number;
+  parsedErrors: string[];
+  affectedFiles: string[];
   startedAt: string | null;
   finishedAt: string | null;
   blockedReason: string | null;
@@ -165,6 +169,8 @@ function rowToCommand(row: CommandRow): ExecutionCommandRecord {
     stdout: asString(row.stdout),
     stderr: asString(row.stderr),
     durationMs: asNumber(row.duration_ms),
+    parsedErrors: safeParseJson(asString(row.parsed_errors_json ?? "[]")) as string[],
+    affectedFiles: safeParseJson(asString(row.affected_files_json ?? "[]")) as string[],
     startedAt: asStringOrNull(row.started_at),
     finishedAt: asStringOrNull(row.finished_at),
     blockedReason: asStringOrNull(row.blocked_reason),
@@ -284,9 +290,9 @@ export function createExecutionRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO execution_commands (
           id, run_id, project_id, workspace_id, name, command, cwd, status,
-          stdout, stderr, duration_ms, started_at, finished_at, blocked_reason,
+          stdout, stderr, duration_ms, parsed_errors_json, affected_files_json, started_at, finished_at, blocked_reason,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.runId,
@@ -299,6 +305,8 @@ export function createExecutionRepo(db: DatabaseSync) {
         "",
         "",
         0,
+        "[]",
+        "[]",
         null,
         null,
         null,
@@ -318,6 +326,8 @@ export function createExecutionRepo(db: DatabaseSync) {
         stdout: "",
         stderr: "",
         durationMs: 0,
+        parsedErrors: [],
+        affectedFiles: [],
         startedAt: null,
         finishedAt: null,
         blockedReason: null,
@@ -332,6 +342,8 @@ export function createExecutionRepo(db: DatabaseSync) {
       stdout: string;
       stderr: string;
       durationMs: number;
+      parsedErrors?: string[];
+      affectedFiles?: string[];
       startedAt: string;
       finishedAt: string;
       blockedReason?: string | null;
@@ -340,6 +352,7 @@ export function createExecutionRepo(db: DatabaseSync) {
       db.prepare(
         `UPDATE execution_commands
            SET status = ?, exit_code = ?, stdout = ?, stderr = ?, duration_ms = ?,
+               parsed_errors_json = ?, affected_files_json = ?,
                started_at = ?, finished_at = ?, blocked_reason = ?, updated_at = ?
          WHERE id = ?`
       ).run(
@@ -348,6 +361,8 @@ export function createExecutionRepo(db: DatabaseSync) {
         input.stdout,
         input.stderr,
         input.durationMs,
+        JSON.stringify(input.parsedErrors ?? []),
+        JSON.stringify(input.affectedFiles ?? []),
         input.startedAt,
         input.finishedAt,
         input.blockedReason ?? null,

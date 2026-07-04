@@ -39,6 +39,34 @@ const BUILTIN_COMMANDS: Record<string, CommandSpec> = {
     args: ["lint"],
     cwdFrom: "workspace",
   },
+  build: {
+    id: "build",
+    description: "Run pnpm build in the workspace.",
+    binary: "pnpm",
+    args: ["build"],
+    cwdFrom: "workspace",
+  },
+  cargo_check: {
+    id: "cargo_check",
+    description: "Run cargo check in the workspace.",
+    binary: "cargo",
+    args: ["check"],
+    cwdFrom: "workspace",
+  },
+  cargo_test: {
+    id: "cargo_test",
+    description: "Run cargo test in the workspace.",
+    binary: "cargo",
+    args: ["test"],
+    cwdFrom: "workspace",
+  },
+  cargo_clippy: {
+    id: "cargo_clippy",
+    description: "Run cargo clippy in the workspace.",
+    binary: "cargo",
+    args: ["clippy"],
+    cwdFrom: "workspace",
+  },
   format_check: {
     id: "format_check",
     description: "Run pnpm format:check in the workspace.",
@@ -110,7 +138,11 @@ function defaultProjectChecks(): ProjectChecksConfig["checks"] {
     typecheck: "pnpm typecheck",
     test: "pnpm test",
     lint: "pnpm lint",
+    build: "pnpm build",
     format_check: "pnpm format:check",
+    cargo_check: "cargo check",
+    cargo_test: "cargo test",
+    cargo_clippy: "cargo clippy",
   };
 }
 
@@ -214,6 +246,8 @@ export interface RunAllowedCommandResult {
   stdout: string;
   stderr: string;
   durationMs: number;
+  parsedErrors: string[];
+  affectedFiles: string[];
   startedAt: string;
   finishedAt: string;
   blockedReason: string | null;
@@ -238,6 +272,28 @@ export function isCommandSafe(command: CommandSpec): { safe: boolean; reason: st
   return { safe: true, reason: "ok" };
 }
 
+function parseCheckEvidence(output: string): { parsedErrors: string[]; affectedFiles: string[] } {
+  const parsedErrors: string[] = [];
+  const affectedFiles = new Set<string>();
+  const lines = output.split(/\r?\n/);
+  const fileLinePattern = /((?:\.{1,2}\/)?[\w./@-]+\.(?:ts|tsx|js|jsx|json|rs|go|py|java|kt|swift|css|scss|md|toml|yaml|yml))(?::(\d+))?(?::(\d+))?/;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (/\b(error|failed|failure|panic|exception|TS\d{4})\b/i.test(trimmed)) {
+      parsedErrors.push(trimmed.slice(0, 1_000));
+    }
+    const match = trimmed.match(fileLinePattern);
+    if (match?.[1]) {
+      affectedFiles.add(match[1].replace(/^\.\//, ""));
+    }
+  }
+  return {
+    parsedErrors: parsedErrors.slice(0, 50),
+    affectedFiles: Array.from(affectedFiles).slice(0, 50),
+  };
+}
+
 export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<RunAllowedCommandResult> {
   const startedAt = new Date().toISOString();
   const startMs = Date.now();
@@ -253,6 +309,8 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
       stdout: "",
       stderr: "",
       durationMs: 0,
+      parsedErrors: [],
+      affectedFiles: [],
       startedAt,
       finishedAt: new Date().toISOString(),
       blockedReason: safety.reason,
@@ -270,6 +328,7 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
     const settle = (status: CommandStatus, exitCode: number | null, blockedReason: string | null): void => {
       if (settled) return;
       settled = true;
+      const evidence = parseCheckEvidence(`${stderr}\n${stdout}`);
       resolve({
         name: input.command.id,
         command: renderCommand(input.command),
@@ -279,6 +338,8 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
         stdout,
         stderr,
         durationMs: Date.now() - startMs,
+        parsedErrors: evidence.parsedErrors,
+        affectedFiles: evidence.affectedFiles,
         startedAt,
         finishedAt: new Date().toISOString(),
         blockedReason,
@@ -333,6 +394,8 @@ export async function runAllowedChecks(input: {
         stdout: "",
         stderr: `Check "${name}" is not in the allowlist.`,
         durationMs: 0,
+        parsedErrors: [`Check "${name}" is not in the allowlist.`],
+        affectedFiles: [],
         startedAt: new Date().toISOString(),
         finishedAt: new Date().toISOString(),
         blockedReason: "check not in allowlist",

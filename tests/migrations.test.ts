@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { listMigrations, runMigrations } from "../packages/db/src/migrate.ts";
 
-test("migrations list includes 0001 through 0008", () => {
+test("migrations list includes 0001 through 0009", () => {
   const migrations = listMigrations();
   const versions = migrations.map((entry) => entry.version);
   assert.ok(versions.includes("0001_init"));
@@ -17,6 +17,7 @@ test("migrations list includes 0001 through 0008", () => {
   assert.ok(versions.includes("0006_trace_replay"));
   assert.ok(versions.includes("0007_dev_runs"));
   assert.ok(versions.includes("0008_embedding_cache"));
+  assert.ok(versions.includes("0009_execution_command_evidence"));
 });
 
 test("migrations apply cleanly and create the new intelligence and trace tables", async () => {
@@ -25,7 +26,7 @@ test("migrations apply cleanly and create the new intelligence and trace tables"
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 8);
+    assert.equal(result.applied.length, 9);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -45,6 +46,19 @@ test("migrations apply cleanly and create the new intelligence and trace tables"
     assert.ok(tableNames.includes("session_replays"), "session_replays table must exist");
     assert.ok(tableNames.includes("prompt_lab_runs"), "prompt_lab_runs table must exist");
     assert.ok(tableNames.includes("prompt_lab_results"), "prompt_lab_results table must exist");
+
+    const executionCommandColumns = db.prepare("PRAGMA table_info(execution_commands)").all() as Array<{
+      name: string;
+    }>;
+    const executionCommandNames = executionCommandColumns.map((c) => c.name);
+    assert.ok(
+      executionCommandNames.includes("parsed_errors_json"),
+      "execution_commands.parsed_errors_json column must exist"
+    );
+    assert.ok(
+      executionCommandNames.includes("affected_files_json"),
+      "execution_commands.affected_files_json column must exist"
+    );
 
     const ragChunksColumns = db.prepare("PRAGMA table_info(rag_chunks)").all() as Array<{
       name: string;

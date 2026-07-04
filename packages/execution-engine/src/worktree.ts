@@ -6,18 +6,32 @@
 //   * safe copy (fallback) when the project is not under git or the
 //     worktree command fails for a recoverable reason.
 //
-// The workspace lives under <runtimeDir>/workspaces/<sessionId>. The
+// The workspace lives under <runtimeDir>/dev-runs/<sessionId>/workspace. The
 // original project path is stored so the patch can later be applied back
 // at the user's explicit request.
 
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileOptions } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { IGNORED_DIRECTORIES, isIgnoredDirectory, normalizeSlashes } from "./files.ts";
 
-const execFileAsync = execFile;
+function execFileAsync(
+  file: string,
+  args: string[],
+  options: ExecFileOptions
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, options, (error, stdout, stderr) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve({ stdout: String(stdout), stderr: String(stderr) });
+    });
+  });
+}
 
 export interface CreateWorkspaceInput {
   projectPath: string;
@@ -95,7 +109,7 @@ function shortSessionId(sessionId: string): string {
 }
 
 function workspaceRootFor(runtimeDir: string): string {
-  return path.join(runtimeDir, "workspaces");
+  return path.join(runtimeDir, "dev-runs");
 }
 
 export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<CreateWorkspaceResult> {
@@ -106,8 +120,9 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
   const workspacesRoot = workspaceRootFor(input.runtimeDir);
   await mkdir(workspacesRoot, { recursive: true });
   const shortId = shortSessionId(input.sessionId);
-  const sessionDir = path.join(workspacesRoot, shortId);
-  const branchName = `workbench/${shortId}`;
+  const runDir = path.join(workspacesRoot, shortId);
+  const sessionDir = path.join(runDir, "workspace");
+  const branchName = `ai/dev/${shortId}`;
 
   if (await isGitRepository(root)) {
     const baseCommit = await getCurrentCommit(root);
@@ -129,7 +144,7 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
             cwd: root,
           }).catch(() => undefined);
           await execFileAsync("git", ["branch", "-D", branchName], { cwd: root }).catch(() => undefined);
-          await rm(sessionDir, { recursive: true, force: true }).catch(() => undefined);
+          await rm(runDir, { recursive: true, force: true }).catch(() => undefined);
         },
       };
     } catch (error) {
@@ -142,7 +157,7 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
   }
 
   // Safe copy fallback.
-  await rm(sessionDir, { recursive: true, force: true });
+  await rm(runDir, { recursive: true, force: true });
   await mkdir(sessionDir, { recursive: true });
   await copyDirectory(root, sessionDir);
   return {
@@ -156,7 +171,7 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
       originalRoot: root,
     },
     cleanup: async () => {
-      await rm(sessionDir, { recursive: true, force: true }).catch(() => undefined);
+      await rm(runDir, { recursive: true, force: true }).catch(() => undefined);
     },
   };
 }

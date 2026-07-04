@@ -189,6 +189,8 @@ export function parseDevCheckResult(value: unknown): DevCheckResult {
     stdout: typeof value.stdout === "string" ? value.stdout : "",
     stderr: typeof value.stderr === "string" ? value.stderr : "",
     durationMs: typeof value.durationMs === "number" ? value.durationMs : 0,
+    parsedErrors: isStringArray(value.parsedErrors) ? value.parsedErrors : [],
+    affectedFiles: isStringArray(value.affectedFiles) ? value.affectedFiles : [],
     startedAt,
     finishedAt,
   };

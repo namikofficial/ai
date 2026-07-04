@@ -293,7 +293,10 @@ async function applyEditsToWorkspace(input: {
 }
 
 async function runCheckStage(input: {
+  runId: string;
+  projectId: string;
   workspace: ExecutionWorkspaceRecord;
+  execution: ExecutionRepo;
   projectChecks: ProjectChecksConfig;
   checks: string[];
 }): Promise<DevRun["checks"]> {
@@ -303,16 +306,41 @@ async function runCheckStage(input: {
     projectConfig: input.projectChecks,
     timeoutMs: 10 * 60_000,
   });
-  return results.map((result) => ({
-    name: result.name,
-    status: result.status,
-    exitCode: result.exitCode,
-    stdout: result.stdout,
-    stderr: result.stderr,
-    durationMs: result.durationMs,
-    startedAt: result.startedAt,
-    finishedAt: result.finishedAt,
-  }));
+  return results.map((result) => {
+    const command = input.execution.recordCommand({
+      runId: input.runId,
+      projectId: input.projectId,
+      workspaceId: input.workspace.id,
+      name: result.name,
+      command: result.command,
+      cwd: result.cwd,
+    });
+    input.execution.completeCommand({
+      id: command.id,
+      status: result.status,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      durationMs: result.durationMs,
+      parsedErrors: result.parsedErrors,
+      affectedFiles: result.affectedFiles,
+      startedAt: result.startedAt,
+      finishedAt: result.finishedAt,
+      blockedReason: result.blockedReason,
+    });
+    return {
+      name: result.name,
+      status: result.status,
+      exitCode: result.exitCode,
+      stdout: result.stdout,
+      stderr: result.stderr,
+      durationMs: result.durationMs,
+      parsedErrors: result.parsedErrors,
+      affectedFiles: result.affectedFiles,
+      startedAt: result.startedAt,
+      finishedAt: result.finishedAt,
+    };
+  });
 }
 
 async function collectDiffForRun(input: {
@@ -652,7 +680,10 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     // Stage 4: checks
     input.runtime.devRuns.updateRun(run.id, { status: "checking" });
     let checks = await runCheckStage({
+      runId: run.id,
+      projectId: input.project.id,
       workspace,
+      execution: input.runtime.execution,
       projectChecks: projectConfig,
       checks: requestedChecks,
     });
@@ -723,7 +754,10 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         }
         repairAttempts += 1;
         checks = await runCheckStage({
+          runId: run.id,
+          projectId: input.project.id,
           workspace,
+          execution: input.runtime.execution,
           projectChecks: projectConfig,
           checks: requestedChecks,
         });

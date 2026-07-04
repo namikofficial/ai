@@ -4,7 +4,7 @@
 // outside the project root or its workspace. This module provides path
 // normalization, secret/path blocking, and safe file read/write.
 
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 export const IGNORED_DIRECTORIES: ReadonlyArray<string> = [
@@ -212,6 +212,94 @@ export async function removeProjectFile(root: string, candidate: string): Promis
   return true;
 }
 
+export interface ListProjectFilesInput {
+  root: string;
+  glob?: string;
+  maxDepth?: number;
+  limit?: number;
+}
+
+export async function listProjectFiles(input: ListProjectFilesInput): Promise<string[]> {
+  const root = path.resolve(input.root);
+  const maxDepth = Math.max(0, Math.floor(input.maxDepth ?? 8));
+  const limit = Math.max(1, Math.floor(input.limit ?? 500));
+  const files: string[] = [];
+  const matcher = createSimpleMatcher(input.glob);
+
+  async function walk(current: string, depth: number): Promise<void> {
+    if (files.length >= limit || depth > maxDepth) return;
+    const entries = (await readdir(current, { withFileTypes: true })) as Array<{
+      name: string;
+      isDirectory(): boolean;
+      isFile(): boolean;
+    }>;
+    for (const entry of entries) {
+      if (files.length >= limit) break;
+      const fullPath = path.join(current, entry.name);
+      const relativePath = normalizeSlashes(path.relative(root, fullPath));
+      if (isIgnoredDirectory(relativePath)) continue;
+      if (entry.isDirectory()) {
+        await walk(fullPath, depth + 1);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const guard = guardPath({ root, candidate: relativePath });
+      if (!guard.ok || guard.isSecret) continue;
+      if (matcher(relativePath)) files.push(relativePath);
+    }
+  }
+
+  await walk(root, 0);
+  return files;
+}
+
+export interface SearchProjectTextInput {
+  root: string;
+  query: string;
+  glob?: string;
+  maxDepth?: number;
+  limit?: number;
+  maxFileBytes?: number;
+}
+
+export interface SearchProjectTextMatch {
+  path: string;
+  line: number;
+  text: string;
+}
+
+export async function searchProjectText(input: SearchProjectTextInput): Promise<SearchProjectTextMatch[]> {
+  const query = input.query.trim();
+  if (!query) return [];
+  const limit = Math.max(1, Math.floor(input.limit ?? 100));
+  const maxFileBytes = Math.max(1_024, Math.floor(input.maxFileBytes ?? 256 * 1024));
+  const files = await listProjectFiles({
+    root: input.root,
+    glob: input.glob,
+    maxDepth: input.maxDepth,
+    limit: Math.max(limit, 500),
+  });
+  const matches: SearchProjectTextMatch[] = [];
+  const needle = query.toLowerCase();
+  for (const file of files) {
+    if (matches.length >= limit) break;
+    const guard = guardPath({ root: input.root, candidate: file });
+    if (!guard.ok || guard.isSecret) continue;
+    const info = await stat(guard.resolved);
+    if (info.size > maxFileBytes) continue;
+    const content = await readFile(guard.resolved, { encoding: "utf8" });
+    const lines = content.split(/\r?\n/);
+    for (let index = 0; index < lines.length; index += 1) {
+      if (matches.length >= limit) break;
+      const line = lines[index] ?? "";
+      if (line.toLowerCase().includes(needle)) {
+        matches.push({ path: file, line: index + 1, text: line.slice(0, 500) });
+      }
+    }
+  }
+  return matches;
+}
+
 export interface ApplyEditInput {
   root: string;
   edit: {
@@ -318,6 +406,31 @@ export async function applyEdit(input: ApplyEditInput): Promise<ApplyEditResult>
     before,
     after,
   };
+}
+
+export interface ApplyStructuredPatchInput {
+  root: string;
+  edits: ApplyEditInput["edit"][];
+}
+
+export async function applyStructuredPatch(input: ApplyStructuredPatchInput): Promise<ApplyEditResult[]> {
+  const results: ApplyEditResult[] = [];
+  for (const edit of input.edits) {
+    results.push(await applyEdit({ root: input.root, edit }));
+  }
+  return results;
+}
+
+function createSimpleMatcher(glob: string | undefined): (relativePath: string) => boolean {
+  const trimmed = glob?.trim();
+  if (!trimmed || trimmed === "**/*" || trimmed === "*") return () => true;
+  const escaped = trimmed
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replaceAll("**", "\u0000")
+    .replaceAll("*", "[^/]*")
+    .replaceAll("\u0000", ".*");
+  const pattern = new RegExp(`^${escaped}$`);
+  return (relativePath) => pattern.test(relativePath);
 }
 
 export interface SimpleUnifiedDiffInput {
