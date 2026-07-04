@@ -179,6 +179,9 @@ export interface CheckRunSummary {
   output: string | null;
   errorOutput: string | null;
   exitCode: number | null;
+  durationMs: number | null;
+  parsedErrors: string[];
+  affectedFiles: string[];
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;

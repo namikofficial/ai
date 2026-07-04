@@ -169,3 +169,38 @@ test("API POST /reviews enqueues a review.reflect worker job", async () => {
   }
   await rm(workspace, { recursive: true, force: true });
 });
+
+test("POST /checks/execute rejects requests without a projectId", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-api-checks-execute-"));
+  const config = resolveConfig({
+    databasePath: join(workspace, "ai.db"),
+    runtimeDir: join(workspace, "runtime"),
+  });
+  await mkdir(config.runtimeDir, { recursive: true });
+
+  const handle = await startWorkbenchServer({ config, inProcess: true });
+  try {
+    const inject = await handle.inject({
+      method: "POST",
+      url: "/checks/execute",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: { name: "typecheck" },
+    });
+    assert.equal(inject.statusCode, 400, `unexpected status: ${inject.statusCode} body=${inject.body}`);
+    const body = JSON.parse(inject.body) as { status: string; error?: { message?: string } };
+    assert.equal(body.status, "error");
+    assert.match(body.error?.message ?? "", /projectId is required/);
+
+    // Sending a projectId that does not resolve to a project must 404.
+    const missingProject = await handle.inject({
+      method: "POST",
+      url: "/checks/execute",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: { name: "typecheck", projectId: "project-does-not-exist" },
+    });
+    assert.equal(missingProject.statusCode, 404);
+  } finally {
+    await handle.close();
+  }
+  await rm(workspace, { recursive: true, force: true });
+});

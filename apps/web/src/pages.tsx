@@ -1762,33 +1762,89 @@ function HandoffPage(): ReactNode {
 }
 
 function ChecksPage(): ReactNode {
-  const resource = useResource(() => api.listChecks());
-  const checks = resource.data?.data ?? [];
+  const checksResource = useResource(() => api.listChecks());
+  const projectsResource = useResource(() => api.listProjects());
+  const projects = (projectsResource.data?.data ?? []) as Array<{ id: string; name: string }>;
+  const checks = checksResource.data?.data ?? [];
   const [name, setName] = useState("typecheck");
   const [projectId, setProjectId] = useState("");
+  const [busy, setBusy] = useState<"execute" | "record" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const submit = async (event: FormEvent<HTMLFormElement>) => {
+  useEffect(() => {
+    if (!projectId && projects[0]?.id) {
+      setProjectId(projects[0].id);
+    }
+  }, [projectId, projects]);
+
+  const handleExecute = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await api.runCheck({ name, projectId: projectId || null });
-    resource.refresh();
+    if (!projectId) {
+      setError("Select a project to execute the check against.");
+      return;
+    }
+    setBusy("execute");
+    setError(null);
+    try {
+      await api.executeCheck({ name, projectId });
+      checksResource.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleRecordOnly = async () => {
+    setBusy("record");
+    setError(null);
+    try {
+      await api.runCheck({ name, projectId: projectId || null });
+      checksResource.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
     <PageShell title="Checks" subtitle="Allowlisted validation runs">
       <Panel title="Run Check" span={4}>
-        <form className="stack" onSubmit={submit}>
-          <select value={name} onChange={(event) => setName(event.currentTarget.value)}>
+        <form className="stack" onSubmit={handleExecute}>
+          <select value={name} onChange={(event) => setName(event.currentTarget.value)} disabled={busy !== null}>
             <option value="typecheck">typecheck</option>
             <option value="tests">tests</option>
             <option value="build">build</option>
             <option value="lint">lint</option>
           </select>
-          <input
+          <select
             value={projectId}
             onChange={(event) => setProjectId(event.currentTarget.value)}
-            placeholder="optional project id"
-          />
-          <button type="submit">Run check</button>
+            disabled={busy !== null}
+          >
+            {projects.length > 0 ? (
+              projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))
+            ) : (
+              <option value="">Add a project first</option>
+            )}
+          </select>
+          {error ? <div className="error">{error}</div> : null}
+          <button type="submit" disabled={busy !== null || !projectId}>
+            {busy === "execute" ? "Executing..." : "Execute check"}
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={handleRecordOnly}
+            disabled={busy !== null}
+          >
+            {busy === "record" ? "Recording..." : "Record check only"}
+          </button>
         </form>
       </Panel>
       <Panel title="Recent Checks" span={8}>
@@ -1811,8 +1867,39 @@ function ChecksPage(): ReactNode {
                   >
                     {check.status}
                   </Badge>
+                  <span className="tiny">
+                    exit {check.exitCode == null ? "—" : check.exitCode}
+                    {check.durationMs != null ? ` · ${check.durationMs}ms` : ""}
+                  </span>
                 </div>
-                <div className="tiny">{check.output ?? check.errorOutput ?? "No output yet."}</div>
+                {check.errorOutput ? (
+                  <pre className="diff-view">stderr: {check.errorOutput}</pre>
+                ) : null}
+                {check.output ? (
+                  <pre className="diff-view">stdout: {check.output}</pre>
+                ) : (
+                  !check.errorOutput && <div className="tiny">No output yet.</div>
+                )}
+                {check.parsedErrors.length > 0 ? (
+                  <div className="tiny">
+                    parsed errors:
+                    <ul>
+                      {check.parsedErrors.map((err) => (
+                        <li key={`${check.id}-err-${err}`}>{err}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {check.affectedFiles.length > 0 ? (
+                  <div className="tiny">
+                    affected files:
+                    <ul>
+                      {check.affectedFiles.map((file) => (
+                        <li key={`${check.id}-file-${file}`}>{file}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
               </div>
             ))
           ) : (
@@ -2965,6 +3052,7 @@ function DevPage(): ReactNode {
   const [runDetail, setRunDetail] = useState<Record<string, unknown> | null>(null);
   const [runDiff, setRunDiff] = useState<Record<string, unknown> | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -3009,12 +3097,20 @@ function DevPage(): ReactNode {
     }
   };
 
+  const refreshRunDetail = async (id: string) => {
+    const [detail, diff] = await Promise.all([
+      api.getDevRun(id),
+      api.getDevRunDiff(id),
+    ]);
+    setRunDetail(detail.data);
+    setRunDiff(diff.data);
+  };
+
   const handleApprove = async () => {
     if (!runId) return;
     try {
       await api.approveDevRun(runId);
-      const detail = await api.getDevRun(runId);
-      setRunDetail(detail.data);
+      await refreshRunDetail(runId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
@@ -3024,10 +3120,23 @@ function DevPage(): ReactNode {
     if (!runId) return;
     try {
       await api.cancelDevRun(runId);
-      const detail = await api.getDevRun(runId);
-      setRunDetail(detail.data);
+      await refreshRunDetail(runId);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleApply = async () => {
+    if (!runId) return;
+    setApplying(true);
+    setError(null);
+    try {
+      await api.applyDevRun(runId);
+      await refreshRunDetail(runId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setApplying(false);
     }
   };
 
@@ -3035,6 +3144,11 @@ function DevPage(): ReactNode {
   const status = String(run?.status ?? "queued");
   const workspace = (runDetail as Record<string, unknown>)?.workspace as Record<string, unknown> | undefined;
   const edits = ((runDetail as Record<string, unknown>)?.edits as Array<Record<string, unknown>>) ?? [];
+  const appliedFiles = Array.isArray(run?.appliedFiles)
+    ? ((run?.appliedFiles as Array<unknown>) as Array<string>)
+    : [];
+  const appliedAt = run?.appliedAt ? String(run.appliedAt) : null;
+  const finalSummary = run?.summary ? String(run.summary) : null;
 
   return (
     <PageShell title="Dev" subtitle="goal → plan → edit → check → approve">
@@ -3121,9 +3235,10 @@ function DevPage(): ReactNode {
               <strong>{status}</strong>
               <Badge
                 tone={
-                  status === "completed" ? "good" :
+                  status === "completed" || status === "applied" ? "good" :
                   status === "failed" ? "bad" :
-                  status === "awaiting_approval" ? "warn" : "neutral"
+                  status === "awaiting_approval" || status === "approved" ? "warn" :
+                  status === "cancelled" ? "bad" : "neutral"
                 }
               >
                 {status}
@@ -3145,12 +3260,38 @@ function DevPage(): ReactNode {
                 ))}
               </div>
             ) : null}
+            {appliedFiles.length > 0 ? (
+              <div className="tiny">
+                applied files:
+                <ul>
+                  {appliedFiles.map((file) => (
+                    <li key={String(file)}>{String(file)}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {appliedAt ? (
+              <div className="tiny">applied at: {appliedAt}</div>
+            ) : null}
+            {finalSummary && (status === "applied" || status === "completed") ? (
+              <div className="tiny">summary: {finalSummary}</div>
+            ) : null}
             {status === "awaiting_approval" && (
               <div className="row">
-                <button type="button" onClick={handleApprove} disabled={submitting}>Approve</button>
-                <button type="button" onClick={handleCancel} disabled={submitting}>Cancel</button>
+                <button type="button" onClick={handleApprove} disabled={submitting || applying}>Approve</button>
+                <button type="button" onClick={handleCancel} disabled={submitting || applying}>Cancel</button>
               </div>
             )}
+            {status === "approved" && (
+              <div className="row">
+                <button type="button" onClick={handleApply} disabled={applying}>
+                  {applying ? "Applying..." : "Apply"}
+                </button>
+              </div>
+            )}
+            {status === "applied" && appliedFiles.length > 0 ? (
+              <div className="tiny">final status: applied {appliedFiles.length} file(s)</div>
+            ) : null}
           </div>
         ) : (
           <EmptyState title="No run yet" body="Start a dev run to see its status here." />

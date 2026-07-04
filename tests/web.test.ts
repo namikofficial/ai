@@ -8,6 +8,66 @@ import { handleMcpRequest } from "../mcp/server/src/tools.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import type { SessionTimelineResponse, TimelineItem } from "../packages/shared/src/index.ts";
 
+test("DevPage exposes an Apply action for approved runs and keeps approve/cancel gated on awaiting_approval", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-web-dev-"));
+  const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
+
+  // Apply handler must call the api client and refresh detail + diff.
+  assert.match(pagesSource, /handleApply/, "DevPage should define handleApply");
+  assert.match(pagesSource, /api\.applyDevRun\(runId\)/, "DevPage must invoke api.applyDevRun(runId)");
+  assert.match(pagesSource, /api\.getDevRun\(/, "DevPage must refresh dev run detail");
+  assert.match(pagesSource, /api\.getDevRunDiff\(/, "DevPage must refresh dev run diff");
+
+  // Approve/Cancel must live inside the awaiting_approval branch and Apply
+  // must live inside its own approved branch — verify by isolating each branch
+  // via regex.
+  const applyBranch = pagesSource.match(/\{status === "approved" && \(([\s\S]*?)\)\}/);
+  assert.ok(applyBranch, "Apply button branch must be gated on status === 'approved'");
+  assert.match(applyBranch[1], /"Apply"/, "Apply branch must render an Apply button");
+
+  const approveBranch = pagesSource.match(/\{status === "awaiting_approval" && \(([\s\S]*?)\)\}/);
+  assert.ok(approveBranch, "approve/cancel branch must be gated on status === 'awaiting_approval'");
+  assert.match(approveBranch[1], />Approve</, "approve branch must contain Approve button");
+  assert.match(approveBranch[1], />Cancel</, "approve branch must contain Cancel button");
+  assert.ok(
+    !/>Approve</.test(applyBranch[1] ?? "") && !/>Cancel</.test(applyBranch[1] ?? ""),
+    "Approve/Cancel must not appear inside the approved branch"
+  );
+
+  // The rendered Run Status panel must surface applied files and the final
+  // status when the run is applied.
+  assert.match(pagesSource, /applied files:/, "Run Status must show applied files");
+  assert.match(pagesSource, /final status: applied/, "Run Status must show final status");
+
+  // The handleApply handler must sequentially call applyDevRun and refresh.
+  const handleApplyMatch = pagesSource.match(/const handleApply = async \(\) => \{([\s\S]*?)\};/);
+  assert.ok(handleApplyMatch, "handleApply must be a defined function");
+  const handleApplyBody = handleApplyMatch[1];
+  const applyIdx = handleApplyBody.search(/api\.applyDevRun/);
+  const refreshIdx = handleApplyBody.search(/refreshRunDetail/);
+  assert.ok(applyIdx >= 0, "handleApply must call api.applyDevRun");
+  assert.ok(refreshIdx >= 0, "handleApply must call refreshRunDetail to refresh detail + diff");
+  assert.ok(refreshIdx > applyIdx, "refresh must occur after the apply call");
+
+  await rm(workspace, { recursive: true, force: true });
+});
+
+test("ChecksPage wires the project selector and Execute/Record actions to the api client", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-web-checks-"));
+  const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
+
+  assert.match(pagesSource, /api\.executeCheck\(\{ name, projectId \}\)/, "ChecksPage must call api.executeCheck");
+  assert.match(
+    pagesSource,
+    /api\.runCheck\(\{ name, projectId: projectId \|\| null \}\)/,
+    "ChecksPage must keep legacy api.runCheck as record-only"
+  );
+  assert.match(pagesSource, /Execute check/, "ChecksPage must render the Execute check button");
+  assert.match(pagesSource, /Record check only/, "ChecksPage must render the Record check only secondary action");
+
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("defines the Vite React shell and router surface", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-web-"));
   const indexHtml = await readFile("/home/namik/Documents/code/ai/apps/web/index.html", "utf8");

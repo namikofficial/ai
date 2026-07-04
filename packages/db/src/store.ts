@@ -850,19 +850,7 @@ export function createStore(db: DatabaseSync) {
     },
     listCheckRuns(limit = 20): CheckRunSummary[] {
       return (db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(
-        (row) => ({
-          id: asString(row.id),
-          name: asString(row.name),
-          status: asString(row.status) as CheckRunSummary["status"],
-          command: row.command == null ? null : asString(row.command),
-          output: row.output == null ? null : asString(row.output),
-          errorOutput: row.error_output == null ? null : asString(row.error_output),
-          exitCode: row.exit_code == null ? null : toNumber(row.exit_code),
-          startedAt: row.started_at == null ? null : asString(row.started_at),
-          finishedAt: row.finished_at == null ? null : asString(row.finished_at),
-          createdAt: asString(row.created_at),
-          updatedAt: asString(row.updated_at),
-        })
+        (row) => rowToCheckRun(row)
       );
     },
     listReviews(projectId?: string | null, limit = 20): ReviewRecord[] {
@@ -985,19 +973,7 @@ export function createStore(db: DatabaseSync) {
     getCheckRun(checkId: string): CheckRunSummary | null {
       const row = db.prepare("SELECT * FROM check_runs WHERE id = ? LIMIT 1").get(checkId) as Row | undefined;
       if (!row) return null;
-      return {
-        id: asString(row.id),
-        name: asString(row.name),
-        status: asString(row.status) as CheckRunSummary["status"],
-        command: row.command == null ? null : asString(row.command),
-        output: row.output == null ? null : asString(row.output),
-        errorOutput: row.error_output == null ? null : asString(row.error_output),
-        exitCode: row.exit_code == null ? null : toNumber(row.exit_code),
-        startedAt: row.started_at == null ? null : asString(row.started_at),
-        finishedAt: row.finished_at == null ? null : asString(row.finished_at),
-        createdAt: asString(row.created_at),
-        updatedAt: asString(row.updated_at),
-      };
+      return rowToCheckRun(row);
     },
     createCheckRun(input: {
       sessionId?: string | null;
@@ -1008,6 +984,9 @@ export function createStore(db: DatabaseSync) {
       output?: string | null;
       errorOutput?: string | null;
       exitCode?: number | null;
+      durationMs?: number | null;
+      parsedErrors?: string[];
+      affectedFiles?: string[];
       startedAt?: string | null;
       finishedAt?: string | null;
     }): CheckRunSummary {
@@ -1015,8 +994,10 @@ export function createStore(db: DatabaseSync) {
       const ts = now();
       db.prepare(
         `INSERT INTO check_runs (
-          id, session_id, project_id, name, status, command, output, error_output, exit_code, started_at, finished_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          id, session_id, project_id, name, status, command, output, error_output, exit_code,
+          duration_ms, parsed_errors_json, affected_files_json,
+          started_at, finished_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.sessionId ?? null,
@@ -1027,6 +1008,9 @@ export function createStore(db: DatabaseSync) {
         input.output ?? null,
         input.errorOutput ?? null,
         input.exitCode ?? null,
+        input.durationMs ?? null,
+        JSON.stringify(input.parsedErrors ?? []),
+        JSON.stringify(input.affectedFiles ?? []),
         input.startedAt ?? null,
         input.finishedAt ?? null,
         ts,
@@ -1044,7 +1028,9 @@ export function createStore(db: DatabaseSync) {
       };
       db.prepare(
         `UPDATE check_runs
-         SET name = ?, status = ?, command = ?, output = ?, error_output = ?, exit_code = ?, started_at = ?, finished_at = ?, updated_at = ?
+         SET name = ?, status = ?, command = ?, output = ?, error_output = ?, exit_code = ?,
+             duration_ms = ?, parsed_errors_json = ?, affected_files_json = ?,
+             started_at = ?, finished_at = ?, updated_at = ?
          WHERE id = ?`
       ).run(
         next.name,
@@ -1053,6 +1039,9 @@ export function createStore(db: DatabaseSync) {
         next.output,
         next.errorOutput,
         next.exitCode,
+        next.durationMs,
+        JSON.stringify(next.parsedErrors ?? []),
+        JSON.stringify(next.affectedFiles ?? []),
         next.startedAt,
         next.finishedAt,
         next.updatedAt,
@@ -2276,6 +2265,30 @@ function safeParseJson(value: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function safeParseStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((entry): entry is string => typeof entry === "string");
+}
+
+function rowToCheckRun(row: Row): CheckRunSummary {
+  return {
+    id: asString(row.id),
+    name: asString(row.name),
+    status: asString(row.status) as CheckRunSummary["status"],
+    command: row.command == null ? null : asString(row.command),
+    output: row.output == null ? null : asString(row.output),
+    errorOutput: row.error_output == null ? null : asString(row.error_output),
+    exitCode: row.exit_code == null ? null : toNumber(row.exit_code),
+    durationMs: row.duration_ms == null ? null : toNumber(row.duration_ms),
+    parsedErrors: safeParseStringArray(safeParseJson(asString(row.parsed_errors_json ?? "[]"))),
+    affectedFiles: safeParseStringArray(safeParseJson(asString(row.affected_files_json ?? "[]"))),
+    startedAt: row.started_at == null ? null : asString(row.started_at),
+    finishedAt: row.finished_at == null ? null : asString(row.finished_at),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  };
 }
 
 interface PlannerTaskDraft {

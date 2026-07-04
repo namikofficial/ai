@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { listMigrations, runMigrations } from "../packages/db/src/migrate.ts";
 
-test("migrations list includes 0001 through 0009", () => {
+test("migrations list includes 0001 through 0010", () => {
   const migrations = listMigrations();
   const versions = migrations.map((entry) => entry.version);
   assert.ok(versions.includes("0001_init"));
@@ -18,6 +18,7 @@ test("migrations list includes 0001 through 0009", () => {
   assert.ok(versions.includes("0007_dev_runs"));
   assert.ok(versions.includes("0008_embedding_cache"));
   assert.ok(versions.includes("0009_execution_command_evidence"));
+  assert.ok(versions.includes("0010_check_run_evidence"));
 });
 
 test("migrations apply cleanly and create the new intelligence and trace tables", async () => {
@@ -26,7 +27,7 @@ test("migrations apply cleanly and create the new intelligence and trace tables"
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 9);
+    assert.equal(result.applied.length, 10);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -59,6 +60,14 @@ test("migrations apply cleanly and create the new intelligence and trace tables"
       executionCommandNames.includes("affected_files_json"),
       "execution_commands.affected_files_json column must exist"
     );
+
+    const checkRunColumns = db.prepare("PRAGMA table_info(check_runs)").all() as Array<{
+      name: string;
+    }>;
+    const checkRunNames = checkRunColumns.map((c) => c.name);
+    assert.ok(checkRunNames.includes("duration_ms"), "check_runs.duration_ms column must exist");
+    assert.ok(checkRunNames.includes("parsed_errors_json"), "check_runs.parsed_errors_json column must exist");
+    assert.ok(checkRunNames.includes("affected_files_json"), "check_runs.affected_files_json column must exist");
 
     const ragChunksColumns = db.prepare("PRAGMA table_info(rag_chunks)").all() as Array<{
       name: string;

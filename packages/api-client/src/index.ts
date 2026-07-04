@@ -244,8 +244,20 @@ export function createApiClient(options: ApiClientOptions) {
     listChecks(): Promise<{ status: "ok"; data: CheckRunSummary[] }> {
       return requestJson(options.baseUrl, "/checks");
     },
+    // Legacy record-only path. Persists a synthetic CheckRunSummary without
+    // actually executing the check. Prefer `executeCheck` for real runs.
     runCheck(input: { name: string; projectId?: string | null }): Promise<{ status: "ok"; data: CheckRunSummary }> {
       return requestJson(options.baseUrl, "/checks/run", {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    // POST /checks/execute — runs the allowlisted check in the project's
+    // actual directory via execution-engine.runAllowedChecks. Requires a
+    // projectId so the command runs against the project workspace.
+    executeCheck(input: { name: string; projectId: string }): Promise<{ status: "ok"; data: CheckRunSummary }> {
+      return requestJson(options.baseUrl, "/checks/execute", {
         method: "POST",
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },

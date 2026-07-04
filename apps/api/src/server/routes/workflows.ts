@@ -183,13 +183,13 @@ export function registerWorkflowRoutes(router: Router, deps: {
     const projectId = body.projectId ? String(body.projectId) : null;
 
     if (!projectId) {
-      sendJson(res, json("error", { message: "projectId is required for /checks/execute" }), 400);
+      sendJson(res, json("error", undefined, { message: "projectId is required for /checks/execute" }), 400);
       return;
     }
 
     const project = deps.store.listProjects().find((p) => p.id === projectId);
     if (!project) {
-      sendJson(res, json("error", { message: `project ${projectId} not found` }), 404);
+      sendJson(res, json("error", undefined, { message: `project ${projectId} not found` }), 404);
       return;
     }
 
@@ -211,8 +211,11 @@ export function registerWorkflowRoutes(router: Router, deps: {
       output: result?.stdout ?? null,
       errorOutput: result?.stderr ?? null,
       exitCode: result?.exitCode ?? null,
-      startedAt: new Date().toISOString(),
-      finishedAt: new Date().toISOString(),
+      durationMs: result?.durationMs ?? null,
+      parsedErrors: result?.parsedErrors ?? [],
+      affectedFiles: result?.affectedFiles ?? [],
+      startedAt: result?.startedAt ?? new Date().toISOString(),
+      finishedAt: result?.finishedAt ?? new Date().toISOString(),
     });
 
     deps.store.appendEvent(
