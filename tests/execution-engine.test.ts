@@ -101,16 +101,17 @@ test("execution-engine: check allowlist blocks unknown commands and parses evide
   }
 });
 
-test("execution-engine: workspaces use runtime/dev-runs/<id>/workspace", async () => {
+test("execution-engine: workspaces use runtime/dev-runs/<runId>/workspace", async () => {
   const project = await makeProject();
   const runtime = await mkdtemp(join(tmpdir(), "ai-runtime-"));
   try {
     const created = await createTaskWorkspace({
       projectPath: project.root,
       runtimeDir: runtime,
-      sessionId: "run:123",
+      runId: "run_123",
+      sessionId: "session_abc",
     });
-    assert.match(created.workspace.path, /dev-runs\/run_123\/workspace$/);
+    assert.match(created.workspace.path, /dev-runs\/run_run_123\/workspace$/);
     await created.cleanup();
   } finally {
     await rm(runtime, { recursive: true, force: true });

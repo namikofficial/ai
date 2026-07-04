@@ -33,10 +33,14 @@ function execFileAsync(
   });
 }
 
+export type WorkspaceStrategy = "auto" | "git_worktree" | "safe_copy";
+
 export interface CreateWorkspaceInput {
   projectPath: string;
   runtimeDir: string;
+  runId: string;
   sessionId: string;
+  strategy?: WorkspaceStrategy;
 }
 
 export interface WorkspaceRecord {
@@ -104,8 +108,9 @@ export async function getCurrentCommit(projectPath: string): Promise<string | nu
   }
 }
 
-function shortSessionId(sessionId: string): string {
-  return sessionId.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 24) || "session";
+function shortId(id: string, label: string): string {
+  const sanitized = id.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 20);
+  return sanitized.length > 0 ? `${label}_${sanitized}` : label;
 }
 
 function workspaceRootFor(runtimeDir: string): string {
@@ -119,20 +124,23 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
   }
   const workspacesRoot = workspaceRootFor(input.runtimeDir);
   await mkdir(workspacesRoot, { recursive: true });
-  const shortId = shortSessionId(input.sessionId);
-  const runDir = path.join(workspacesRoot, shortId);
-  const sessionDir = path.join(runDir, "workspace");
-  const branchName = `ai/dev/${shortId}`;
+  const runShortId = shortId(input.runId, "run");
+  const runDir = path.join(workspacesRoot, runShortId);
+  const workspaceDir = path.join(runDir, "workspace");
+  const branchName = `ai/dev/${runShortId}`;
 
-  if (await isGitRepository(root)) {
+  const strategy = input.strategy ?? "auto";
+  const useWorktree = strategy === "git_worktree" || (strategy === "auto" && (await isGitRepository(root)));
+
+  if (useWorktree) {
     const baseCommit = await getCurrentCommit(root);
     const currentBranch = await getCurrentBranch(root);
     try {
-      await execFileAsync("git", ["worktree", "add", "-b", branchName, sessionDir], { cwd: root });
+      await execFileAsync("git", ["worktree", "add", "-b", branchName, workspaceDir], { cwd: root });
       return {
         workspace: {
-          id: `ws_${shortId}`,
-          path: sessionDir,
+          id: `ws_${runShortId}`,
+          path: workspaceDir,
           strategy: "git_worktree",
           branch: branchName,
           baseCommit,
@@ -140,7 +148,7 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
           originalRoot: root,
         },
         cleanup: async () => {
-          await execFileAsync("git", ["worktree", "remove", "--force", sessionDir], {
+          await execFileAsync("git", ["worktree", "remove", "--force", workspaceDir], {
             cwd: root,
           }).catch(() => undefined);
           await execFileAsync("git", ["branch", "-D", branchName], { cwd: root }).catch(() => undefined);
@@ -156,14 +164,14 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
     }
   }
 
-  // Safe copy fallback.
+  // Safe copy (or explicit safe_copy strategy).
   await rm(runDir, { recursive: true, force: true });
-  await mkdir(sessionDir, { recursive: true });
-  await copyDirectory(root, sessionDir);
+  await mkdir(workspaceDir, { recursive: true });
+  await copyDirectory(root, workspaceDir);
   return {
     workspace: {
-      id: `ws_${shortId}`,
-      path: sessionDir,
+      id: `ws_${runShortId}`,
+      path: workspaceDir,
       strategy: "safe_copy",
       branch: null,
       baseCommit: null,
@@ -230,6 +238,12 @@ export interface CollectDiffResult {
 
 export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffResult> {
   const maxBytes = input.maxBytesPerFile ?? 256 * 1024;
+
+  // Try git diff first for quality.
+  const gitDiffResult = await tryGitDiff(input);
+  if (gitDiffResult != null) return gitDiffResult;
+
+  // Fallback: manual per-file comparison.
   const diffs: string[] = [];
   const changed: string[] = [];
   const added: string[] = [];
@@ -286,6 +300,128 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
     filesAdded: added,
     filesRemoved: removed,
     truncated,
+  };
+}
+
+async function tryGitDiff(input: CollectDiffInput): Promise<CollectDiffResult | null> {
+  const { workspace, originalRoot, paths } = input;
+  const nonEmpty = paths.filter(Boolean);
+  if (nonEmpty.length === 0) return null;
+
+  let diffOutput: string | null = null;
+
+  try {
+    if (workspace.isGitWorktree) {
+      // git diff HEAD -- <paths> inside the worktree gives us changes vs the base commit.
+      const { stdout } = await execFileAsync(
+        "git",
+        ["diff", "--no-color", "HEAD", "--", ...nonEmpty],
+        { cwd: workspace.path, timeout: 30_000 }
+      );
+      diffOutput = stdout;
+    } else {
+      // safe_copy: diff original against workspace using git diff --no-index.
+      // git diff --no-index exits 1 when differences are found, which is expected.
+      try {
+        const { stdout } = await execFileAsync(
+          "git",
+          ["diff", "--no-color", "--no-index", originalRoot, workspace.path, "--", ...nonEmpty],
+          { cwd: originalRoot, timeout: 30_000 }
+        );
+        diffOutput = stdout;
+      } catch (error) {
+        // Exit code 1 = differences found; parse from error's stdout/stderr.
+        const execError = error as { code?: number; stdout?: unknown; stderr?: unknown };
+        if (execError.code === 1) {
+          diffOutput = String(execError.stdout ?? execError.stderr ?? "");
+        } else {
+          return null;
+        }
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  if (diffOutput == null || diffOutput.trim().length === 0) return null;
+  return parseGitDiffOutput(diffOutput, nonEmpty);
+}
+
+function parseGitDiffOutput(raw: string, paths: string[]): CollectDiffResult {
+  const changed: string[] = [];
+  const added: string[] = [];
+  const removed: string[] = [];
+  const pathSet = new Set(paths);
+  const diffLines = raw.split("\n");
+  let currentFile: string | null = null;
+  let inAdded = false;
+  let inRemoved = false;
+  const diffParts: string[] = [];
+  let i = 0;
+
+  while (i < diffLines.length) {
+    const line = diffLines[i]!;
+    // git diff header: diff --git a/path b/path
+    const diffHeader = line.match(/^diff --git a\/(.+) b\/(.+)$/);
+    if (diffHeader) {
+      if (currentFile !== null && pathSet.has(currentFile)) {
+        // Close previous file
+      }
+      currentFile = diffHeader[2]!;
+      inAdded = false;
+      inRemoved = false;
+      i++;
+      continue;
+    }
+    // File mode line: new file mode
+    if (line.startsWith("new file mode") || line.startsWith("new file")) {
+      if (currentFile) added.push(currentFile);
+      i++;
+      continue;
+    }
+    // Deleted file mode
+    if (line.startsWith("deleted file mode")) {
+      if (currentFile) removed.push(currentFile);
+      i++;
+      continue;
+    }
+    // Hunk header: @@ -N,N +N,N @@
+    if (line.startsWith("@@")) {
+      if (currentFile && pathSet.has(currentFile) && !changed.includes(currentFile)) {
+        changed.push(currentFile);
+      }
+      diffParts.push(line);
+      inAdded = false;
+      inRemoved = false;
+      i++;
+      continue;
+    }
+    // Context or diff content
+    if (currentFile && pathSet.has(currentFile)) {
+      diffParts.push(line);
+      if (line.startsWith("+") && !line.startsWith("+++")) inAdded = true;
+      if (line.startsWith("-") && !line.startsWith("---")) inRemoved = true;
+    }
+    i++;
+  }
+
+  // Also handle files that were added (detected via "new file mode" header)
+  // Run a second pass to detect simple new files
+  for (const p of paths) {
+    if (!changed.includes(p) && !added.includes(p) && !removed.includes(p)) {
+      // Check if this path appears as "new file" in raw output
+      if (raw.includes(`new file mode`) && raw.includes(`a/${p}`) && raw.includes(`b/${p}`)) {
+        if (!added.includes(p)) added.push(p);
+      }
+    }
+  }
+
+  return {
+    diff: diffParts.join("\n"),
+    filesChanged: changed,
+    filesAdded: added,
+    filesRemoved: removed,
+    truncated: false,
   };
 }
 

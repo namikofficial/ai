@@ -745,6 +745,13 @@ async function run(): Promise<void> {
       return;
     }
 
+    // ai dev apply <run-id>
+    if (subcommand === "apply") {
+      if (!runIdOrGoal) throw new Error("ai dev apply <run-id>");
+      printJson(await client.applyDevRun(runIdOrGoal));
+      return;
+    }
+
     // ai dev "<goal>" — start a new dev run
     if (subcommand) {
       const project = options.project;

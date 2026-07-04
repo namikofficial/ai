@@ -561,6 +561,12 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
+    applyDevRun(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/dev/runs/${encodeURIComponent(runId)}/apply`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+    },
     getEmbeddingCache(): Promise<{ status: "ok"; data: { entryCount: number; stats: Array<Record<string, unknown>> } }> {
       return requestJson(options.baseUrl, `/embeddings/cache`);
     },

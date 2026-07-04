@@ -88,6 +88,7 @@ function highestRisk(levels: RiskLevel[]): RiskLevel {
 
 function nextCommandFor(runId: string, status: DevRunStatus, applied: boolean): string {
   if (applied) return `ai dev show ${runId}`;
+  if (status === "approved") return `ai dev apply ${runId}`;
   if (status === "awaiting_approval") return `ai dev diff ${runId}  # then: ai dev approve ${runId}`;
   if (status === "completed" || status === "failed" || status === "cancelled") return `ai dev show ${runId}`;
   return `ai dev show ${runId}`;
@@ -110,8 +111,15 @@ function buildDevPrompt(input: {
   hints: string[];
   riskHints: string[];
   rules: string[];
+  testFiles?: Array<{ path: string; content: string }>;
+  packageScripts?: { path: string; content: string } | null;
 }): string {
   const context = input.retrieved.map((entry) => `FILE: ${entry.path}\n\`\`\`\n${entry.content}\n\`\`\``).join("\n\n");
+  const testSection =
+    input.testFiles && input.testFiles.length > 0
+      ? `Relevant tests:\n${input.testFiles.map((f) => `FILE: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``).join("\n")}\n\n`
+      : "";
+  const scriptsSection = input.packageScripts ? `Package scripts:\n\`\`\`\n${input.packageScripts.content}\n\`\`\`\n\n` : "";
   return [
     `You are the workbench dev editor. Plan the smallest possible set of edits for this goal.`,
     `Project: ${input.projectName}`,
@@ -119,7 +127,7 @@ function buildDevPrompt(input: {
     `Likely files: ${input.hints.join(", ") || "(none yet)"}`,
     `Risk reminders: ${input.riskHints.join("; ")}`,
     `Safety rules: ${input.rules.join("; ")}`,
-    `Context (truncated):\n${context || "(no context)"}`,
+    `${scriptsSection}${testSection}Context (truncated):\n${context || "(no context)"}`,
     ``,
     `Output ONLY a JSON object with this exact shape:`,
     `{`,
@@ -168,6 +176,37 @@ function parseModelPlan(text: string): DevPlan | null {
   }
 }
 
+interface PlanValidation {
+  valid: boolean;
+  reason?: string;
+  correctedRisk?: "low" | "medium" | "high";
+}
+
+/**
+ * Reviewer gate: validates the planner's output before it proceeds to editing.
+ * - Rejects plans with missing summary or no edits.
+ * - Cross-checks edit risk vs declared risk; upgrades risk if mismatched.
+ * - Can request a retry if output is malformed.
+ */
+function validatePlan(plan: DevPlan): PlanValidation {
+  if (!plan.summary || plan.summary.trim().length === 0) {
+    return { valid: false, reason: "plan missing summary" };
+  }
+  if (plan.edits.length === 0) {
+    return { valid: false, reason: "plan has no edits" };
+  }
+  // Cross-check: compute actual max risk from edit paths vs declared risk.
+  const editRisks = plan.edits.map((e) => riskForPath(e.path));
+  const maxEditRisk = highestRisk(editRisks);
+  if (maxEditRisk === "high" && plan.risk !== "high") {
+    return { valid: true, reason: `risk downgraded by model; actual risk is high`, correctedRisk: "high" };
+  }
+  if (maxEditRisk === "medium" && plan.risk === "low") {
+    return { valid: true, reason: `risk mismatched: edits are medium-risk but plan says low`, correctedRisk: "medium" };
+  }
+  return { valid: true };
+}
+
 async function readProjectSources(
   input: RunDevWorkflowInput,
   paths: string[]
@@ -182,6 +221,60 @@ async function readProjectSources(
     }
   }
   return sources;
+}
+
+/**
+ * Find and read test files related to the hinted source files.
+ * Looks for .test.ts / .spec.ts siblings and nearby __tests__ directories.
+ */
+async function readRelatedTestFiles(
+  projectPath: string,
+  hints: string[]
+): Promise<Array<{ path: string; content: string }>> {
+  const results: Array<{ path: string; content: string }> = [];
+  const seen = new Set<string>();
+
+  for (const hint of hints) {
+    const base = hint.replace(/\.[^.]+$/, "");
+    const candidates = [
+      `${base}.test.ts`,
+      `${base}.spec.ts`,
+      `${base}.test.tsx`,
+      `${base}.spec.tsx`,
+      hint.replace(/^(packages|apps)\/([^/]+)\//, "$1/$2/src/__tests__/$2."),
+    ];
+    for (const candidate of candidates) {
+      if (seen.has(candidate)) continue;
+      try {
+        const content = await readProjectFile(projectPath, candidate);
+        results.push({ path: candidate, content: content.slice(0, 2_000) });
+        seen.add(candidate);
+      } catch {
+        // not found
+      }
+    }
+  }
+  return results;
+}
+
+/**
+ * Read package.json scripts block for project context.
+ */
+async function readPackageScripts(projectPath: string): Promise<{ path: string; content: string } | null> {
+  try {
+    const content = await readProjectFile(projectPath, "package.json");
+    // Extract just the scripts section for brevity.
+    const parsed = JSON.parse(content) as { scripts?: Record<string, string> };
+    if (parsed.scripts) {
+      const scriptsBlock = Object.entries(parsed.scripts)
+        .map(([k, v]) => `  "${k}": "${v}"`)
+        .join("\n");
+      return { path: "package.json#scripts", content: `{\n  "scripts": {\n${scriptsBlock}\n  }\n}` };
+    }
+  } catch {
+    // no package.json or not parseable
+  }
+  return null;
 }
 
 function pickFileHints(queries: RetrievalQueryRecord[], projectPath: string, repo: RetrievalRepo): string[] {
@@ -267,6 +360,7 @@ function shouldRequireApproval(input: {
 async function applyEditsToWorkspace(input: {
   workspace: ExecutionWorkspaceRecord;
   edits: DevEdit[];
+  approveEdits: boolean;
 }): Promise<{ applied: DevEdit[]; failed: Array<{ edit: DevEdit; reason: string }> }> {
   const applied: DevEdit[] = [];
   const failed: Array<{ edit: DevEdit; reason: string }> = [];
@@ -278,6 +372,11 @@ async function applyEditsToWorkspace(input: {
     }
     if (isSecretFile(guard.relative)) {
       failed.push({ edit, reason: "refuses to touch secret files" });
+      continue;
+    }
+    if (guard.isHighRisk && !input.approveEdits) {
+      failed.push({ edit, reason: "high-risk file requires approveEdits=true" });
+      continue;
     }
   }
   for (const edit of input.edits) {
@@ -520,7 +619,10 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     const queries = existingQueries.length > 0 ? existingQueries : [chosenQuery];
     const contextChunks = retrievalContextForQueries(queries, input.runtime.retrieval);
     const hints = pickFileHints(queries, input.project.path, input.runtime.retrieval);
-    const sources = await readProjectSources(input, hints.length > 0 ? hints : ["README.md", "package.json"]);
+    const fallbackPaths = hints.length > 0 ? hints : ["README.md", "package.json"];
+    const sources = await readProjectSources(input, fallbackPaths);
+    const testFiles = await readRelatedTestFiles(input.project.path, fallbackPaths);
+    const packageScripts = await readPackageScripts(input.project.path);
 
     // Stage 1: plan
     input.runtime.devRuns.updateRun(run.id, { status: "planning" });
@@ -548,6 +650,8 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
             hints,
             riskHints: projectConfig.dev.requireApprovalFor,
             rules,
+            testFiles,
+            packageScripts,
           }),
         },
       ],
@@ -566,6 +670,61 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       plan = buildMissingContextPlan("model output was not a valid plan");
     } else if (plan.edits.length === 0) {
       plan = { ...plan, missingContextReason: plan.notes ?? "model returned no edits" };
+    }
+
+    // Reviewer gate: validate plan quality before proceeding to workspace edits.
+    if (plan.edits.length > 0) {
+      const validation = validatePlan(plan);
+      if (!validation.valid) {
+        // Retry once with a stricter prompt.
+        emit({ kind: "review.rejected", level: "warn", message: validation.reason ?? "plan invalid" });
+        const retryResult = await input.runtime.modelRuntime.invoke("planner-balanced-local", {
+          role: "planner",
+          modelName: "planner-balanced-local",
+          messages: [
+            {
+              role: "system",
+              content:
+                "You are the workbench dev planner. Output ONLY a valid JSON object. " +
+                "Every field must be present and correctly typed: summary (string), edits (array of edit objects), checks (array of strings), risk (low|medium|high). " +
+                "Do not add any text before or after the JSON.",
+            },
+            {
+              role: "user",
+              content:
+                "RETRY: " +
+                buildDevPrompt({
+                  goal: parsedRequest.goal,
+                  projectName: input.project.name,
+                  retrieved: sources,
+                  hints,
+                  riskHints: projectConfig.dev.requireApprovalFor,
+                  rules,
+                  testFiles,
+                  packageScripts,
+                }),
+            },
+          ],
+          temperature: 0,
+          maxOutputTokens: 1024,
+          metadata: { kind: "dev-plan", runId: run.id, sessionId: input.sessionId, projectId: input.project.id },
+        });
+        const retryPlan = parseModelPlan(retryResult.text);
+        if (retryPlan && retryPlan.edits.length > 0) {
+          plan = retryPlan;
+          emit({ kind: "review.passed", message: "retry succeeded" });
+        } else {
+          plan = buildMissingContextPlan("retry produced no valid plan");
+        }
+      } else if (validation.correctedRisk) {
+        // Upgrade risk when the model downgraded it.
+        plan = { ...plan, risk: validation.correctedRisk };
+        emit({
+          kind: "review.rejected",
+          level: "warn",
+          message: `risk corrected to ${validation.correctedRisk}: ${validation.reason}`,
+        });
+      }
     }
 
     if (plan.edits.length === 0) {
@@ -599,7 +758,9 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
     const created = await createTaskWorkspace({
       projectPath: input.project.path,
       runtimeDir: input.runtimeDir,
+      runId: run.id,
       sessionId: input.sessionId,
+      strategy: projectConfig.dev.workspaceStrategy ?? "auto",
     });
     const workspace = input.runtime.execution.createWorkspace({
       runId: run.id,
@@ -623,7 +784,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       approveEdits: parsedRequest.approveEdits ?? false,
     });
 
-    const editOutcomes = await applyEditsToWorkspace({ workspace, edits });
+    const editOutcomes = await applyEditsToWorkspace({ workspace, edits, approveEdits: parsedRequest.approveEdits ?? false });
     for (const success of editOutcomes.applied) {
       const editId = input.runtime.devRuns.addEdit({
         runId: run.id,
@@ -731,7 +892,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
           emit({ kind: "repair.attempted", level: "warn", message: "repair returned no edits" });
           break;
         }
-        const repairOutcome = await applyEditsToWorkspace({ workspace, edits: repairPlan.edits });
+        const repairOutcome = await applyEditsToWorkspace({ workspace, edits: repairPlan.edits, approveEdits: parsedRequest.approveEdits ?? false });
         for (const success of repairOutcome.applied) {
           input.runtime.devRuns.addEdit({
             runId: run.id,

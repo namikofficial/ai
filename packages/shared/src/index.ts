@@ -1261,7 +1261,9 @@ export type ExecutionEventKind =
   | "patch.applied"
   | "run.completed"
   | "run.failed"
-  | "run.cancelled";
+  | "run.cancelled"
+  | "review.rejected"
+  | "review.passed";
 
 export interface ExecutionEvent {
   id: string;

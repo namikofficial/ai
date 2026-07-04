@@ -130,6 +130,7 @@ export interface ProjectChecksConfig {
     defaultChecks: string[];
     maxRepairLoops: number;
     requireApprovalFor: string[];
+    workspaceStrategy?: "auto" | "git_worktree" | "safe_copy";
   };
 }
 
@@ -151,6 +152,7 @@ function defaultProjectDev(): ProjectChecksConfig["dev"] {
     defaultChecks: ["typecheck"],
     maxRepairLoops: 1,
     requireApprovalFor: ["env", "migrations", "auth", "db", "package"],
+    workspaceStrategy: "auto",
   };
 }
 
@@ -178,6 +180,10 @@ export function readProjectChecksConfig(raw: Record<string, unknown> | null | un
   const requireApprovalFor = Array.isArray(rawDev.requireApprovalFor)
     ? rawDev.requireApprovalFor.filter((item): item is string => typeof item === "string")
     : defaultProjectDev().requireApprovalFor;
+  const workspaceStrategy = (rawDev.workspaceStrategy as string | undefined);
+  const validStrategy = ["auto", "git_worktree", "safe_copy"].includes(workspaceStrategy ?? "")
+    ? (workspaceStrategy as "auto" | "git_worktree" | "safe_copy")
+    : defaultProjectDev().workspaceStrategy;
 
   return {
     checks: mergedChecks,
@@ -185,6 +191,7 @@ export function readProjectChecksConfig(raw: Record<string, unknown> | null | un
       defaultChecks: defaultChecks.length > 0 ? defaultChecks : defaultProjectDev().defaultChecks,
       maxRepairLoops,
       requireApprovalFor,
+      workspaceStrategy: validStrategy,
     },
   };
 }

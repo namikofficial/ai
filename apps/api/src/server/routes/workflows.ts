@@ -133,6 +133,10 @@ export function registerWorkflowRoutes(router: Router, deps: {
     sendHtml(res, renderChecksPage(deps.store));
   });
 
+  // NOTE: /checks/run currently records check results only — it does not execute
+  // checks in a real workspace. Real check execution happens inside dev-run workflows
+  // via execution-engine.runAllowedChecks() with an isolated workspace.
+  // TODO: add real execution by resolving project workspace and calling runAllowedChecks
   router.post("/checks/run", asyncRoute(async (req, res) => {
     const body = (
       req.headers["content-type"]?.includes("application/json")
