@@ -61,9 +61,9 @@ async function pickFreePort(preferred) {
 async function main() {
   loadEnvFile(resolve(process.cwd(), ".env"));
 
-  const apiPort = await pickFreePort(parsePort(process.env.AI_API_PORT, 4242));
+  const apiPort = await pickFreePort(parsePort(process.env.AI_API_PORT, 4417));
   const webPort = await pickFreePort(
-    parsePort(process.env.AI_WEB_PORT, 3000) === apiPort ? 0 : parsePort(process.env.AI_WEB_PORT, 3000)
+    parsePort(process.env.AI_WEB_PORT, 4317) === apiPort ? 0 : parsePort(process.env.AI_WEB_PORT, 4317)
   );
 
   process.env.AI_API_PORT = String(apiPort);

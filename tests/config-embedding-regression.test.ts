@@ -14,7 +14,7 @@ test("config: resolveConfig returns safe defaults", () => {
   const config = resolveConfig();
   assert.ok(config.databasePath.endsWith("ai.db"));
   assert.equal(typeof config.cloudEnabled, "boolean");
-  assert.equal(config.apiPort, 4242);
+  assert.equal(config.apiPort, 4417);
 });
 
 test("config: resolveProjectConfig loads valid .ai-workbench.json", () => {

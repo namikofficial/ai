@@ -273,7 +273,7 @@ async function buildTimelineFromStore(store: ReturnType<typeof createStore>, ses
 
 async function run(): Promise<void> {
   const { command, options, positionals } = parseArgs(process.argv.slice(2));
-  const apiPort = Number(options["api-port"] ?? 4242);
+  const apiPort = Number(options["api-port"] ?? 4417);
   const apiUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiPort}`;
   const client = await ensureServer(apiUrl);
 
@@ -297,8 +297,8 @@ async function run(): Promise<void> {
   }
 
   if (command === "web") {
-    const webPort = Number(options.port ?? 3000);
-    const apiOnlyPort = Number(options["api-port"] ?? 4242);
+    const webPort = Number(options.port ?? 4317);
+    const apiOnlyPort = Number(options["api-port"] ?? 4417);
     const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
     const apiHandle = await startWorkbenchServer({
       config: { apiUrl: apiOnlyUrl, webPort: apiOnlyPort, apiPort: apiOnlyPort },

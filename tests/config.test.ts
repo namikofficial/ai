@@ -5,9 +5,9 @@ import { readEmbeddingConfig } from "../packages/indexer/src/config.ts";
 
 test("uses separate web and api defaults", () => {
   const config = resolveConfig();
-  assert.equal(config.webPort, 3000);
-  assert.equal(config.apiPort, 4242);
-  assert.equal(config.apiUrl, "http://127.0.0.1:4242");
+  assert.equal(config.webPort, 4317);
+  assert.equal(config.apiPort, 4417);
+  assert.equal(config.apiUrl, "http://127.0.0.1:4417");
 });
 
 test("derives the api url from a custom api port", () => {

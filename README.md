@@ -21,13 +21,13 @@ pnpm dev
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│  Vite React Web Dashboard (port 3000)                      │
+│  Vite React Web Dashboard (port 4317)                      │
 │  SPA with React Router · Zustand (UI state + live events)  │
 │  SSE via EventSource · REST API calls via fetch             │
 └────────────────────────┬──────────────────────────────────┘
-                         │ proxy /api → Express (4242)
+                         │ proxy /api → Express (4417)
 ┌────────────────────────▼──────────────────────────────────┐
-│  Express API Server (port 4242)                            │
+│  Express API Server (port 4417)                            │
 │  REST for state/mutations · SSE /events/stream              │
 │  SQLite (durable) · Qdrant (vector retrieval)               │
 └─────────────────────────────────────────────────────────────┘
@@ -44,8 +44,8 @@ pnpm dev
 The `pnpm cli` command provides the main entry point for managing the workbench.
 
 ### Servers
-- `pnpm cli -- api --port 4242`: Start the Express API server.
-- `pnpm cli -- web --port 3000 --api-port 4242`: Start the Vite React web dashboard.
+- `pnpm cli -- api --port 4417`: Start the Express API server.
+- `pnpm cli -- web --port 4317 --api-port 4417`: Start the Vite React web dashboard.
 - `pnpm cli -- worker`: Start the background job worker (for reflections and indexing).
 - `pnpm cli -- mcp`: Start the MCP (Model Context Protocol) server.
 
