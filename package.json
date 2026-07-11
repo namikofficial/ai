@@ -27,6 +27,8 @@
     "repomix": "^0.2.0"
   },
   "dependencies": {
+    "@ast-grep/napi": "^0.44.1",
+    "@ast-grep/napi-linux-x64-gnu": "^0.44.1",
     "acorn": "^8.17.0",
     "acorn-typescript": "^1.4.13"
   }
