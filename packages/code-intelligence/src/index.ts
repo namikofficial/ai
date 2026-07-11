@@ -50,9 +50,13 @@ export interface ProjectContextGraph {
   routeFiles: string[];
   middlewareFiles: string[];
   dbFiles: string[];
+  serviceFiles: string[];
+  repositoryFiles: string[];
+  testFiles: string[];
   authPaths: string[];
   packageBoundaries: string[];
   hotPaths: string[];
+  callGraphEdgeCount: number;
   notes: string[];
   symbolCount?: number;
 }
@@ -755,7 +759,77 @@ export function resolveLocalReference(path: string, specifier: string): string |
   return localFilePathVariants(normalized).find((candidate) => /\.[a-z0-9]+$/i.test(candidate)) ?? null;
 }
 
-export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeIntelligenceResult {
+// Builds intra-file call edges by matching `name(` call sites to symbols
+// defined in the same file. This is the multi-hop link (controller ->
+// service -> repository) that makes architectural questions answerable
+// without a full type checker. It is heuristic: it links by name and skips
+// language keywords and self-recursion within the same symbol span.
+const CALL_KEYWORDS = new Set([
+  "if",
+  "for",
+  "while",
+  "switch",
+  "catch",
+  "function",
+  "return",
+  "await",
+  "new",
+  "typeof",
+  "instanceof",
+  "do",
+  "else",
+  "case",
+]);
+
+function buildCallEdges(input: ExtractCodeSymbolsInput, symbols: CodeSymbol[], sourceLines: string[]): CodeEdge[] {
+  const edges: CodeEdge[] = [];
+  const byName = new Map<string, CodeSymbol[]>();
+  for (const symbol of symbols) {
+    if (symbol.kind === "import") continue;
+    const arr = byName.get(symbol.name) ?? [];
+    arr.push(symbol);
+    byName.set(symbol.name, arr);
+  }
+  const callRe = /\b([A-Za-z_$][\w$]*)\s*\(/g;
+  let produced = 0;
+  for (let index = 0; index < sourceLines.length && produced < 400; index += 1) {
+    const line = sourceLines[index] ?? "";
+    const callLine = index + 1;
+    let match: RegExpExecArray | null;
+    callRe.lastIndex = 0;
+    while ((match = callRe.exec(line)) !== null) {
+      const callee = match[1];
+      if (CALL_KEYWORDS.has(callee)) continue;
+      const targets = byName.get(callee);
+      if (!targets || targets.length === 0) continue;
+      const enclosing =
+        symbols.find(
+          (s) => s.kind !== "import" && s.startLine <= callLine && s.endLine >= callLine
+        ) ?? null;
+      for (const target of targets) {
+        if (enclosing && enclosing.id === target.id) continue;
+        if (target.startLine <= callLine && target.endLine >= callLine) continue;
+        edges.push({
+          id: edgeId(input, (enclosing?.id ?? "file"), target.id, "calls"),
+          projectId: input.projectId,
+          fromSymbolId: enclosing?.id ?? "file",
+          toSymbolId: target.id,
+          kind: "calls",
+          confidence: 0.6,
+          metadata: { caller: enclosing?.name ?? input.path, callee },
+        });
+        produced += 1;
+        if (produced >= 400) break;
+      }
+    }
+  }
+  return edges;
+}
+
+export function extractCodeIntelligence(
+  input: ExtractCodeSymbolsInput,
+  opts?: { deepGraph?: boolean }
+): CodeIntelligenceResult {
   const language = guessFileLanguage(input.path, input.language);
   let result: { symbols: CodeSymbol[]; edges: CodeEdge[] } = { symbols: [], edges: [] };
   switch (language) {
@@ -778,6 +852,16 @@ export function extractCodeIntelligence(input: ExtractCodeSymbolsInput): CodeInt
     default:
       result = { symbols: [], edges: [] };
       break;
+  }
+
+  // Deep graph mode (selected by `preferTreeSitter` in project config)
+  // augments the symbol graph with intra-file call edges so multi-hop
+  // architectural questions are answerable. Native tree-sitter is not
+  // required; the acorn AST + regex extractors already provide the
+  // structural facts, and call edges are derived heuristically.
+  if (opts?.deepGraph) {
+    const sourceLines = lines(input.content);
+    result.edges = [...result.edges, ...buildCallEdges(input, result.symbols, sourceLines)];
   }
 
   result.symbols = dedupeCodeSymbols(result.symbols);
@@ -895,6 +979,7 @@ export function linkSymbolsToChunks(
 export function buildProjectContextGraph(input: {
   projectId: string;
   symbols: CodeSymbol[];
+  edges?: CodeEdge[];
   paths: string[];
   updatedAt?: string;
 }): ProjectContextGraph {
@@ -932,10 +1017,18 @@ export function buildProjectContextGraph(input: {
   )
     .map((entry) => entry.path)
     .slice(0, 24);
+  const serviceFiles = uniquePaths.filter((path) => /service|usecase|domain|logic/i.test(path));
+  const repositoryFiles = uniquePaths.filter((path) => /repository|repo|store|dao|persistence|entity/i.test(path));
+  const testFiles = uniquePaths.filter((path) => /\.(test|spec)\.[a-z]+$/.test(path) || /__tests__|tests?\//i.test(path));
+  const callGraphEdgeCount = input.edges?.length ?? 0;
   const notes = [
     routeFiles.length > 0 ? `route files: ${routeFiles.length}` : "no obvious route files",
     middlewareFiles.length > 0 ? `middleware files: ${middlewareFiles.length}` : "no obvious middleware files",
     dbFiles.length > 0 ? `db/migration files: ${dbFiles.length}` : "no obvious db files",
+    serviceFiles.length > 0 ? `service files: ${serviceFiles.length}` : "no obvious service files",
+    repositoryFiles.length > 0 ? `repository files: ${repositoryFiles.length}` : "no obvious repository files",
+    testFiles.length > 0 ? `test files: ${testFiles.length}` : "no obvious test files",
+    callGraphEdgeCount > 0 ? `call-graph edges: ${callGraphEdgeCount}` : "no call-graph edges",
   ];
   return {
     projectId: input.projectId,
@@ -944,9 +1037,13 @@ export function buildProjectContextGraph(input: {
     routeFiles,
     middlewareFiles,
     dbFiles,
+    serviceFiles,
+    repositoryFiles,
+    testFiles,
     authPaths,
     packageBoundaries,
     hotPaths,
+    callGraphEdgeCount,
     notes,
     symbolCount: input.symbols.length,
   };

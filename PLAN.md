@@ -52,7 +52,7 @@ Core user outcomes:
    - Subscribes to live session events via SSE.
 
 2. `apps/api`
-   - Fastify API.
+   - Express API.
    - Owns auth-lite, session orchestration, project management, ask/research/plan/handoff endpoints, event stream, and persistence APIs.
    - Emits typed events and writes all durable state to SQLite.
 
@@ -182,7 +182,7 @@ These are good source docs and prompt assets, but they should be rewritten into 
 ### 5.3 Rewrite instead of copying
 
 - `system/rag/cli.py` -> new TypeScript CLI in `cli/ai`
-- `system/rag/server.py` -> new Fastify API in `apps/api`
+- `system/rag/server.py` -> new Express API in `apps/api`
 - `system/rag/mcp_server.py` -> new safe MCP server in `mcp/server`
 - `system/rag/app.py` -> obsolete; replace with web/API entrypoints
 - `system/rag/commands.py` -> reworked into typed command helpers
@@ -1013,7 +1013,7 @@ This is the slice to implement first.
 2. Add `package.json`, `pnpm-workspace.yaml`, and TypeScript config packages.
 3. Add `packages/shared` with Zod schemas for projects, sessions, tasks, events, ask requests, and retrieval results.
 4. Add `packages/db` with SQLite migrations and typed repository helpers.
-5. Add `apps/api` with Fastify and a `/health` route.
+5. Add `apps/api` with Express and a `/health` route.
 6. Add `GET /projects`, `POST /projects`, `POST /projects/:id/index`, `GET /sessions`, `GET /sessions/:id`, `POST /ask`, and `GET /events/stream`.
 7. Add `apps/web` shell with layout, sidebar, top project selector, and placeholder pages, then split the browser shell from the API server.
 8. Add `cli/ai` with `web`, `project add`, `project index`, `ask`, `sessions`, and `trace`.

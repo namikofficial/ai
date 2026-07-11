@@ -440,6 +440,9 @@ export type EventType =
   | "check.started"
   | "check.completed"
   | "check.failed"
+  | "validation.started"
+  | "validation.passed"
+  | "validation.failed"
   | "handoff.created"
   | "handoff.archived"
   | "review.reflected"
@@ -946,6 +949,8 @@ export interface FactRecord {
   status: FactStatus;
   lastVerifiedAt: string | null;
   expiresAt: string | null;
+  validAt: string | null;
+  invalidAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

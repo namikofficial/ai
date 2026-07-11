@@ -56,12 +56,23 @@ export interface FactProposal {
   kind: string;
   confidence: number;
   sourceKind: string;
+  validAt?: string | null;
+  invalidAt?: string | null;
   sources: Array<{ kind: string; ref: string; excerpt: string | null }>;
   evidence: ReflectionEvidence[];
 }
 
 export interface StaleFactProposal {
   factId: string;
+  reason: string;
+  evidence: ReflectionEvidence[];
+}
+
+export interface ContradictionProposal {
+  factId: string;
+  key: string;
+  existingValue: string;
+  proposedValue: string;
   reason: string;
   evidence: ReflectionEvidence[];
 }
@@ -106,6 +117,7 @@ export interface ReflectionOutput {
   skillCandidates: SkillCandidateProposal[];
   facts: FactProposal[];
   staleFacts: StaleFactProposal[];
+  contradictions: ContradictionProposal[];
   retrievalFeedback: RetrievalFeedbackProposal[];
   notes: string[];
 }
@@ -308,6 +320,58 @@ function detectStaleFacts(existing: FactRecord[], ttlDays: number): StaleFactPro
   return out;
 }
 
+function isFactCurrentlyValid(fact: FactRecord, asOf: number): boolean {
+  if (fact.status === "archived" || fact.status === "stale") return false;
+  if (fact.validAt && new Date(fact.validAt).getTime() > asOf) return false;
+  if (fact.invalidAt && new Date(fact.invalidAt).getTime() <= asOf) return false;
+  return true;
+}
+
+function windowsOverlap(
+  aFrom: string | null,
+  aTo: string | null,
+  bFrom: string | null,
+  bTo: string | null
+): boolean {
+  const aStart = aFrom ? new Date(aFrom).getTime() : -Infinity;
+  const aEnd = aTo ? new Date(aTo).getTime() : Infinity;
+  const bStart = bFrom ? new Date(bFrom).getTime() : -Infinity;
+  const bEnd = bTo ? new Date(bTo).getTime() : Infinity;
+  return aStart <= bEnd && bStart <= aEnd;
+}
+
+// Detects proposals that contradict a currently-valid existing fact with the
+// same key but a different value. Contradictions must be surfaced for human
+// review before promotion; they are never auto-applied.
+export function detectContradictions(existing: FactRecord[], proposals: FactProposal[]): ContradictionProposal[] {
+  const out: ContradictionProposal[] = [];
+  const asOf = Date.now();
+  for (const proposal of proposals) {
+    for (const fact of existing) {
+      if (fact.key !== proposal.key) continue;
+      if (fact.value === proposal.value) continue;
+      if (!isFactCurrentlyValid(fact, asOf)) continue;
+      if (!windowsOverlap(fact.validAt, fact.invalidAt, proposal.validAt ?? null, proposal.invalidAt ?? null)) continue;
+      out.push({
+        factId: fact.id,
+        key: fact.key,
+        existingValue: fact.value,
+        proposedValue: proposal.value,
+        reason: `proposed value "${proposal.value}" contradicts current fact "${fact.value}"`,
+        evidence: [
+          {
+            kind: "review",
+            refId: fact.id,
+            excerpt: `${fact.key}=${fact.value} (status=${fact.status})`,
+            meta: { kind: fact.kind, confidence: fact.confidence },
+          },
+        ],
+      });
+    }
+  }
+  return out;
+}
+
 function proposeSkillFromChecks(input: ReflectInput): SkillCandidateProposal | null {
   const successfulChecks = input.checks.filter((entry) => entry.status === "completed" && entry.command);
   if (successfulChecks.length < 1) return null;
@@ -444,6 +508,8 @@ export function reflect(input: ReflectInput): ReflectionOutput {
   const stale = detectStaleFacts(input.existingFacts, ttlDays);
   staleFacts.push(...stale);
 
+  const contradictions = detectContradictions(input.existingFacts, facts);
+
   const skillChecks = proposeSkillFromChecks(input);
   if (skillChecks) skillCandidates.push(skillChecks);
   const skillReviews = proposeSkillFromReviews(input);
@@ -455,9 +521,10 @@ export function reflect(input: ReflectInput): ReflectionOutput {
   notes.push(`skillCandidates=${skillCandidates.length}`);
   notes.push(`facts=${facts.length}`);
   notes.push(`staleFacts=${staleFacts.length}`);
+  notes.push(`contradictions=${contradictions.length}`);
   notes.push(`retrievalFeedback=${retrievalFeedback.length}`);
 
-  return { memoryCandidates, skillCandidates, facts, staleFacts, retrievalFeedback, notes };
+  return { memoryCandidates, skillCandidates, facts, staleFacts, contradictions, retrievalFeedback, notes };
 }
 
 export function buildSkillCandidateRecord(

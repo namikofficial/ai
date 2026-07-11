@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildSkillCandidateRecord, reflect } from "../packages/reflection-engine/src/index.ts";
+import {
+  buildSkillCandidateRecord,
+  detectContradictions,
+  reflect,
+  type FactProposal,
+} from "../packages/reflection-engine/src/index.ts";
+import type { FactRecord } from "../packages/shared/src/index.ts";
 
 const baseSession = {
   id: "sess_1",
@@ -100,6 +106,8 @@ test("reflection-engine: emits stale fact when last_verified_at is older than tt
         status: "fresh",
         lastVerifiedAt: old,
         expiresAt: null,
+        validAt: null,
+        invalidAt: null,
         createdAt: old,
         updatedAt: old,
       },
@@ -172,4 +180,86 @@ test("reflection-engine: buildSkillCandidateRecord maps to a skill candidate rec
   );
   assert.equal(record.status, "pending");
   assert.equal(record.applicableProjects[0], "p1");
+});
+
+test("reflection-engine: detectContradictions flags a conflicting currently-valid fact", () => {
+  const now = new Date().toISOString();
+  const existing: FactRecord[] = [
+    {
+      id: "f1",
+      projectId: "p1",
+      key: "runtime",
+      value: "node22",
+      kind: "runtime",
+      confidence: 0.9,
+      sourceKind: "extraction",
+      status: "fresh",
+      lastVerifiedAt: now,
+      expiresAt: null,
+      validAt: null,
+      invalidAt: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+    {
+      id: "f2",
+      projectId: "p1",
+      key: "runtime",
+      value: "node18",
+      kind: "runtime",
+      confidence: 0.9,
+      sourceKind: "extraction",
+      status: "stale",
+      lastVerifiedAt: now,
+      expiresAt: null,
+      validAt: null,
+      invalidAt: null,
+      createdAt: now,
+      updatedAt: now,
+    },
+  ];
+  const proposals: FactProposal[] = [
+    { key: "runtime", value: "node20", kind: "runtime", confidence: 0.8, sourceKind: "reflection", sources: [], evidence: [] },
+  ];
+  const contradictions = detectContradictions(existing, proposals);
+  assert.equal(contradictions.length, 1, "stale fact must not count as a contradiction");
+  assert.equal(contradictions[0].factId, "f1");
+  assert.equal(contradictions[0].existingValue, "node22");
+  assert.equal(contradictions[0].proposedValue, "node20");
+});
+
+test("reflection-engine: detectContradictions ignores non-overlapping validity windows", () => {
+  const existing: FactRecord[] = [
+    {
+      id: "f1",
+      projectId: "p1",
+      key: "policy",
+      value: "old",
+      kind: "policy",
+      confidence: 0.9,
+      sourceKind: "extraction",
+      status: "fresh",
+      lastVerifiedAt: "2020-01-01T00:00:00.000Z",
+      expiresAt: null,
+      validAt: "2000-01-01T00:00:00.000Z",
+      invalidAt: "2021-01-01T00:00:00.000Z",
+      createdAt: "2020-01-01T00:00:00.000Z",
+      updatedAt: "2020-01-01T00:00:00.000Z",
+    },
+  ];
+  const proposals: FactProposal[] = [
+    {
+      key: "policy",
+      value: "new",
+      kind: "policy",
+      confidence: 0.8,
+      sourceKind: "reflection",
+      validAt: "2030-01-01T00:00:00.000Z",
+      invalidAt: null,
+      sources: [],
+      evidence: [],
+    },
+  ];
+  const contradictions = detectContradictions(existing, proposals);
+  assert.equal(contradictions.length, 0, "non-overlapping windows must not contradict");
 });

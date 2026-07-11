@@ -94,6 +94,8 @@ test("context-engine: omits stale facts based on ttlDays", () => {
         status: "fresh",
         lastVerifiedAt: longAgo,
         expiresAt: null,
+        validAt: null,
+        invalidAt: null,
         createdAt: longAgo,
         updatedAt: longAgo,
       },

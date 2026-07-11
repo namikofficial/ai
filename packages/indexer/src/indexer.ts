@@ -263,13 +263,16 @@ export async function indexProject(options: IndexProjectOptions): Promise<IndexP
     let code: CodeIntelligenceResult | null = null;
     if (codeIntelligenceEnabled) {
       try {
-        code = extractIntelligence({
-          projectId,
-          fileId,
-          path: relativePath,
-          language,
-          content,
-        });
+        code = extractIntelligence(
+          {
+            projectId,
+            fileId,
+            path: relativePath,
+            language,
+            content,
+          },
+          { deepGraph: preferTreeSitter }
+        );
       } catch (error) {
         code = null;
         onWarning?.({

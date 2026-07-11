@@ -9,7 +9,9 @@ import {
   guardPath,
   listProjectFiles,
   readProjectChecksConfig,
+  resolveCheckCommand,
   runAllowedChecks,
+  runValidationPipeline,
   searchProjectText,
 } from "../packages/execution-engine/src/index.ts";
 
@@ -115,6 +117,106 @@ test("execution-engine: workspaces use runtime/dev-runs/<runId>/workspace", asyn
     await created.cleanup();
   } finally {
     await rm(runtime, { recursive: true, force: true });
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: new security checks resolve as builtins", () => {
+  const config = readProjectChecksConfig({ checks: {} });
+  for (const name of ["semgrep", "osv", "playwright"]) {
+    const spec = resolveCheckCommand(name, config);
+    assert.ok(spec, `expected builtin check to resolve: ${name}`);
+    assert.equal(spec?.id, name);
+  }
+});
+
+test("execution-engine: validation pipeline runs in order and stops at first failure", async () => {
+  const project = await makeProject();
+  try {
+    const config = readProjectChecksConfig({
+      checks: {
+        pass: "echo ok",
+        fail: "false",
+        pass2: "echo again",
+      },
+    });
+    const pipeline = await runValidationPipeline({
+      cwd: project.root,
+      projectConfig: config,
+      checks: ["pass", "fail", "pass2"],
+      timeoutMs: 10_000,
+    });
+    assert.equal(pipeline.results.length, 2, "pipeline should stop after the failing check");
+    assert.equal(pipeline.results[0]?.name, "pass");
+    assert.equal(pipeline.results[0]?.status, "completed");
+    assert.equal(pipeline.results[1]?.name, "fail");
+    assert.equal(pipeline.results[1]?.status, "failed");
+    assert.equal(pipeline.stoppedAt, "fail");
+    assert.equal(pipeline.allPassed, false);
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: validation pipeline records blocked unknown check and stops", async () => {
+  const project = await makeProject();
+  try {
+    const config = readProjectChecksConfig({ checks: {} });
+    const pipeline = await runValidationPipeline({
+      cwd: project.root,
+      projectConfig: config,
+      checks: ["definitely-unknown", "typecheck"],
+      timeoutMs: 10_000,
+    });
+    assert.equal(pipeline.results.length, 1);
+    assert.equal(pipeline.results[0]?.status, "blocked");
+    assert.equal(pipeline.stoppedAt, "definitely-unknown");
+    assert.equal(pipeline.allPassed, false);
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: validation pipeline rejects denied binaries in project checks", async () => {
+  const project = await makeProject();
+  try {
+    const config = readProjectChecksConfig({ checks: { wipe: "rm -rf /" } });
+    const spec = resolveCheckCommand("wipe", config);
+    assert.equal(spec, null, "denied binary must not resolve to a command");
+    const pipeline = await runValidationPipeline({
+      cwd: project.root,
+      projectConfig: config,
+      checks: ["wipe"],
+      timeoutMs: 10_000,
+    });
+    assert.equal(pipeline.results[0]?.status, "blocked");
+  } finally {
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: validation pipeline continues on failure when requested", async () => {
+  const project = await makeProject();
+  try {
+    const config = readProjectChecksConfig({
+      checks: {
+        fail: "false",
+        pass: "echo ok",
+      },
+    });
+    const pipeline = await runValidationPipeline({
+      cwd: project.root,
+      projectConfig: config,
+      checks: ["fail", "pass"],
+      continueOnFailure: true,
+      timeoutMs: 10_000,
+    });
+    assert.equal(pipeline.results.length, 2);
+    assert.equal(pipeline.results[0]?.status, "failed");
+    assert.equal(pipeline.results[1]?.status, "completed");
+    assert.equal(pipeline.stoppedAt, null);
+    assert.equal(pipeline.allPassed, false);
+  } finally {
     await project.cleanup();
   }
 });

@@ -48,6 +48,7 @@ function parseReflectionOutput(value: unknown): ReflectionOutput | null {
     skillCandidates: [],
     facts: [],
     staleFacts: [],
+    contradictions: [],
     retrievalFeedback: [],
     notes,
   };
@@ -203,6 +204,7 @@ function mergeReflectionOutput(base: ReflectionOutput, modelOutput: ReflectionOu
     skillCandidates: [...base.skillCandidates],
     facts: [...base.facts],
     staleFacts: [...base.staleFacts],
+    contradictions: [...base.contradictions],
     retrievalFeedback: [...base.retrievalFeedback],
     notes: [...base.notes],
   };
@@ -507,7 +509,25 @@ function applyReflectionOutput(
       });
       skillCandidates += 1;
     }
+    // Contradicted facts must not be auto-applied. They are recorded as
+    // memory events for human review instead, preserving SQLite as the
+    // authoritative, non-contradictory source of truth.
+    const contradictedKeys = new Set(output.contradictions.map((entry) => entry.key));
     for (const fact of output.facts) {
+      if (contradictedKeys.has(fact.key)) {
+        const contradiction = output.contradictions.find((entry) => entry.key === fact.key);
+        store.memory.writeMemoryEvent({
+          projectId,
+          sessionId,
+          type: "contradiction",
+          command: null,
+          status: "blocked",
+          summary: `Refused to apply fact ${fact.key}=${fact.value}: contradicts current ${contradiction?.existingValue ?? "fact"}`,
+          sourceRef: contradiction?.factId ?? null,
+          evidence: { key: fact.key, proposedValue: fact.value, existingValue: contradiction?.existingValue ?? null },
+        });
+        continue;
+      }
       store.memory.recordFact({
         projectId,
         key: fact.key,
@@ -515,6 +535,8 @@ function applyReflectionOutput(
         kind: fact.kind,
         confidence: fact.confidence,
         sourceKind: fact.sourceKind,
+        validAt: fact.validAt ?? null,
+        invalidAt: fact.invalidAt ?? null,
         sources: fact.sources.map((source) => ({
           kind: source.kind,
           ref: source.ref,

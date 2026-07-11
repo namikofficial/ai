@@ -1,11 +1,15 @@
-import type { createStore } from "../../../packages/db/src/store.ts";
+import { parseDevRequest } from "../../../packages/agent-protocol/src/dev.ts";
 import { resolveProjectConfig } from "../../../packages/config/src/index.ts";
+import type { createStore } from "../../../packages/db/src/store.ts";
+import { cancelDevRun, runDevWorkflow } from "../../../packages/dev-agent/src/index.ts";
+import {
+  readProjectChecksConfig,
+  runAllowedChecks,
+  runValidationPipeline,
+} from "../../../packages/execution-engine/src/index.ts";
+import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import type { ConfigSnapshot, ProjectSummary, SessionRecord, TaskRecord } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
-import { readProjectChecksConfig, runAllowedChecks } from "../../../packages/execution-engine/src/index.ts";
-import { parseDevRequest } from "../../../packages/agent-protocol/src/dev.ts";
-import { cancelDevRun, runDevWorkflow } from "../../../packages/dev-agent/src/index.ts";
-import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -247,6 +251,21 @@ function toolDescriptors(): ToolDescriptor[] {
           sessionId: { type: "string" },
         },
         required: ["name"],
+      },
+    },
+    {
+      name: "ai_run_validation",
+      description:
+        "Run the full validation pipeline for an AI-generated patch (format -> lint -> typecheck -> test -> semgrep -> osv -> playwright) and store each result as a memory event.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: { type: "string" },
+          sessionId: { type: "string" },
+          checks: { type: "array", items: { type: "string" } },
+          continueOnFailure: { type: "boolean" },
+        },
+        required: ["projectId"],
       },
     },
     {
@@ -680,6 +699,88 @@ async function handleTool(
         durationMs: result.durationMs,
         parsedErrors: result.parsedErrors,
         affectedFiles: result.affectedFiles,
+      };
+    }
+    case "ai_run_validation": {
+      const projectIdentifier = args.projectId ? asString(args.projectId) : "";
+      const sessionId = args.sessionId ? asString(args.sessionId) : null;
+      const session = sessionId ? store.getSession(sessionId) : null;
+      const project = projectIdentifier
+        ? store.getProject(projectIdentifier)
+        : session?.projectId
+          ? store.getProject(session.projectId)
+          : null;
+      if (!project) {
+        throw new Error("ai_run_validation requires a resolvable projectId or a sessionId linked to a project.");
+      }
+      const projectConfig = readProjectChecksConfig(resolveProjectConfig(project.path).raw);
+      const checks = Array.isArray(args.checks)
+        ? (args.checks as string[]).filter((c) => typeof c === "string")
+        : undefined;
+      const continueOnFailure = args.continueOnFailure === true;
+      const pipeline = await runValidationPipeline({
+        cwd: project.path,
+        projectConfig,
+        checks,
+        continueOnFailure,
+        timeoutMs: 10 * 60_000,
+      });
+      for (const result of pipeline.results) {
+        const summary =
+          result.status === "completed" && result.exitCode === 0
+            ? `${result.command} passed`
+            : `${result.command} ${result.status}${result.exitCode != null ? ` (exit ${result.exitCode})` : ""}: ${(
+                result.parsedErrors[0] ?? result.stderr ?? result.blockedReason ?? ""
+              ).slice(0, 500)}`;
+        store.memory.writeMemoryEvent({
+          projectId: project.id,
+          sessionId,
+          type: "validation_result",
+          command: result.command,
+          status: result.status,
+          summary,
+          sourceRef: project.path,
+          evidence: {
+            exitCode: result.exitCode,
+            durationMs: result.durationMs,
+            parsedErrors: result.parsedErrors,
+            affectedFiles: result.affectedFiles,
+            blockedReason: result.blockedReason,
+          },
+        });
+      }
+      if (sessionId) {
+        store.appendEvent(
+          createEvent(
+            pipeline.allPassed ? "validation.passed" : "validation.failed",
+            {
+              projectId: project.id,
+              allPassed: pipeline.allPassed,
+              stoppedAt: pipeline.stoppedAt,
+              results: pipeline.results.map((r) => ({
+                name: r.name,
+                status: r.status,
+                exitCode: r.exitCode,
+              })),
+            },
+            { sessionId, projectId: project.id, agent: "mcp", level: pipeline.allPassed ? "info" : "warn" }
+          )
+        );
+      }
+      return {
+        projectId: project.id,
+        allPassed: pipeline.allPassed,
+        stoppedAt: pipeline.stoppedAt,
+        results: pipeline.results.map((r) => ({
+          name: r.name,
+          command: r.command,
+          status: r.status,
+          exitCode: r.exitCode,
+          durationMs: r.durationMs,
+          parsedErrors: r.parsedErrors,
+          affectedFiles: r.affectedFiles,
+          blockedReason: r.blockedReason,
+        })),
       };
     }
     case "ai_dev_start": {

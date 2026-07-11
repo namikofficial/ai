@@ -112,6 +112,10 @@ const CHECK_ALLOWLIST = new Set([
   "pnpm test",
   "pnpm build",
   "pnpm lint",
+  "semgrep",
+  "osv",
+  "osv-scanner",
+  "playwright",
 ]);
 
 export function isCheckAllowed(name: string): boolean {

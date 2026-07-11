@@ -67,6 +67,8 @@ interface FactRow {
   status: string;
   last_verified_at: string | null;
   expires_at: string | null;
+  valid_at: string | null;
+  invalid_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -141,6 +143,8 @@ function rowToFact(row: FactRow): FactRecord {
     status: asString(row.status) as FactStatus,
     lastVerifiedAt: asStringOrNull(row.last_verified_at),
     expiresAt: asStringOrNull(row.expires_at),
+    validAt: asStringOrNull(row.valid_at),
+    invalidAt: asStringOrNull(row.invalid_at),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };
@@ -338,6 +342,8 @@ export function createMemoryRepo(db: DatabaseSync) {
       kind?: string;
       confidence: number;
       sourceKind?: string;
+      validAt?: string | null;
+      invalidAt?: string | null;
       sources?: Array<{ kind: string; ref: string; excerpt?: string | null }>;
     }): FactRecord {
       const id = newId("fact");
@@ -345,8 +351,8 @@ export function createMemoryRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO facts (
           id, project_id, key, value, kind, confidence, source_kind, status,
-          last_verified_at, expires_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          last_verified_at, expires_at, valid_at, invalid_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.projectId ?? null,
@@ -358,6 +364,8 @@ export function createMemoryRepo(db: DatabaseSync) {
         "fresh",
         ts,
         null,
+        input.validAt ?? null,
+        input.invalidAt ?? null,
         ts,
         ts
       );
@@ -378,6 +386,8 @@ export function createMemoryRepo(db: DatabaseSync) {
         status: "fresh",
         lastVerifiedAt: ts,
         expiresAt: null,
+        validAt: input.validAt ?? null,
+        invalidAt: input.invalidAt ?? null,
         createdAt: ts,
         updatedAt: ts,
       };
@@ -424,6 +434,270 @@ export function createMemoryRepo(db: DatabaseSync) {
         .prepare("SELECT * FROM project_rules WHERE project_id = ? ORDER BY pinned DESC, updated_at DESC LIMIT ?")
         .all(projectId, limit) as ProjectRuleRow[];
       return rows.map(rowToRule);
+    },
+    writeMemoryEvent(input: {
+      projectId?: string | null;
+      sessionId?: string | null;
+      type: string;
+      command?: string | null;
+      status?: string | null;
+      summary?: string | null;
+      sourceRef?: string | null;
+      evidence?: Record<string, unknown>;
+    }): { id: string; createdAt: string } {
+      const id = newId("mevt");
+      const ts = now();
+      db.prepare(
+        `INSERT INTO memory_events (
+          id, project_id, session_id, type, command, status, summary, source_ref, evidence_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id,
+        input.projectId ?? null,
+        input.sessionId ?? null,
+        input.type,
+        input.command ?? null,
+        input.status ?? null,
+        input.summary ?? null,
+        input.sourceRef ?? null,
+        JSON.stringify(input.evidence ?? {}),
+        ts
+      );
+      return { id, createdAt: ts };
+    },
+    listMemoryEvents(opts?: {
+      projectId?: string | null;
+      sessionId?: string | null;
+      type?: string;
+      limit?: number;
+    }): Array<{
+      id: string;
+      projectId: string | null;
+      sessionId: string | null;
+      type: string;
+      command: string | null;
+      status: string | null;
+      summary: string | null;
+      sourceRef: string | null;
+      evidence: Record<string, unknown>;
+      createdAt: string;
+    }> {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (opts?.projectId != null) {
+        conditions.push("project_id = ?");
+        params.push(opts.projectId);
+      }
+      if (opts?.sessionId != null) {
+        conditions.push("session_id = ?");
+        params.push(opts.sessionId);
+      }
+      if (opts?.type) {
+        conditions.push("type = ?");
+        params.push(opts.type);
+      }
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+      params.push(opts?.limit ?? 100);
+      const rows = db
+        .prepare(`SELECT * FROM memory_events ${where} ORDER BY created_at DESC LIMIT ?`)
+        .all(...params) as Array<{
+        id: string;
+        project_id: string | null;
+        session_id: string | null;
+        type: string;
+        command: string | null;
+        status: string | null;
+        summary: string | null;
+        source_ref: string | null;
+        evidence_json: string;
+        created_at: string;
+      }>;
+      return rows.map((row) => ({
+        id: asString(row.id),
+        projectId: asStringOrNull(row.project_id),
+        sessionId: asStringOrNull(row.session_id),
+        type: asString(row.type),
+        command: asStringOrNull(row.command),
+        status: asStringOrNull(row.status),
+        summary: asStringOrNull(row.summary),
+        sourceRef: asStringOrNull(row.source_ref),
+        evidence: safeParseJson<Record<string, unknown>>(asString(row.evidence_json)),
+        createdAt: asString(row.created_at),
+      }));
+    },
+    writeMemoryNode(input: {
+      projectId?: string | null;
+      entity: string;
+      entityType?: string;
+      label: string;
+      value?: string | null;
+      validAt?: string | null;
+      invalidAt?: string | null;
+      sourceKind?: string;
+      sourceRef?: string | null;
+      confidence?: number;
+    }): { id: string; createdAt: string } {
+      const id = newId("mgnode");
+      const ts = now();
+      db.prepare(
+        `INSERT INTO memory_graph_nodes (
+          id, project_id, entity, entity_type, label, value, valid_at, invalid_at, source_kind, source_ref, confidence, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id,
+        input.projectId ?? null,
+        input.entity,
+        input.entityType ?? "entity",
+        input.label,
+        input.value ?? null,
+        input.validAt ?? null,
+        input.invalidAt ?? null,
+        input.sourceKind ?? "reflection",
+        input.sourceRef ?? null,
+        input.confidence ?? 0.5,
+        ts
+      );
+      return { id, createdAt: ts };
+    },
+    writeMemoryEdge(input: {
+      projectId?: string | null;
+      sourceNodeId: string;
+      targetNodeId: string;
+      relation: string;
+      validAt?: string | null;
+      invalidAt?: string | null;
+      confidence?: number;
+    }): { id: string; createdAt: string } {
+      const id = newId("mgedge");
+      const ts = now();
+      db.prepare(
+        `INSERT INTO memory_graph_edges (
+          id, project_id, source_node_id, target_node_id, relation, valid_at, invalid_at, confidence, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        id,
+        input.projectId ?? null,
+        input.sourceNodeId,
+        input.targetNodeId,
+        input.relation,
+        input.validAt ?? null,
+        input.invalidAt ?? null,
+        input.confidence ?? 0.5,
+        ts
+      );
+      return { id, createdAt: ts };
+    },
+    listMemoryGraph(opts?: {
+      projectId?: string | null;
+      entity?: string;
+      relation?: string;
+      asOf?: string;
+    }): {
+      nodes: Array<{
+        id: string;
+        projectId: string | null;
+        entity: string;
+        entityType: string;
+        label: string;
+        value: string | null;
+        validAt: string | null;
+        invalidAt: string | null;
+        sourceKind: string;
+        sourceRef: string | null;
+        confidence: number;
+        createdAt: string;
+      }>;
+      edges: Array<{
+        id: string;
+        projectId: string | null;
+        sourceNodeId: string;
+        targetNodeId: string;
+        relation: string;
+        validAt: string | null;
+        invalidAt: string | null;
+        confidence: number;
+        createdAt: string;
+      }>;
+    } {
+      const asOf = opts?.asOf ?? new Date().toISOString();
+      const nodeConditions: string[] = [];
+      const nodeParams: unknown[] = [];
+      if (opts?.projectId != null) {
+        nodeConditions.push("project_id = ?");
+        nodeParams.push(opts.projectId);
+      }
+      if (opts?.entity) {
+        nodeConditions.push("entity = ?");
+        nodeParams.push(opts.entity);
+      }
+      nodeConditions.push("(valid_at IS NULL OR valid_at <= ?)");
+      nodeParams.push(asOf);
+      nodeConditions.push("(invalid_at IS NULL OR invalid_at > ?)");
+      nodeParams.push(asOf);
+      const nodeWhere = nodeConditions.length > 0 ? `WHERE ${nodeConditions.join(" AND ")}` : "";
+      const nodeRows = db
+        .prepare(`SELECT * FROM memory_graph_nodes ${nodeWhere} ORDER BY created_at DESC`)
+        .all(...nodeParams) as Array<{
+        id: string;
+        project_id: string | null;
+        entity: string;
+        entity_type: string;
+        label: string;
+        value: string | null;
+        valid_at: string | null;
+        invalid_at: string | null;
+        source_kind: string;
+        source_ref: string | null;
+        confidence: number;
+        created_at: string;
+      }>;
+      const nodeIds = new Set(nodeRows.map((row) => row.id));
+      const edgeRows = db
+        .prepare(
+          `SELECT * FROM memory_graph_edges
+           WHERE source_node_id IN (${nodeRows.length > 0 ? nodeRows.map(() => "?").join(",") : "''"}) 
+             AND (valid_at IS NULL OR valid_at <= ?) AND (invalid_at IS NULL OR invalid_at > ?)
+           ORDER BY created_at DESC`
+        )
+        .all(...nodeRows.map((row) => row.id), asOf, asOf) as Array<{
+        id: string;
+        project_id: string | null;
+        source_node_id: string;
+        target_node_id: string;
+        relation: string;
+        valid_at: string | null;
+        invalid_at: string | null;
+        confidence: number;
+        created_at: string;
+      }>;
+      const edges = edgeRows.filter((edge) => nodeIds.has(edge.source_node_id) && nodeIds.has(edge.target_node_id));
+      return {
+        nodes: nodeRows.map((row) => ({
+          id: asString(row.id),
+          projectId: asStringOrNull(row.project_id),
+          entity: asString(row.entity),
+          entityType: asString(row.entity_type),
+          label: asString(row.label),
+          value: asStringOrNull(row.value),
+          validAt: asStringOrNull(row.valid_at),
+          invalidAt: asStringOrNull(row.invalid_at),
+          sourceKind: asString(row.source_kind),
+          sourceRef: asStringOrNull(row.source_ref),
+          confidence: asNumber(row.confidence),
+          createdAt: asString(row.created_at),
+        })),
+        edges: edges.map((row) => ({
+          id: asString(row.id),
+          projectId: asStringOrNull(row.project_id),
+          sourceNodeId: asString(row.source_node_id),
+          targetNodeId: asString(row.target_node_id),
+          relation: asString(row.relation),
+          validAt: asStringOrNull(row.valid_at),
+          invalidAt: asStringOrNull(row.invalid_at),
+          confidence: asNumber(row.confidence),
+          createdAt: asString(row.created_at),
+        })),
+      };
     },
   };
 }

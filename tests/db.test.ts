@@ -217,3 +217,111 @@ test("uses FTS fallback when qdrant collection dimension mismatches embedding di
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("stores and lists validation memory events", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ai-db-memory-events-"));
+  const dbPath = join(dir, "ai.db");
+  try {
+    const store = createStore(initializeStore(dbPath));
+    const project = store.createProject({ path: dir, name: "memory-events-project" });
+
+    const written = store.memory.writeMemoryEvent({
+      projectId: project.id,
+      type: "validation_result",
+      command: "pnpm test",
+      status: "failed",
+      summary: "tenant owner login test fails because subAccountId filter excludes tenant-level owner",
+      sourceRef: dir,
+      evidence: { exitCode: 1, affectedFiles: ["src/auth.ts"] },
+    });
+    assert.ok(written.id.startsWith("mevt_"));
+
+    const events = store.memory.listMemoryEvents({ projectId: project.id, type: "validation_result" });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].command, "pnpm test");
+    assert.equal(events[0].status, "failed");
+    assert.match(events[0].summary ?? "", /subAccountId filter/);
+    assert.deepEqual(events[0].evidence.affectedFiles, ["src/auth.ts"]);
+    store.db.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stores and queries temporal memory graph with validity windows", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ai-db-graph-"));
+  const dbPath = join(dir, "ai.db");
+  try {
+    const store = createStore(initializeStore(dbPath));
+    const project = store.createProject({ path: dir, name: "graph-project" });
+
+    const owner = store.memory.writeMemoryNode({
+      projectId: project.id,
+      entity: "owner",
+      entityType: "role",
+      label: "tenant owner",
+      value: "can login with PIN",
+    });
+    const pin = store.memory.writeMemoryNode({
+      projectId: project.id,
+      entity: "pin_login",
+      entityType: "feature",
+      label: "PIN login",
+      value: "enabled",
+    });
+    store.memory.writeMemoryEdge({
+      projectId: project.id,
+      sourceNodeId: owner.id,
+      targetNodeId: pin.id,
+      relation: "uses",
+    });
+    // A node that expired before now should be excluded from the default asOf view.
+    store.memory.writeMemoryNode({
+      projectId: project.id,
+      entity: "legacy_owner",
+      entityType: "role",
+      label: "legacy owner",
+      value: "deprecated",
+      validAt: "2000-01-01T00:00:00.000Z",
+      invalidAt: "2001-01-01T00:00:00.000Z",
+    });
+
+    const graph = store.memory.listMemoryGraph({ projectId: project.id });
+    assert.equal(graph.nodes.length, 2, "expired node must be excluded by default asOf");
+    assert.equal(graph.edges.length, 1);
+    assert.ok(graph.nodes.some((n) => n.entity === "owner"));
+    assert.ok(graph.edges[0].relation === "uses");
+
+    const ownerOnly = store.memory.listMemoryGraph({ projectId: project.id, entity: "owner" });
+    assert.equal(ownerOnly.nodes.length, 1);
+    store.db.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("records temporal facts with validity windows", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ai-db-fact-validity-"));
+  const dbPath = join(dir, "ai.db");
+  try {
+    const store = createStore(initializeStore(dbPath));
+    const project = store.createProject({ path: dir, name: "fact-validity" });
+    store.memory.recordFact({
+      projectId: project.id,
+      key: "deploy_window",
+      value: "enabled",
+      kind: "policy",
+      confidence: 0.9,
+      sourceKind: "reflection",
+      validAt: "2030-01-01T00:00:00.000Z",
+      invalidAt: null,
+    });
+    const facts = store.memory.listFacts(project.id);
+    assert.equal(facts.length, 1);
+    assert.equal(facts[0].validAt, "2030-01-01T00:00:00.000Z");
+    assert.equal(facts[0].invalidAt, null);
+    store.db.close();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

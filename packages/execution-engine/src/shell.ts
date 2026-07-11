@@ -74,7 +74,96 @@ const BUILTIN_COMMANDS: Record<string, CommandSpec> = {
     args: ["format:check"],
     cwdFrom: "workspace",
   },
+  semgrep: {
+    id: "semgrep",
+    description: "Run Semgrep static analysis in the workspace.",
+    binary: "semgrep",
+    args: ["scan", "--config", "auto", "--json", "--quiet", "--error", "--timeout", "120"],
+    cwdFrom: "workspace",
+  },
+  osv: {
+    id: "osv",
+    description: "Run OSV-Scanner dependency vulnerability scan in the workspace.",
+    binary: "osv-scanner",
+    args: ["-r", ".", "--format", "json"],
+    cwdFrom: "workspace",
+  },
+  playwright: {
+    id: "playwright",
+    description: "Run Playwright browser smoke tests in the workspace.",
+    binary: "pnpm",
+    args: ["exec", "playwright", "test", "--reporter", "json"],
+    cwdFrom: "workspace",
+  },
 };
+
+// Canonical validation order for AI-generated patches. Each stage is a
+// builtin check id. The pipeline runs them in order and stops at the first
+// failure unless `continueOnFailure` is set.
+export const VALIDATION_ORDER: string[] = ["format_check", "lint", "typecheck", "test", "semgrep", "osv", "playwright"];
+
+export interface RunValidationPipelineInput {
+  cwd: string;
+  projectConfig: ProjectChecksConfig;
+  checks?: string[];
+  continueOnFailure?: boolean;
+  timeoutMs?: number;
+}
+
+export interface RunValidationPipelineResult {
+  checks: string[];
+  results: RunAllowedCommandResult[];
+  allPassed: boolean;
+  stoppedAt: string | null;
+}
+
+export async function runValidationPipeline(input: RunValidationPipelineInput): Promise<RunValidationPipelineResult> {
+  const checks = input.checks && input.checks.length > 0 ? input.checks : VALIDATION_ORDER;
+  const results: RunAllowedCommandResult[] = [];
+  let stoppedAt: string | null = null;
+  for (const name of checks) {
+    const command = resolveCheckCommand(name, input.projectConfig);
+    if (!command) {
+      const blocked: RunAllowedCommandResult = {
+        name,
+        command: `<unknown check "${name}">`,
+        cwd: input.cwd,
+        status: "blocked",
+        exitCode: null,
+        stdout: "",
+        stderr: `Check "${name}" is not in the allowlist.`,
+        durationMs: 0,
+        parsedErrors: [`Check "${name}" is not in the allowlist.`],
+        affectedFiles: [],
+        startedAt: new Date().toISOString(),
+        finishedAt: new Date().toISOString(),
+        blockedReason: "check not in allowlist",
+      };
+      results.push(blocked);
+      if (!input.continueOnFailure) {
+        stoppedAt = name;
+        break;
+      }
+      continue;
+    }
+    const result = await runAllowedCommand({
+      cwd: input.cwd,
+      command,
+      timeoutMs: input.timeoutMs,
+    });
+    results.push(result);
+    if (result.status !== "completed" && !input.continueOnFailure) {
+      stoppedAt = name;
+      break;
+    }
+  }
+  return {
+    checks,
+    results,
+    allPassed: results.every((result) => result.status === "completed" && result.exitCode === 0),
+    stoppedAt,
+  };
+}
 
 const DENIED_BINARIES = new Set([
   "rm",
@@ -141,6 +230,9 @@ function defaultProjectChecks(): ProjectChecksConfig["checks"] {
     lint: "pnpm lint",
     build: "pnpm build",
     format_check: "pnpm format:check",
+    semgrep: "semgrep scan --config auto --json --quiet --error --timeout 120",
+    osv: "osv-scanner -r . --format json",
+    playwright: "pnpm exec playwright test --reporter json",
     cargo_check: "cargo check",
     cargo_test: "cargo test",
     cargo_clippy: "cargo clippy",
@@ -180,7 +272,7 @@ export function readProjectChecksConfig(raw: Record<string, unknown> | null | un
   const requireApprovalFor = Array.isArray(rawDev.requireApprovalFor)
     ? rawDev.requireApprovalFor.filter((item): item is string => typeof item === "string")
     : defaultProjectDev().requireApprovalFor;
-  const workspaceStrategy = (rawDev.workspaceStrategy as string | undefined);
+  const workspaceStrategy = rawDev.workspaceStrategy as string | undefined;
   const validStrategy = ["auto", "git_worktree", "safe_copy"].includes(workspaceStrategy ?? "")
     ? (workspaceStrategy as "auto" | "git_worktree" | "safe_copy")
     : defaultProjectDev().workspaceStrategy;
@@ -283,7 +375,8 @@ function parseCheckEvidence(output: string): { parsedErrors: string[]; affectedF
   const parsedErrors: string[] = [];
   const affectedFiles = new Set<string>();
   const lines = output.split(/\r?\n/);
-  const fileLinePattern = /((?:\.{1,2}\/)?[\w./@-]+\.(?:ts|tsx|js|jsx|json|rs|go|py|java|kt|swift|css|scss|md|toml|yaml|yml))(?::(\d+))?(?::(\d+))?/;
+  const fileLinePattern =
+    /((?:\.{1,2}\/)?[\w./@-]+\.(?:ts|tsx|js|jsx|json|rs|go|py|java|kt|swift|css|scss|md|toml|yaml|yml))(?::(\d+))?(?::(\d+))?/;
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
