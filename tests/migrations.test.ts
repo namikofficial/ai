@@ -19,15 +19,17 @@ test("migrations list includes 0001 through 0010", () => {
   assert.ok(versions.includes("0008_embedding_cache"));
   assert.ok(versions.includes("0009_execution_command_evidence"));
   assert.ok(versions.includes("0010_check_run_evidence"));
+  assert.ok(versions.includes("0011_memory_events"));
+  assert.ok(versions.includes("0012_memory_graph"));
 });
 
-test("migrations apply cleanly and create the new intelligence and trace tables", async () => {
+test("migrations apply cleanly and create all expected tables", async () => {
   const dir = await mkdtemp(join(tmpdir(), "ai-mig-"));
   const dbPath = join(dir, "ai.db");
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 10);
+    assert.equal(result.applied.length, 12);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
