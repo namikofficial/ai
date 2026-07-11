@@ -1,4 +1,53 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useWorkbenchStore } from "./store.ts";
+
+export interface ResourceState<T> {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  refresh(): void;
+}
+
+export function useResource<T>(loader: () => Promise<T>, deps: ReadonlyArray<unknown> = [], options?: { live?: boolean }): ResourceState<T> {
+  const liveTick = useWorkbenchStore((state) => state.liveTick);
+  const refreshNonce = useWorkbenchStore((state) => state.refreshNonce);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const loaderRef = useRef(loader);
+  const controllerRef = useRef<AbortController | null>(null);
+  loaderRef.current = loader;
+  const refresh = useCallback(() => setReloadTick((value) => value + 1), []);
+
+  useEffect(() => {
+    controllerRef.current?.abort();
+    controllerRef.current = new AbortController();
+    let active = true;
+    setLoading(true);
+    setError(null);
+    loaderRef.current()
+      .then((value) => {
+        if (active) {
+          setData(value);
+          setLoading(false);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (active && !(cause instanceof DOMException && cause.name === "AbortError")) {
+          setError(cause instanceof Error ? cause.message : String(cause));
+          setLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+      controllerRef.current?.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [options?.live ? liveTick : 0, refreshNonce, reloadTick, ...deps]);
+
+  return { data, loading, error, refresh };
+}
 
 /**
  * Simple query hook with abort controller support.

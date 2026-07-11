@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { createServer as createViteServer } from "vite";
+import { fileURLToPath } from "node:url";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
 import { startWorkbenchServer } from "../../api/src/server.ts";
@@ -25,9 +26,10 @@ export async function startWorkbenchWeb(options: WebServerOptions = {}): Promise
     },
   });
 
-  const webRoot = new URL("..", import.meta.url).pathname;
+  const webRoot = fileURLToPath(new URL("..", import.meta.url));
   const vite = await createViteServer({
     root: webRoot,
+    configFile: false,
     appType: "spa",
     plugins: [react()],
     server: {

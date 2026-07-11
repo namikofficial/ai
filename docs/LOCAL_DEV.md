@@ -14,7 +14,7 @@ pnpm dev
 In another shell:
 
 ```bash
-node --experimental-strip-types cli/ai/src/main.ts api --port 4242
+node --experimental-strip-types cli/ai/src/main.ts api --port 4417
 node --experimental-strip-types cli/ai/src/main.ts project add /path/to/repo --name demo
 node --experimental-strip-types cli/ai/src/main.ts project index demo
 node --experimental-strip-types cli/ai/src/main.ts ask "where is auth handled?" --project demo
