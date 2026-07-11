@@ -44,6 +44,7 @@ function useResource<T>(
   options?: { live?: boolean }
 ): ResourceState<T> {
   const liveTick = useWorkbenchStore((state) => state.liveTick);
+  const refreshNonce = useWorkbenchStore((state) => state.refreshNonce);
   const [reloadTick, setReloadTick] = useState(0);
   const [data, setData] = useState<T | null>(null);
   const [loading, setLoading] = useState(true);
@@ -81,7 +82,7 @@ function useResource<T>(
       controllerRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liveTick, reloadTick, ...deps]);
+  }, [options?.live ? liveTick : 0, refreshNonce, reloadTick, ...deps]);
 
   return { data, loading, error, refresh };
 }
@@ -95,6 +96,8 @@ function PageShell({
   subtitle?: string;
   children: ReactNode;
 }): ReactNode {
+  const openCommandPalette = useWorkbenchStore((state) => state.openCommandPalette);
+  const requestRefresh = useWorkbenchStore((state) => state.requestRefresh);
   return (
     <>
       <div className="topbar">
@@ -102,10 +105,10 @@ function PageShell({
           <div className="title">{title}</div>
           {subtitle ? <div className="meta">{subtitle}</div> : null}
         </div>
-        <button type="button" data-action="refresh">
+        <button type="button" data-action="refresh" onClick={requestRefresh}>
           Refresh
         </button>
-        <button type="button" data-action="palette">
+        <button type="button" data-action="palette" onClick={openCommandPalette}>
           Command Palette
         </button>
       </div>
@@ -122,15 +125,40 @@ function formatList(items: string[]): ReactNode {
 }
 
 function DashboardPage(): ReactNode {
-  const resource = useResource(() => api.status(), [], { live: true });
-  const status = resource.data?.data as any;
+  const resource = useResource(
+    () => Promise.all([api.status(), api.healthDeep().catch((error) => ({ status: "degraded" as const, data: { error: String(error) } }))]),
+    [],
+    { live: true }
+  );
+  const status = resource.data?.[0]?.data as any;
+  const deepHealth = resource.data?.[1]?.data as any;
   const projects = Array.isArray(status?.projects) ? (status.projects as ProjectSummary[]) : [];
   const sessions = Array.isArray(status?.sessions) ? (status.sessions as SessionRecord[]) : [];
   const checks = Array.isArray(status?.checks) ? (status.checks as Array<{ name: string; status: string }>) : [];
   const settings = status?.settings ?? {};
 
   return (
-    <PageShell title="Dashboard" subtitle="Local SQLite store, typed events, and SSE updates">
+    <PageShell title="Home" subtitle="Local readiness cockpit">
+      <Panel title="Runtime readiness" span={12}>
+        <div className="status-grid">
+          {[
+            ["API", true],
+            ["SQLite", Boolean(deepHealth?.databaseReachable)],
+            ["Qdrant", deepHealth?.dependencies?.qdrant?.ok],
+            ["Models", deepHealth?.dependencies?.models?.ok],
+            ["Worker", deepHealth?.dependencies?.worker?.ok],
+            ["Embeddings", Boolean(deepHealth?.embedding?.provider)],
+          ].map(([label, ready]) => (
+            <div className="list-item" key={String(label)}>
+              <div className="row">
+                <strong>{label}</strong>
+                <Badge tone={ready ? "good" : "bad"}>{ready ? "ready" : "needs attention"}</Badge>
+              </div>
+            </div>
+          ))}
+        </div>
+        {deepHealth?.error ? <div className="tiny">{deepHealth.error}</div> : null}
+      </Panel>
       <StatCard label="Projects" value={status?.summary?.projects ?? projects.length} detail="Indexed repos" />
       <StatCard label="Active Sessions" value={status?.summary?.activeSessions ?? 0} detail="Live work" />
       <StatCard label="Checks" value={status?.summary?.checks ?? checks.length} detail="Recent validations" />

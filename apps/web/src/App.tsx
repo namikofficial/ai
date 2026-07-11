@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo } from "react";
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import type { EventEnvelope } from "../../../packages/shared/src/index.ts";
 import {
@@ -33,28 +33,18 @@ import {
 } from "./pages.tsx";
 import { useWorkbenchStore } from "./store.ts";
 
-const navItems = [
-  ["/dashboard", "Dashboard"],
-  ["/projects", "Projects"],
-  ["/sessions", "Sessions"],
-  ["/tasks", "Tasks"],
-  ["/agents", "Agents"],
-  ["/ask", "Ask"],
-  ["/prompts", "Prompts"],
-  ["/prompt-lab", "Prompt Lab"],
-  ["/planner", "Planner"],
-  ["/handoff", "Handoff"],
-  ["/checks", "Checks"],
-  ["/memory", "Memory"],
-  ["/retrieval", "Retrieval"],
-  ["/skills", "Skills"],
-  ["/eval", "Eval"],
-  ["/reviews", "Reviews"],
-  ["/dev", "Dev"],
-  ["/models", "Models"],
-  ["/mcp", "MCP"],
-  ["/settings", "Settings"],
-] as const;
+type NavItem = readonly [string, string];
+const navGroups: readonly { label: string; items: readonly NavItem[] }[] = [
+  { label: "Home", items: [["/dashboard", "Home"]] },
+  { label: "Projects", items: [["/projects", "Projects"]] },
+  { label: "Ask", items: [["/ask", "Ask"]] },
+  { label: "Work", items: [["/planner", "Planner"], ["/handoff", "Handoff"], ["/dev", "Dev"], ["/checks", "Checks"], ["/reviews", "Reviews"]] },
+  { label: "Runs", items: [["/sessions", "Sessions"], ["/tasks", "Tasks"], ["/agents", "Agents"]] },
+  { label: "Knowledge", items: [["/retrieval", "Retrieval"], ["/memory", "Memory"], ["/skills", "Skills"], ["/eval", "Eval"], ["/prompts", "Prompts"], ["/prompt-lab", "Prompt Lab"]] },
+  { label: "System", items: [["/models", "Models"], ["/mcp", "MCP"], ["/settings", "Settings"]] },
+];
+
+const navItems = navGroups.flatMap((group) => group.items);
 
 const commandItems = [
   ["/dashboard", "Dashboard", "Overview and live status"],
@@ -119,14 +109,24 @@ function CommandPalette(): ReactNode {
   const open = useWorkbenchStore((state) => state.commandPaletteOpen);
   const close = useWorkbenchStore((state) => state.closeCommandPalette);
   const navigate = useNavigate();
+  const [query, setQuery] = useState("");
+  const filteredItems = commandItems.filter(([, label, description]) =>
+    `${label} ${description}`.toLowerCase().includes(query.toLowerCase())
+  );
   return (
     <div
       className="command-palette"
+      role="dialog"
+      aria-label="Command palette"
       data-open={open ? "true" : "false"}
+      tabIndex={-1}
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           close();
         }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") close();
       }}
     >
       <div className="sheet">
@@ -136,8 +136,14 @@ function CommandPalette(): ReactNode {
             Close
           </button>
         </div>
+        <input
+          aria-label="Filter commands"
+          placeholder="Search actions..."
+          value={query}
+          onChange={(event) => setQuery(event.currentTarget.value)}
+        />
         <div className="items">
-          {commandItems.map(([href, label, description]) => (
+          {filteredItems.map(([href, label, description]) => (
             <button
               key={href}
               type="button"
@@ -151,6 +157,7 @@ function CommandPalette(): ReactNode {
               <small>{description}</small>
             </button>
           ))}
+          {filteredItems.length === 0 ? <div className="tiny">No matching actions.</div> : null}
         </div>
       </div>
     </div>
@@ -211,15 +218,20 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
         <nav className="nav">
-          {navItems.map(([href, label]) => (
-            <NavLink
-              key={href}
-              to={href}
-              end={href === "/dashboard"}
-              className={({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined)}
-            >
-              {label}
-            </NavLink>
+          {navGroups.map((group) => (
+            <div className="nav-group" key={group.label}>
+              <div className="nav-group-label">{group.label}</div>
+              {group.items.map(([href, label]) => (
+                <NavLink
+                  key={href}
+                  to={href}
+                  end={href === "/dashboard"}
+                  className={({ isActive }: { isActive: boolean }) => (isActive ? "active" : undefined)}
+                >
+                  {label}
+                </NavLink>
+              ))}
+            </div>
           ))}
         </nav>
         <div className="sidebar-panel">

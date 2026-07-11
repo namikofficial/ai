@@ -1,4 +1,4 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
 import { compilePrompt } from "../../../packages/prompt-compiler/src/index.ts";
@@ -809,6 +809,7 @@ export async function startWorkbenchWorker(options: WorkerOptions = {}): Promise
   });
 
   while (!stopped) {
+    await writeFile(`${config.runtimeDir}/worker-heartbeat`, new Date().toISOString(), "utf8");
     const processed = await processNextJob(store);
     if (!processed) {
       await sleep(pollIntervalMs);

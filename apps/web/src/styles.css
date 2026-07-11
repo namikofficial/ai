@@ -107,6 +107,18 @@ textarea {
   gap: 0.35rem;
   margin-bottom: 1rem;
 }
+.nav-group {
+  display: grid;
+  gap: 0.25rem;
+}
+.nav-group-label {
+  margin: 0.65rem 0.8rem 0.15rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
 .nav a {
   padding: 0.65rem 0.8rem;
   border-radius: 12px;
@@ -190,6 +202,11 @@ textarea {
 }
 .list {
   display: grid;
+  gap: 0.6rem;
+}
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 0.6rem;
 }
 .list-item {
@@ -331,6 +348,10 @@ textarea {
   background: #0f172a;
   box-shadow: 0 28px 80px rgba(2, 6, 23, 0.45);
 }
+.sheet > input {
+  width: 100%;
+  margin-top: 0.85rem;
+}
 .items {
   display: grid;
   gap: 0.5rem;
@@ -384,5 +405,8 @@ pre {
   .panel[data-span="8"],
   .panel[data-span="12"] {
     grid-column: span 12;
+  }
+  .status-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

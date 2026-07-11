@@ -6,11 +6,9 @@
     "dev": "node --experimental-strip-types src/main.ts"
   },
   "dependencies": {
-    "express": "^5.2.1",
-    "supertest": "^7.2.2"
+    "express": "^5.2.1"
   },
   "devDependencies": {
-    "@types/express": "^5.0.6",
-    "@types/supertest": "^6.0.3"
+    "@types/express": "^5.0.6"
   }
 }

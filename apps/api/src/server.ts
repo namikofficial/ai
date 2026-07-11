@@ -1,8 +1,9 @@
-import { mkdir } from "node:fs/promises";
+import { mkdir, stat } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import * as path from "node:path";
 import express, { type Request } from "express";
-import supertest from "supertest";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
+import { resolveEmbeddingConfig } from "../../../packages/config/src/index.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
 import {
   createModelRuntime,
@@ -86,6 +87,66 @@ function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: Conf
     cloudEnabled: config.cloudEnabled,
     modelProviderCount: modelProviderCount.count,
     promptCount: promptCount.count,
+  };
+}
+
+async function probe(url: string | null): Promise<{ ok: boolean; latencyMs: number; error?: string }> {
+  if (!url) return { ok: false, latencyMs: 0, error: "not configured" };
+  const started = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    return { ok: response.ok, latencyMs: Date.now() - started, ...(response.ok ? {} : { error: `HTTP ${response.status}` }) };
+  } catch (error) {
+    return { ok: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function readModelIds(url: string): Promise<string[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return [];
+    const payload = (await response.json()) as { data?: Array<{ id?: unknown }> };
+    return (payload.data ?? []).map((entry) => (typeof entry.id === "string" ? entry.id : "")).filter(Boolean);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function buildDeepHealthSnapshot(
+  store: ReturnType<typeof createStore>,
+  config: ConfigSnapshot
+): Promise<Record<string, unknown>> {
+  const base = buildHealthSnapshot(store, config);
+  const qdrant = config.qdrantEnabled
+    ? await probe(config.qdrantUrl ? `${config.qdrantUrl}/collections` : null)
+    : { ok: true, skipped: true, latencyMs: 0 };
+  const modelBase = process.env.AI_LOCAL_BASE_URL ?? "http://127.0.0.1:8080/v1";
+  const models = await probe(`${modelBase.replace(/\/$/, "")}/models`);
+  const exposedModelIds = models.ok ? await readModelIds(`${modelBase.replace(/\/$/, "")}/models`) : [];
+  const expectedProfiles = store.models
+    .listProfiles()
+    .filter((profile) => profile.providerId === "provider_llamacpp_local")
+    .map((profile) => profile.modelName);
+  let worker: Record<string, unknown> = { ok: false, error: "heartbeat missing" };
+  try {
+    const heartbeat = await stat(`${config.runtimeDir}/worker-heartbeat`);
+    worker = { ok: Date.now() - heartbeat.mtimeMs < 15_000, ageMs: Math.round(Date.now() - heartbeat.mtimeMs) };
+  } catch {
+    // The worker may not be running yet.
+  }
+  return {
+    ...base,
+    deep: true,
+    dependencies: { qdrant, models: { ...models, exposedModelIds, missingProfiles: expectedProfiles.filter((id) => !exposedModelIds.includes(id)) }, worker },
+    embedding: resolveEmbeddingConfig(),
   };
 }
 
@@ -208,6 +269,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   const healthRouter = express.Router();
   registerHealthRoutes(healthRouter, {
     buildHealthSnapshot: () => buildHealthSnapshot(store, config),
+    buildDeepHealthSnapshot: () => buildDeepHealthSnapshot(store, config),
     config,
     listProjects: () => store.listProjects(),
     dashboardSnapshot: () => store.dashboardSnapshot(),
@@ -301,16 +363,47 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   });
 
   const inject = async (input: { method: string; url: string; headers?: Record<string, string>; body?: unknown }) => {
-    const headers = {
+    const headers: Record<string, string> = {
       accept: "application/json",
       ...(input.body === undefined ? input.headers : { "content-type": "application/json", ...input.headers }),
     };
-    const method = input.method.toLowerCase() as "get" | "post" | "put" | "patch" | "delete" | "options" | "head";
-    const agent = supertest(app);
-    const requestBuilder = agent[method](input.url).set(headers);
-    const response = input.body === undefined ? await requestBuilder : await requestBuilder.send(input.body as object);
-    const body = response.text ?? JSON.stringify(response.body ?? null);
-    return { statusCode: response.statusCode, body };
+    const temporary = await new Promise<import("node:http").Server>((resolve, reject) => {
+      const candidate = app.listen(0, "127.0.0.1", () => resolve(candidate));
+      candidate.once("error", reject);
+    });
+    try {
+      const address = temporary.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      return await new Promise<{ statusCode: number; body: string }>((resolve, reject) => {
+        const request = httpRequest(
+          { hostname: "127.0.0.1", port, path: input.url, method: input.method.toUpperCase(), headers },
+          (response) => {
+            const chunks: string[] = [];
+            response.setEncoding("utf8");
+            response.on("data", (chunk: string) => chunks.push(chunk));
+            response.on("end", () =>
+              resolve({ statusCode: response.statusCode ?? 500, body: chunks.join("") })
+            );
+          }
+        );
+        request.on("error", reject);
+        if (input.body !== undefined) {
+          const contentType = String(headers["content-type"] ?? "");
+          const body =
+            typeof input.body === "string"
+              ? input.body
+              : contentType.includes("application/x-www-form-urlencoded")
+                ? new URLSearchParams(
+                    Object.entries(input.body as Record<string, unknown>).map(([key, value]) => [key, String(value)])
+                  ).toString()
+                : JSON.stringify(input.body);
+          request.write(body);
+        }
+        request.end();
+      });
+    } finally {
+      await new Promise<void>((resolve) => temporary.close(() => resolve()));
+    }
   };
 
   if (options.inProcess) {

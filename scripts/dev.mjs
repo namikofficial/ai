@@ -71,7 +71,7 @@ async function main() {
   process.env.AI_API_URL = `http://127.0.0.1:${apiPort}`;
 
   const commands = [
-    [process.execPath, ["--experimental-strip-types", "apps/web/src/server.ts"]],
+    [process.execPath, ["--experimental-strip-types", "apps/web/src/main.ts"]],
     [process.execPath, ["--experimental-strip-types", "apps/worker/src/main.ts"]],
   ];
 

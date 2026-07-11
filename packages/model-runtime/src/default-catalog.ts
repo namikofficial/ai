@@ -23,6 +23,7 @@ export interface DefaultProviderInput {
 
 export interface DefaultEnvOverrides {
   localBaseUrl?: string;
+  embeddingBaseUrl?: string;
   modelFast?: string;
   modelFast2?: string;
   modelDeep?: string;
@@ -38,6 +39,8 @@ export interface DefaultEnvOverrides {
 function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): DefaultEnvOverrides {
   return {
     localBaseUrl: env.AI_LOCAL_BASE_URL && env.AI_LOCAL_BASE_URL.length > 0 ? env.AI_LOCAL_BASE_URL : undefined,
+    embeddingBaseUrl:
+      env.AI_EMBEDDING_BASE_URL && env.AI_EMBEDDING_BASE_URL.length > 0 ? env.AI_EMBEDDING_BASE_URL : undefined,
     modelFast: env.AI_LOCAL_MODEL_FAST && env.AI_LOCAL_MODEL_FAST.length > 0 ? env.AI_LOCAL_MODEL_FAST : undefined,
     modelFast2: env.AI_LOCAL_MODEL_FAST2 && env.AI_LOCAL_MODEL_FAST2.length > 0 ? env.AI_LOCAL_MODEL_FAST2 : undefined,
     modelDeep: env.AI_LOCAL_MODEL_DEEP && env.AI_LOCAL_MODEL_DEEP.length > 0 ? env.AI_LOCAL_MODEL_DEEP : undefined,
@@ -61,16 +64,16 @@ function readEnvOverrides(env: NodeJS.ProcessEnv = process.env): DefaultEnvOverr
 
 export const DEFAULT_LOCAL_BASE_URL = "http://127.0.0.1:8080/v1";
 // Defaults are tuned for the workstation's small/local llama-swap set.
-export const DEFAULT_FAST_MODEL = "qwen3-4b";
-export const DEFAULT_FAST2_MODEL = "gemma-3-4b";
-export const DEFAULT_DEEP_MODEL = "qwen3-8b";
-export const DEFAULT_CODER_MODEL = "qwen-coder-7b";
-export const DEFAULT_REASONER_MODEL = "deepseek-r1-7b";
-export const DEFAULT_ROUTER_MODEL = "qwen3-router";
-export const DEFAULT_TINY_MODEL = "llama-3b";
-export const DEFAULT_TINY2_MODEL = "phi-4-mini";
-export const DEFAULT_EMBEDDING_MODEL = "qwen3-4b";
-export const DEFAULT_EMBEDDING_DIMENSION = 512;
+export const DEFAULT_FAST_MODEL = "qwen3-4b-local";
+export const DEFAULT_FAST2_MODEL = "qwen3-4b-local";
+export const DEFAULT_DEEP_MODEL = "qwen3-4b-local";
+export const DEFAULT_CODER_MODEL = "qwen3-4b-local";
+export const DEFAULT_REASONER_MODEL = "granite-agent";
+export const DEFAULT_ROUTER_MODEL = "qwen3-4b-local";
+export const DEFAULT_TINY_MODEL = "qwen3-4b-local";
+export const DEFAULT_TINY2_MODEL = "qwen3-4b-local";
+export const DEFAULT_EMBEDDING_MODEL = "nomic-text-embed";
+export const DEFAULT_EMBEDDING_DIMENSION = 768;
 
 export const DEFAULT_PROVIDER_ROWS: DefaultProviderInput[] = [
   {
@@ -88,6 +91,14 @@ export const DEFAULT_PROVIDER_ROWS: DefaultProviderInput[] = [
     baseUrl: "http://127.0.0.1:8080/v1",
     apiKeyEnv: null,
     enabled: false,
+  },
+  {
+    id: "provider_llamacpp_embeddings",
+    kind: "local_openai_compat",
+    displayName: "Local llama.cpp embeddings",
+    baseUrl: "http://127.0.0.1:8081/v1",
+    apiKeyEnv: null,
+    enabled: true,
   },
   {
     id: "provider_heuristic_local",
@@ -219,7 +230,7 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
     // --- embeddings ---
     {
       id: "embedding-local",
-      providerId: local,
+      providerId: "provider_llamacpp_embeddings",
       role: "embedding",
       modelName: embeddingModel,
       displayName: "Embedding (local)",
@@ -375,13 +386,22 @@ export function buildDefaultProfileRows(env: NodeJS.ProcessEnv = process.env): D
 
 export const DEFAULT_PROFILE_ROWS: DefaultProfileInput[] = buildDefaultProfileRows();
 
-export function buildDefaultProvider(provider: DefaultProviderInput, baseUrl?: string): ModelProviderRecord {
+export function buildDefaultProvider(
+  provider: DefaultProviderInput,
+  baseUrl?: string,
+  embeddingBaseUrl?: string
+): ModelProviderRecord {
   const ts = new Date().toISOString();
   return {
     id: provider.id,
     kind: provider.kind,
     displayName: provider.displayName,
-    baseUrl: provider.id === "provider_llamacpp_local" ? (baseUrl ?? provider.baseUrl) : provider.baseUrl,
+    baseUrl:
+      provider.id === "provider_llamacpp_local"
+        ? (baseUrl ?? provider.baseUrl)
+        : provider.id === "provider_llamacpp_embeddings"
+          ? (embeddingBaseUrl ?? provider.baseUrl)
+          : provider.baseUrl,
     apiKeyEnv: provider.apiKeyEnv,
     enabled: provider.enabled,
     createdAt: ts,
@@ -437,12 +457,13 @@ export function seedDefaultModelCatalog(
 ): { providersAdded: number; profilesAdded: number; profilesUpgraded: number; skipped: boolean; localBaseUrl: string } {
   const overrides = readEnvOverrides(env);
   const localBaseUrl = overrides.localBaseUrl ?? DEFAULT_LOCAL_BASE_URL;
+  const embeddingBaseUrl = overrides.embeddingBaseUrl ?? "http://127.0.0.1:8081/v1";
   const existing = repo.listProfiles();
   const existingIds = new Set(existing.map((profile) => profile.id));
   if (existing.length === 0) {
     let providersAdded = 0;
     for (const provider of DEFAULT_PROVIDER_ROWS) {
-      repo.upsertProvider(buildDefaultProvider(provider, localBaseUrl));
+      repo.upsertProvider(buildDefaultProvider(provider, localBaseUrl, embeddingBaseUrl));
       providersAdded += 1;
     }
     const profiles = buildDefaultProfileRows(env);
@@ -465,7 +486,7 @@ export function seedDefaultModelCatalog(
   let providersAdded = 0;
   for (const provider of DEFAULT_PROVIDER_ROWS) {
     if (existingProviderIds.has(provider.id)) continue;
-    repo.upsertProvider(buildDefaultProvider(provider, localBaseUrl));
+    repo.upsertProvider(buildDefaultProvider(provider, localBaseUrl, embeddingBaseUrl));
     providersAdded += 1;
   }
   const profiles = buildDefaultProfileRows(env);

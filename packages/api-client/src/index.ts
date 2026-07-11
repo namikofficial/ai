@@ -68,7 +68,16 @@ async function requestJson<T>(baseUrl: string, path: string, init?: RequestInit)
   });
 
   if (!response.ok) {
-    throw new Error(`Request failed for ${path}: ${response.status} ${response.statusText}`);
+    let detail = "";
+    try {
+      const payload = (await response.clone().json()) as { error?: { message?: string }; message?: string };
+      detail = payload.error?.message ?? payload.message ?? "";
+    } catch {
+      // Keep the HTTP status when the server returned non-JSON diagnostics.
+    }
+    throw new Error(
+      `Request failed for ${path}: ${response.status} ${response.statusText}${detail ? ` — ${detail}` : ""}`
+    );
   }
 
   return (await response.json()) as T;
@@ -78,6 +87,9 @@ export function createApiClient(options: ApiClientOptions) {
   return {
     health(): Promise<{ status: "ok"; data: { uptime: number } }> {
       return requestJson(options.baseUrl, "/health");
+    },
+    healthDeep(): Promise<{ status: "ok" | "degraded"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, "/health/deep");
     },
     config(): Promise<{ status: "ok"; data: ConfigSnapshot }> {
       return requestJson(options.baseUrl, "/config");

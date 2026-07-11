@@ -151,3 +151,22 @@ Prompt Lab:
 The API exposes read-only status endpoints:
 - `GET /health`: Basic database and connectivity status.
 - `GET /status`: Detailed snapshot of project, session, and model health.
+
+Deep local readiness is available through `GET /health/deep` and the CLI:
+
+```bash
+pnpm cli -- health --deep
+```
+
+It probes the SQLite runtime, optional Qdrant, local model endpoint, embedding configuration, and worker heartbeat. A `ready: false` response is a degraded diagnostic response, not a crash.
+
+## Knowledge packing
+
+For large refactors, create a reproducible Repomix snapshot and project-native knowledge artifacts:
+
+~~~bash
+node scripts/repomix-pack.mjs /path/to/repo --style xml --output "$HOME/ai-knowledge/packs/repo.xml"
+node scripts/generate-project-knowledge.mjs /path/to/repo "$HOME/ai-knowledge/projects/repo"
+~~~
+
+Use normal Workbench exact/FTS/dense retrieval for small and medium questions. See docs/KNOWLEDGE_STACK_PLAN.md for the optional Sourcebot, graph-memory, DeepWiki, reranker, and workflow boundaries.

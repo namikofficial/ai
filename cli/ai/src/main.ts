@@ -71,7 +71,9 @@ function printUsage(): void {
   ai dev cancel <run-id>
   ai tools list
   ai tools call <name> --project <project> [--args <json>] [--allow-high-risk]
-  ai status`);
+  ai status
+  ai health [--deep]
+  ai health --deep --json`);
 }
 
 function parseArgs(argv: string[]) {
@@ -625,6 +627,15 @@ async function run(): Promise<void> {
 
   if (command === "status") {
     printJson(await client.status());
+    return;
+  }
+
+  if (command === "health") {
+    if (options.deep === "true" || options.json === "true") {
+      printJson(await client.healthDeep());
+    } else {
+      printJson(await client.health());
+    }
     return;
   }
 

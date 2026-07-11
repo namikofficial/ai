@@ -1,0 +1,17 @@
+name: fix-bug
+description: Safe local bug-fix workflow with retrieval, checks, review, and memory.
+approval: manual
+steps:
+  - id: understand
+    tools: [repo_search, docs_search, memory_search]
+  - id: plan
+    model: qwen3-4b-local
+  - id: patch
+    tools: [file_read, file_edit]
+  - id: validate
+    tools: [allowlisted_check]
+    commands: [typecheck, test, lint]
+  - id: review
+    tools: [diff, risk_review]
+  - id: summarize
+    writes: [memory_events, run_summary]

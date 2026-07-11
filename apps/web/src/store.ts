@@ -8,6 +8,7 @@ interface WorkbenchUiState {
   commandPaletteOpen: boolean;
   liveStatus: LiveStatus;
   liveTick: number;
+  refreshNonce: number;
   liveEvents: EventEnvelope[];
   setSelectedProjectId(projectId: string | null): void;
   openCommandPalette(): void;
@@ -15,6 +16,7 @@ interface WorkbenchUiState {
   toggleCommandPalette(): void;
   pushEvent(event: EventEnvelope): void;
   setLiveStatus(status: LiveStatus): void;
+  requestRefresh(): void;
 }
 
 export const useWorkbenchStore = create<WorkbenchUiState>((set) => ({
@@ -22,6 +24,7 @@ export const useWorkbenchStore = create<WorkbenchUiState>((set) => ({
   commandPaletteOpen: false,
   liveStatus: "connecting",
   liveTick: 0,
+  refreshNonce: 0,
   liveEvents: [],
   setSelectedProjectId: (selectedProjectId) => set({ selectedProjectId }),
   openCommandPalette: () => set({ commandPaletteOpen: true }),
@@ -34,4 +37,5 @@ export const useWorkbenchStore = create<WorkbenchUiState>((set) => ({
       liveEvents: [event, ...state.liveEvents].slice(0, 100),
     })),
   setLiveStatus: (liveStatus) => set({ liveStatus }),
+  requestRefresh: () => set((state) => ({ refreshNonce: state.refreshNonce + 1 })),
 }));
