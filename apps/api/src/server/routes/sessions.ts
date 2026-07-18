@@ -1,7 +1,12 @@
+import { createHash } from "node:crypto";
+import { relative } from "node:path";
 import type { Router } from "express";
 import { runAskWorkflow } from "../../../../../packages/ask-engine/src/index.ts";
+import { estimateTokens } from "../../../../../packages/context-engine/src/index.ts";
 import type { createStore } from "../../../../../packages/db/src/store.ts";
+import { isSecretFile } from "../../../../../packages/execution-engine/src/index.ts";
 import type { createModelRuntime } from "../../../../../packages/model-runtime/src/index.ts";
+import { checkPathPolicy, redactSecrets } from "../../../../../packages/safety/src/index.ts";
 import { compileSessionContextPreview } from "../../../../../packages/session-context/src/index.ts";
 import {
   createEvent,
@@ -286,6 +291,179 @@ export function registerSessionRoutes(
         return;
       }
       sendJson(res, json("ok", preview));
+    })
+  );
+
+  router.get("/sessions/:sessionId/context/scope", (req, res) => {
+    const sessionId = decodeURIComponent(String(req.params.sessionId ?? ""));
+    const scope = deps.store.getSessionContextScope(sessionId);
+    if (!scope) {
+      sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+      return;
+    }
+    sendJson(res, json("ok", scope));
+  });
+
+  router.put(
+    "/sessions/:sessionId/context/scope",
+    asyncRoute(async (req, res) => {
+      const sessionId = decodeURIComponent(String(req.params.sessionId ?? ""));
+      const session = deps.store.getSession(sessionId);
+      if (!session) {
+        sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+        return;
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      const project = session.projectId ? deps.store.getProject(session.projectId) : null;
+      const readPaths = (value: unknown, field: string, allowSecretPatterns: boolean): string[] => {
+        if (value === undefined) return [];
+        if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+          throw new Error(`${field} must be an array of paths`);
+        }
+        if (!project && value.length > 0) throw new Error(`${field} requires a project-scoped session`);
+        return [
+          ...new Set(
+            value
+              .map(String)
+              .map((entry) => entry.trim())
+              .filter(Boolean)
+          ),
+        ]
+          .slice(0, 100)
+          .map((entry) => {
+            const policy = checkPathPolicy({ projectRoot: project?.path ?? "", candidatePath: entry });
+            if (!policy.allowed) throw new Error(`${field} contains a path outside the session project`);
+            const normalized = relative(project?.path ?? "", policy.resolvedPath).replaceAll("\\", "/");
+            if (!allowSecretPatterns && isSecretFile(normalized)) {
+              throw new Error(`${field} cannot include secret-like files`);
+            }
+            return normalized;
+          });
+      };
+      try {
+        const current = deps.store.getSessionContextScope(sessionId);
+        if (!current) throw new Error("session context scope is unavailable");
+        const booleanField = (name: string, fallback: boolean): boolean =>
+          typeof body[name] === "boolean" ? body[name] : fallback;
+        const tokenBudget = body.tokenBudget === undefined ? current.tokenBudget : Math.trunc(Number(body.tokenBudget));
+        if (!Number.isFinite(tokenBudget) || tokenBudget < 1_000 || tokenBudget > 32_000) {
+          throw new Error("tokenBudget must be between 1000 and 32000");
+        }
+        const scope = deps.store.updateSessionContextScope(sessionId, {
+          includeActiveFile: booleanField("includeActiveFile", current.includeActiveFile),
+          includeChangedFiles: booleanField("includeChangedFiles", current.includeChangedFiles),
+          includeConversation: booleanField("includeConversation", current.includeConversation),
+          includeMemory: booleanField("includeMemory", current.includeMemory),
+          includeRetrieval: booleanField("includeRetrieval", current.includeRetrieval),
+          includeRules: booleanField("includeRules", current.includeRules),
+          explicitFiles:
+            body.explicitFiles === undefined
+              ? current.explicitFiles
+              : readPaths(body.explicitFiles, "explicitFiles", false),
+          excludedPaths:
+            body.excludedPaths === undefined
+              ? current.excludedPaths
+              : readPaths(body.excludedPaths, "excludedPaths", true),
+          tokenBudget,
+        });
+        publish(
+          createEvent(
+            "session.context_scope_updated",
+            {
+              explicitFileCount: scope.explicitFiles.length,
+              excludedPathCount: scope.excludedPaths.length,
+              tokenBudget: scope.tokenBudget,
+            },
+            { sessionId, projectId: session.projectId, agent: "context-consent" }
+          )
+        );
+        sendJson(res, json("ok", scope));
+      } catch (error) {
+        sendJson(
+          res,
+          json("error", undefined, { message: error instanceof Error ? error.message : String(error) }),
+          400
+        );
+      }
+    })
+  );
+
+  router.post(
+    "/sessions/:sessionId/context/clipboard/preview",
+    asyncRoute(async (req, res) => {
+      const sessionId = decodeURIComponent(String(req.params.sessionId ?? ""));
+      if (!deps.store.getSession(sessionId)) {
+        sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+        return;
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      const clipboard = readRequiredString(body.content, "content", 100_000);
+      if (!clipboard.value) {
+        sendJson(res, json("error", undefined, { message: clipboard.error ?? "clipboard content is required" }), 400);
+        return;
+      }
+      const redacted = redactSecrets(clipboard.value);
+      sendJson(
+        res,
+        json("ok", {
+          sourceType: "clipboard",
+          sourceHash: createHash("sha256").update(clipboard.value).digest("hex"),
+          redactedPreview: redacted.text.slice(0, 1_000),
+          estimatedTokens: estimateTokens(redacted.text),
+          redactionCount: redacted.redactions.reduce((sum, entry) => sum + entry.count, 0),
+          untrusted: true,
+          persisted: false,
+          requiresConsent: true,
+        })
+      );
+    })
+  );
+
+  router.get("/sessions/:sessionId/context/consents", (req, res) => {
+    const sessionId = decodeURIComponent(String(req.params.sessionId ?? ""));
+    if (!deps.store.getSession(sessionId)) {
+      sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+      return;
+    }
+    sendJson(res, json("ok", deps.store.listSessionContextConsents(sessionId)));
+  });
+
+  router.post(
+    "/sessions/:sessionId/context/consents",
+    asyncRoute(async (req, res) => {
+      const sessionId = decodeURIComponent(String(req.params.sessionId ?? ""));
+      if (!deps.store.getSession(sessionId)) {
+        sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+        return;
+      }
+      const body = (await readJsonBody(req)) as Record<string, unknown>;
+      const decision = body.decision === "approved" || body.decision === "denied" ? body.decision : null;
+      const sourceHash = typeof body.sourceHash === "string" ? body.sourceHash.toLowerCase() : "";
+      if (!decision || !/^[a-f0-9]{64}$/.test(sourceHash)) {
+        sendJson(res, json("error", undefined, { message: "decision and SHA-256 sourceHash are required" }), 400);
+        return;
+      }
+      const consent = deps.store.createSessionContextConsent({
+        sessionId,
+        sourceHash,
+        decision,
+        purpose:
+          typeof body.purpose === "string" && body.purpose.trim()
+            ? body.purpose.trim().slice(0, 240)
+            : "context compilation",
+        decidedBy:
+          typeof body.decidedBy === "string" && body.decidedBy.trim()
+            ? body.decidedBy.trim().slice(0, 120)
+            : "workbench-user",
+      });
+      publish(
+        createEvent(
+          "session.context_consent_recorded",
+          { consentId: consent.id, sourceType: consent.sourceType, sourceHash, decision },
+          { sessionId, projectId: deps.store.getSession(sessionId)?.projectId ?? null, agent: "context-consent" }
+        )
+      );
+      sendJson(res, json("ok", consent), 201);
     })
   );
 

@@ -54,6 +54,8 @@ import type {
   ReviewRecord,
   ReviewRequest,
   ReviewResponse,
+  SessionContextConsent,
+  SessionContextScope,
   SessionRecord,
   SessionStatus,
   SettingsSnapshot,
@@ -223,6 +225,39 @@ function rowToSession(row: Row): SessionRecord {
     errorMessage: row.error_message == null ? null : asString(row.error_message),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
+  };
+}
+
+function rowToSessionContextScope(row: Row): SessionContextScope {
+  return {
+    sessionId: asString(row.session_id),
+    projectId: row.project_id == null ? null : asString(row.project_id),
+    includeActiveFile: toNumber(row.include_active_file) === 1,
+    includeChangedFiles: toNumber(row.include_changed_files) === 1,
+    includeConversation: toNumber(row.include_conversation) === 1,
+    includeMemory: toNumber(row.include_memory) === 1,
+    includeRetrieval: toNumber(row.include_retrieval) === 1,
+    includeRules: toNumber(row.include_rules) === 1,
+    explicitFiles: safeParseStringArray(JSON.parse(asString(row.explicit_files_json))),
+    excludedPaths: safeParseStringArray(JSON.parse(asString(row.excluded_paths_json))),
+    tokenBudget: toNumber(row.token_budget),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  };
+}
+
+function rowToSessionContextConsent(row: Row): SessionContextConsent {
+  return {
+    id: asString(row.id),
+    sessionId: asString(row.session_id),
+    sourceType: "clipboard",
+    sourceHash: asString(row.source_hash),
+    decision: asString(row.decision) as SessionContextConsent["decision"],
+    purpose: asString(row.purpose),
+    decidedBy: asString(row.decided_by),
+    decidedAt: asString(row.decided_at),
+    consumedAt: row.consumed_at == null ? null : asString(row.consumed_at),
+    createdAt: asString(row.created_at),
   };
 }
 
@@ -552,6 +587,102 @@ export function createStore(db: DatabaseSync) {
       const row = db.prepare("SELECT * FROM agent_sessions WHERE id = ? LIMIT 1").get(sessionId) as Row | undefined;
       return row ? rowToSession(row) : null;
     },
+    getSessionContextScope(sessionId: string): SessionContextScope | null {
+      const session = store.getSession(sessionId);
+      if (!session) return null;
+      const existing = db.prepare("SELECT * FROM session_context_scopes WHERE session_id = ?").get(sessionId) as
+        | Row
+        | undefined;
+      if (existing) return rowToSessionContextScope(existing);
+      db.prepare(
+        `INSERT INTO session_context_scopes (session_id, project_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`
+      ).run(sessionId, session.projectId, session.createdAt, session.updatedAt);
+      const created = db.prepare("SELECT * FROM session_context_scopes WHERE session_id = ?").get(sessionId) as Row;
+      return rowToSessionContextScope(created);
+    },
+    updateSessionContextScope(
+      sessionId: string,
+      patch: Partial<
+        Pick<
+          SessionContextScope,
+          | "includeActiveFile"
+          | "includeChangedFiles"
+          | "includeConversation"
+          | "includeMemory"
+          | "includeRetrieval"
+          | "includeRules"
+          | "explicitFiles"
+          | "excludedPaths"
+          | "tokenBudget"
+        >
+      >
+    ): SessionContextScope {
+      const current = store.getSessionContextScope(sessionId);
+      if (!current) throw new Error(`unknown session: ${sessionId}`);
+      const next = { ...current, ...patch, updatedAt: now() };
+      next.tokenBudget = Math.min(32_000, Math.max(1_000, Math.trunc(next.tokenBudget)));
+      next.explicitFiles = [...new Set(next.explicitFiles.map((entry) => entry.trim()).filter(Boolean))].slice(0, 100);
+      next.excludedPaths = [...new Set(next.excludedPaths.map((entry) => entry.trim()).filter(Boolean))].slice(0, 100);
+      db.prepare(
+        `UPDATE session_context_scopes SET
+           include_active_file = ?, include_changed_files = ?, include_conversation = ?, include_memory = ?,
+           include_retrieval = ?, include_rules = ?, explicit_files_json = ?, excluded_paths_json = ?,
+           token_budget = ?, updated_at = ?
+         WHERE session_id = ?`
+      ).run(
+        next.includeActiveFile ? 1 : 0,
+        next.includeChangedFiles ? 1 : 0,
+        next.includeConversation ? 1 : 0,
+        next.includeMemory ? 1 : 0,
+        next.includeRetrieval ? 1 : 0,
+        next.includeRules ? 1 : 0,
+        JSON.stringify(next.explicitFiles),
+        JSON.stringify(next.excludedPaths),
+        next.tokenBudget,
+        next.updatedAt,
+        sessionId
+      );
+      return store.getSessionContextScope(sessionId) as SessionContextScope;
+    },
+    createSessionContextConsent(input: {
+      sessionId: string;
+      sourceHash: string;
+      decision: SessionContextConsent["decision"];
+      purpose: string;
+      decidedBy: string;
+    }): SessionContextConsent {
+      if (!store.getSession(input.sessionId)) throw new Error(`unknown session: ${input.sessionId}`);
+      if (!/^[a-f0-9]{64}$/.test(input.sourceHash)) throw new Error("context source hash must be SHA-256 hex");
+      const id = createId("context_consent");
+      const ts = now();
+      db.prepare(
+        `INSERT INTO session_context_consents (
+           id, session_id, source_type, source_hash, decision, purpose, decided_by, decided_at, consumed_at, created_at
+         ) VALUES (?, ?, 'clipboard', ?, ?, ?, ?, ?, NULL, ?)`
+      ).run(id, input.sessionId, input.sourceHash, input.decision, input.purpose, input.decidedBy, ts, ts);
+      return store.getSessionContextConsent(id) as SessionContextConsent;
+    },
+    getSessionContextConsent(consentId: string): SessionContextConsent | null {
+      const row = db.prepare("SELECT * FROM session_context_consents WHERE id = ?").get(consentId) as Row | undefined;
+      return row ? rowToSessionContextConsent(row) : null;
+    },
+    listSessionContextConsents(sessionId: string, limit = 50): SessionContextConsent[] {
+      return (
+        db
+          .prepare("SELECT * FROM session_context_consents WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
+          .all(sessionId, Math.max(1, Math.min(200, Math.trunc(limit)))) as Row[]
+      ).map(rowToSessionContextConsent);
+    },
+    consumeSessionContextConsent(input: { consentId: string; sessionId: string; sourceHash: string }): boolean {
+      const result = db
+        .prepare(
+          `UPDATE session_context_consents SET consumed_at = ?
+           WHERE id = ? AND session_id = ? AND source_hash = ? AND decision = 'approved' AND consumed_at IS NULL`
+        )
+        .run(now(), input.consentId, input.sessionId, input.sourceHash);
+      return result.changes === 1;
+    },
     createSession(input: CreateSessionInput): SessionRecord {
       const ts = now();
       const id = createId("sess");
@@ -579,6 +710,10 @@ export function createStore(db: DatabaseSync) {
         ts,
         ts
       );
+      db.prepare(
+        `INSERT OR IGNORE INTO session_context_scopes (session_id, project_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?)`
+      ).run(id, input.projectId, ts, ts);
       return requireRecord(store.getSession(id), "session");
     },
     updateSession(sessionId: string, patch: Partial<SessionRecord>): SessionRecord {

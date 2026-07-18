@@ -14,7 +14,10 @@ export async function compileSessionContextPreview(
 ): Promise<SessionContextPreview | null> {
   const session = store.getSession(input.sessionId);
   if (!session) return null;
-  const tokenBudget = Math.min(32_000, Math.max(1_000, Math.trunc(input.tokenBudget ?? 8_000)));
+  const scope = store.getSessionContextScope(session.id);
+  if (!scope) return null;
+  const requestedBudget = Math.min(32_000, Math.max(1_000, Math.trunc(input.tokenBudget ?? scope.tokenBudget)));
+  const tokenBudget = Math.min(requestedBudget, scope.tokenBudget);
   const project = session.projectId ? store.getProject(session.projectId) : null;
   let redactionCount = 0;
   const redactForPreview = (value: string): string => {
@@ -22,14 +25,14 @@ export async function compileSessionContextPreview(
     redactionCount += redacted.redactions.reduce((sum, entry) => sum + entry.count, 0);
     return redacted.text;
   };
-  const messages = store.conversation.listMessages(session.id, 100).slice(-20);
+  const messages = scope.includeConversation ? store.conversation.listMessages(session.id, 100).slice(-20) : [];
   const rawQuery =
     input.query ?? [...messages].reverse().find((message) => message.role === "user")?.content ?? session.userGoal;
   const query = redactForPreview(rawQuery);
   const [status, changedFilesResult, recentCommitsResult] = project
     ? await Promise.all([
         buildProjectStatus(store, { projectId: project.id }),
-        collectGitChangedPaths(project.path),
+        scope.includeChangedFiles ? collectGitChangedPaths(project.path) : Promise.resolve({ paths: [], error: null }),
         processCommandRunner.run("git", ["log", "-5", "--pretty=format:%h%x09%s"], {
           cwd: project.path,
           timeoutMs: 5_000,
@@ -37,10 +40,13 @@ export async function compileSessionContextPreview(
       ])
     : [null, { paths: [], error: null }, null];
   const task = session.activeTaskId ? store.getTask(session.activeTaskId) : null;
-  const lessons = session.projectId ? store.listProjectLessons(session.projectId, 5) : [];
-  const rules = session.projectId ? store.listProjectRules(session.projectId, 5) : [];
-  const memory = session.projectId ? store.listProjectMemory(session.projectId, 5) : [];
-  const chunks = session.projectId && query ? store.searchChunks(session.projectId, query, { limit: 8 }) : [];
+  const lessons = scope.includeMemory && session.projectId ? store.listProjectLessons(session.projectId, 5) : [];
+  const rules = scope.includeRules && session.projectId ? store.listProjectRules(session.projectId, 5) : [];
+  const memory = scope.includeMemory && session.projectId ? store.listProjectMemory(session.projectId, 5) : [];
+  const chunks =
+    scope.includeRetrieval && session.projectId && query
+      ? store.searchChunks(session.projectId, query, { limit: 8 })
+      : [];
   const estimate = (content: string): number => Math.max(1, Math.ceil(content.length / 4));
   const readContextFile = async (candidatePath: string): Promise<{ path: string; content: string } | null> => {
     if (!project) return null;
@@ -48,6 +54,15 @@ export async function compileSessionContextPreview(
     if (!policy.allowed) return null;
     try {
       const projectRelativePath = relative(project.path, policy.resolvedPath) || candidatePath;
+      const normalizedPath = projectRelativePath.replaceAll("\\", "/").replace(/^\.\//, "");
+      if (
+        scope.excludedPaths.some((excluded) => {
+          const normalizedExcluded = excluded.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
+          return normalizedPath === normalizedExcluded || normalizedPath.startsWith(`${normalizedExcluded}/`);
+        })
+      ) {
+        return null;
+      }
       if (isSecretFile(projectRelativePath)) return null;
       if ((await stat(policy.resolvedPath)).size > 1_000_000) return null;
       const content = (await readFile(policy.resolvedPath, "utf8")).slice(0, 32_000);
@@ -60,10 +75,14 @@ export async function compileSessionContextPreview(
       return null;
     }
   };
-  const activeFile = status?.context?.activeFile ? await readContextFile(status.context.activeFile) : null;
+  const activeFile =
+    scope.includeActiveFile && status?.context?.activeFile ? await readContextFile(status.context.activeFile) : null;
   const changedFiles = (
     await Promise.all(changedFilesResult.paths.slice(0, 12).map((path) => readContextFile(path)))
   ).filter((entry): entry is { path: string; content: string } => entry !== null);
+  const explicitFiles = (await Promise.all(scope.explicitFiles.map((path) => readContextFile(path)))).filter(
+    (entry): entry is { path: string; content: string } => entry !== null
+  );
   const selectedSymbol = status?.context?.selectedSymbol ?? null;
   const symbolChunks =
     session.projectId && selectedSymbol ? store.searchChunks(session.projectId, selectedSymbol, { limit: 3 }) : [];
@@ -128,6 +147,16 @@ export async function compileSessionContextPreview(
           },
         ]
       : []),
+    ...explicitFiles.map((file) => ({
+      id: `explicit-file:${file.path}`,
+      kind: "explicit_file" as const,
+      source: file.path,
+      reason: "File explicitly selected in the durable session context scope",
+      title: file.path,
+      content: file.content,
+      estimatedTokens: estimate(file.content),
+      freshness: scope.updatedAt,
+    })),
     ...changedFiles.map((file) => ({
       id: `changed-file:${file.path}`,
       kind: "changed_file" as const,
@@ -298,6 +327,7 @@ export async function compileSessionContextPreview(
     excluded,
     selectedFiles: [
       ...new Set([
+        ...explicitFiles.map((file) => file.path),
         ...(activeFile ? [activeFile.path] : []),
         ...changedFiles.map((file) => file.path),
         ...symbolChunks.map((chunk) => chunk.path),
@@ -313,7 +343,13 @@ export async function compileSessionContextPreview(
       ...(changedFilesResult.paths.length > changedFiles.length
         ? [`${changedFilesResult.paths.length - changedFiles.length} changed file(s) were unreadable or outside scope`]
         : []),
+      ...(scope.explicitFiles.length > explicitFiles.length
+        ? [
+            `${scope.explicitFiles.length - explicitFiles.length} explicit file(s) were unreadable, secret-like, or excluded`,
+          ]
+        : []),
       ...(redactionCount > 0 ? [`Redacted ${redactionCount} potential secret value(s)`] : []),
     ],
+    scope,
   };
 }

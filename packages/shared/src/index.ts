@@ -440,6 +440,8 @@ export type EventType =
   | "session.failed"
   | "session.reflected"
   | "session.message_appended"
+  | "session.context_scope_updated"
+  | "session.context_consent_recorded"
   | "task.created"
   | "task.started"
   | "task.completed"
@@ -778,6 +780,46 @@ export interface SharedSessionMessageInput {
   metadata?: Record<string, unknown>;
 }
 
+export interface SessionContextScope {
+  sessionId: string;
+  projectId: string | null;
+  includeActiveFile: boolean;
+  includeChangedFiles: boolean;
+  includeConversation: boolean;
+  includeMemory: boolean;
+  includeRetrieval: boolean;
+  includeRules: boolean;
+  explicitFiles: string[];
+  excludedPaths: string[];
+  tokenBudget: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionContextConsent {
+  id: string;
+  sessionId: string;
+  sourceType: "clipboard";
+  sourceHash: string;
+  decision: "approved" | "denied";
+  purpose: string;
+  decidedBy: string;
+  decidedAt: string;
+  consumedAt: string | null;
+  createdAt: string;
+}
+
+export interface ClipboardContextPreview {
+  sourceType: "clipboard";
+  sourceHash: string;
+  redactedPreview: string;
+  estimatedTokens: number;
+  redactionCount: number;
+  untrusted: true;
+  persisted: false;
+  requiresConsent: true;
+}
+
 export interface SessionContextPreviewItem {
   id: string;
   kind:
@@ -795,7 +837,9 @@ export interface SessionContextPreviewItem {
     | "memory"
     | "rule"
     | "lesson"
-    | "retrieval";
+    | "retrieval"
+    | "explicit_file"
+    | "clipboard";
   source: string;
   reason: string;
   title: string;
@@ -818,6 +862,7 @@ export interface SessionContextPreview {
   selectedFiles: string[];
   index: { stale: boolean; lastIndexedAt: string | null };
   warnings: string[];
+  scope: SessionContextScope;
 }
 
 export type RetrievalIntentKind = "lookup" | "explain" | "debug" | "plan" | "review" | "summary";

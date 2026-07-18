@@ -21,6 +21,7 @@ import type {
   AskRequest,
   AskResponse,
   CheckRunSummary,
+  ClipboardContextPreview,
   CodeEdgeRecord,
   CodeSymbolRecord,
   CompiledPromptRecord,
@@ -49,7 +50,9 @@ import type {
   ReviewRecord,
   ReviewRequest,
   ReviewResponse,
+  SessionContextConsent,
   SessionContextPreview,
+  SessionContextScope,
   SessionRecord,
   SessionReplayRequest,
   SessionReplayResponse,
@@ -463,6 +466,60 @@ export function createApiClient(options: ApiClientOptions) {
       if (input.tokenBudget) params.set("tokenBudget", String(input.tokenBudget));
       const suffix = params.size ? `?${params.toString()}` : "";
       return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/context${suffix}`);
+    },
+    getSessionContextScope(sessionId: string): Promise<{ status: "ok"; data: SessionContextScope }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/context/scope`);
+    },
+    updateSessionContextScope(
+      sessionId: string,
+      input: Partial<
+        Pick<
+          SessionContextScope,
+          | "includeActiveFile"
+          | "includeChangedFiles"
+          | "includeConversation"
+          | "includeMemory"
+          | "includeRetrieval"
+          | "includeRules"
+          | "explicitFiles"
+          | "excludedPaths"
+          | "tokenBudget"
+        >
+      >
+    ): Promise<{ status: "ok"; data: SessionContextScope }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/context/scope`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    previewClipboardContext(
+      sessionId: string,
+      content: string
+    ): Promise<{ status: "ok"; data: ClipboardContextPreview }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/context/clipboard/preview`, {
+        method: "POST",
+        body: JSON.stringify({ content }),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    recordSessionContextConsent(
+      sessionId: string,
+      input: {
+        sourceHash: string;
+        decision: "approved" | "denied";
+        purpose?: string;
+        decidedBy?: string;
+      }
+    ): Promise<{ status: "ok"; data: SessionContextConsent }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/context/consents`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    listSessionContextConsents(sessionId: string): Promise<{ status: "ok"; data: SessionContextConsent[] }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/context/consents`);
     },
     replaySession(
       sessionId: string,
