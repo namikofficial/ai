@@ -35,12 +35,15 @@ is unavailable.
 - `ai_resume_session` — mutating
 - `ai_get_session_context` — read-only preview
 - `ai_save_session_memory` — mutating, explicit outcome persistence
+- `ai_list_actions` / `ai_get_action_execution` — read-only, explicit-project workflow inspection
+- `ai_run_action` / `ai_cancel_action` — mutating, API-owned workflow request and cancellation
 
 `ai_ask_rag`, `ai_create_plan`, and `ai_dev_start` also accept `sessionId`, allowing coding agents to preserve the
 same project/task/conversation lineage through the full workflow.
 
 MCP calls remain audit logged. Session IDs are the scoping boundary: message project ownership is copied from the
-canonical session, never accepted from the caller.
+canonical session, never accepted from the caller. Workflow tools require an explicit project ID and reject a session
+or task owned by another project. They call the canonical loopback API and cannot approve their own workflow requests.
 
 ## Browser and CLI continuity
 

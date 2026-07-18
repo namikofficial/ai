@@ -15,8 +15,10 @@ flowchart LR
   Manifest[Approved ProjectManifest] --> Actions[GET /actions]
   Actions --> Rofi[Rofi cockpit]
   Actions --> CLI[ai action list]
+  Actions --> MCP[MCP action tools]
   Rofi --> Run[POST /actions/:id/run]
   CLI --> Run
+  MCP --> Run
   Run --> Scope[Canonical project + approved-root check]
   Scope --> Policy[Mutation / terminal / env / capability policy]
   Policy -->|adapter unavailable| Audit[Durable blocked event]
@@ -58,6 +60,17 @@ ai action cancel <execution-id>
 Without `projectId`, action listing and execution use the canonical selected project. An unavailable API is a hard
 failure for execution; desktop clients must not create a local workflow record or run a cached command. Rofi uses
 the cached action label/state only for presentation and submits the stable workflow ID to Workbench.
+
+## MCP boundary
+
+Coding agents use `ai_list_actions`, `ai_get_action_execution`, `ai_run_action`, and `ai_cancel_action`. Every MCP
+workflow call requires an explicit canonical `projectId`; execution requests additionally cross-check any session and
+task against that project. These tools proxy the loopback Workbench API so MCP never becomes a second workflow runner.
+Calls fail clearly when the API is unavailable, and every request remains in the MCP audit log.
+
+There is intentionally no `ai_approve_action` tool. An agent may request a mutating workflow and receive its pending
+approval/deep link, but it cannot approve its own request. Approval remains an independent user decision in Workbench
+or through the explicit human-operated CLI.
 
 ## Adding a workflow
 

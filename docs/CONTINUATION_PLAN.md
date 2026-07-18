@@ -15,6 +15,8 @@ lists concrete remaining gates rather than treating compatibility slices as fini
 - Runtime supervision, readiness/diagnostics, SSE replay, notifications, backup/restore, and Python RAG importer.
 - Exact-context approval binding for mutating workflows, canonical path/symlink enforcement, direct supervised
   execution, process-tree cancellation, CLI controls, Workbench review, and Rofi approval deep links.
+- MCP action list/run/status/cancel tools proxy the canonical loopback API, enforce explicit project/session/task
+  scope, remain audit logged, and deliberately cannot self-approve.
 
 ## Priority 1 — Complete workflow modes
 
@@ -23,8 +25,7 @@ Build on `workflow_executions` rather than adding another runner:
 1. Implement terminal and tmux adapters carrying canonical project/session/task/run identifiers.
 2. Implement isolated and background modes, dependencies/retries, expected artifacts, and restart recovery.
 3. Resolve environment references from an approved secret provider without returning values to logs/caches.
-4. Add MCP tools for action list/run/status with the same mutating/read-only boundaries.
-5. Add recovery workflows and artifact inspection to workflow reviews.
+4. Add recovery workflows and artifact inspection to workflow reviews.
 
 Acceptance evidence: API/CLI/Rofi integration tests for success, denial, approval replay, cancellation, timeout,
 wrong-project invocation, secret redaction, process-tree cleanup, and restart recovery.

@@ -187,6 +187,13 @@ test("MCP workflow tools use the canonical API, preserve project scope, and cann
     mode: "check",
     source: "test",
   });
+  const otherSession = store.createSession({
+    projectId: otherProject.id,
+    title: "Other MCP workflow session",
+    userGoal: "remain in the other project",
+    mode: "check",
+    source: "test",
+  });
   const manifest: ProjectManifest = {
     ...contractFixture.ProjectManifest,
     id: project.id,
@@ -290,9 +297,20 @@ test("MCP workflow tools use the canonical API, preserve project scope, and cann
     assert.equal(pendingPayload.execution.state, "waiting");
     assert.equal(pendingPayload.approval.status, "pending");
 
-    const confused = await handleMcpRequest(store, config, {
+    const crossSession = await handleMcpRequest(store, config, {
       jsonrpc: "2.0",
       id: 6,
+      method: "tools/call",
+      params: {
+        name: "ai_run_action",
+        arguments: { projectId: project.id, workflowId: "version", sessionId: otherSession.id },
+      },
+    });
+    assert.match(crossSession?.error?.message ?? "", /different project/);
+
+    const confused = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 7,
       method: "tools/call",
       params: {
         name: "ai_get_action_execution",
@@ -307,11 +325,19 @@ test("MCP workflow tools use the canonical API, preserve project scope, and cann
 
   const unavailable = await handleMcpRequest(store, config, {
     jsonrpc: "2.0",
-    id: 7,
+    id: 8,
     method: "tools/call",
     params: { name: "ai_list_actions", arguments: { projectId: project.id } },
   });
   assert.match(unavailable?.error?.message ?? "", /Workbench API unavailable/);
+  const externalConfig = { ...config, apiUrl: "https://example.com" };
+  const external = await handleMcpRequest(store, externalConfig, {
+    jsonrpc: "2.0",
+    id: 9,
+    method: "tools/call",
+    params: { name: "ai_list_actions", arguments: { projectId: project.id } },
+  });
+  assert.match(external?.error?.message ?? "", /loopback Workbench API/);
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
 });
