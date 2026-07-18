@@ -471,7 +471,7 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
   invokeModel(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
   enqueueJob(input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }): { id: string };
   listEvents(sessionId?: string, limit?: number): EventEnvelope[];
-  consumeSessionContextConsent(input: { consentId: string; sessionId: string; sourceHash: string }): boolean;
+  consumeSessionContextConsent?(input: { consentId: string; sessionId: string; sourceHash: string }): boolean;
 }
 
 export interface RunAskWorkflowInput {
@@ -502,12 +502,10 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   if (clipboardInput && !existingSession) {
     throw new Error("clipboard context requires an existing project-scoped session and explicit consent");
   }
-  const clipboardSourceHash = clipboardInput
-    ? createHash("sha256").update(clipboardInput.content).digest("hex")
-    : null;
+  const clipboardSourceHash = clipboardInput ? createHash("sha256").update(clipboardInput.content).digest("hex") : null;
   if (
     clipboardInput &&
-    !input.store.consumeSessionContextConsent({
+    !input.store.consumeSessionContextConsent?.({
       consentId: clipboardInput.consentId,
       sessionId: existingSession?.id ?? "",
       sourceHash: clipboardSourceHash as string,
@@ -915,19 +913,20 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     rules,
     previousMessages,
     skills,
-    extraCandidates: clipboardPersistentMarker && clipboardSourceHash
-      ? [
-          {
-            kind: "clipboard",
-            sourceId: `clipboard:${clipboardSourceHash}`,
-            excerpt: clipboardPersistentMarker,
-            priority: 1.5,
-            pinned: true,
-            reason: "one-time user-approved untrusted clipboard context",
-            reference: { untrusted: true, ephemeral: true, sourceHash: clipboardSourceHash },
-          },
-        ]
-      : [],
+    extraCandidates:
+      clipboardPersistentMarker && clipboardSourceHash
+        ? [
+            {
+              kind: "clipboard",
+              sourceId: `clipboard:${clipboardSourceHash}`,
+              excerpt: clipboardPersistentMarker,
+              priority: 1.5,
+              pinned: true,
+              reason: "one-time user-approved untrusted clipboard context",
+              reference: { untrusted: true, ephemeral: true, sourceHash: clipboardSourceHash },
+            },
+          ]
+        : [],
   });
   const contextPack = input.store.context.recordPack({
     sessionId: session.id,
@@ -1327,7 +1326,9 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     );
   const modelContextItems = clipboardForModel
     ? persistedContextItems.map((item) =>
-        item.kind === "clipboard" ? { ...item, excerpt: clipboardForModel, tokenCount: Math.ceil(clipboardForModel.length / 4) } : item
+        item.kind === "clipboard"
+          ? { ...item, excerpt: clipboardForModel, tokenCount: Math.ceil(clipboardForModel.length / 4) }
+          : item
       )
     : persistedContextItems;
   const compiledAnswer = compilePrompt(
@@ -1348,19 +1349,23 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       tokenBudget: 4096,
     })
   );
-  const compiledAnswerForRecord = clipboardForModel && clipboardPersistentMarker
-    ? {
-        ...compiledAnswer,
-        messages: compiledAnswer.messages.map((message) => ({
-          ...message,
-          content: message.content.replaceAll(clipboardForModel, clipboardPersistentMarker),
-        })),
-        includedContext: compiledAnswer.includedContext.map((item) =>
-          item.kind === "clipboard" ? { ...item, excerpt: clipboardPersistentMarker } : item
-        ),
-        safetyNotes: [...compiledAnswer.safetyNotes, "Ephemeral clipboard content omitted from durable prompt records."],
-      }
-    : compiledAnswer;
+  const compiledAnswerForRecord =
+    clipboardForModel && clipboardPersistentMarker
+      ? {
+          ...compiledAnswer,
+          messages: compiledAnswer.messages.map((message) => ({
+            ...message,
+            content: message.content.replaceAll(clipboardForModel, clipboardPersistentMarker),
+          })),
+          includedContext: compiledAnswer.includedContext.map((item) =>
+            item.kind === "clipboard" ? { ...item, excerpt: clipboardPersistentMarker } : item
+          ),
+          safetyNotes: [
+            ...compiledAnswer.safetyNotes,
+            "Ephemeral clipboard content omitted from durable prompt records.",
+          ],
+        }
+      : compiledAnswer;
   input.store.recordCompiledPrompt({
     compiledPrompt: compiledAnswerForRecord,
     sessionId: session.id,

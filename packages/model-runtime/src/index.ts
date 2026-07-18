@@ -162,12 +162,15 @@ function redactMetadata(metadata: Record<string, unknown> | undefined): Record<s
   }
 }
 
-function requestForRecord(request: ModelInvokeRequest, options: ModelInvokeOptions | undefined): ModelInvokeRequest {
+function requestForRecord(request: ModelInvokeRequest, options: ModelInvokeOptions | undefined): Record<string, unknown> {
   const recorded = options?.recordedRequest ?? request;
   return { ...recorded, metadata: redactMetadata(recorded.metadata) ?? undefined };
 }
 
-function responseForRecord(response: Record<string, unknown>, options: ModelInvokeOptions | undefined): Record<string, unknown> {
+function responseForRecord(
+  response: Record<string, unknown>,
+  options: ModelInvokeOptions | undefined
+): Record<string, unknown> {
   return options?.sensitive ? { sensitive: true, contentOmitted: true } : response;
 }
 
@@ -425,11 +428,14 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
                 latencyMs: Date.now() - fallbackStarted,
                 status: "fallback",
                 request: requestForRecord(request, options),
-                response: responseForRecord({
-                  text: fallbackResult.text.slice(0, 1000),
-                  usage: fallbackResult.usage,
-                  fallbackFrom: message,
-                }, options),
+                response: responseForRecord(
+                  {
+                    text: fallbackResult.text.slice(0, 1000),
+                    usage: fallbackResult.usage,
+                    fallbackFrom: message,
+                  },
+                  options
+                ),
                 error: message,
                 sessionId: options?.sessionId,
                 taskId: options?.taskId,
@@ -499,11 +505,14 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
               latencyMs: Date.now() - fallbackStarted,
               status: "fallback",
               request: requestForRecord(request, options),
-              response: responseForRecord({
-                text: fallbackResult.text.slice(0, 1000),
-                usage: fallbackResult.usage,
-                fallbackFrom: message,
-              }, options),
+              response: responseForRecord(
+                {
+                  text: fallbackResult.text.slice(0, 1000),
+                  usage: fallbackResult.usage,
+                  fallbackFrom: message,
+                },
+                options
+              ),
               error: message,
               sessionId: options?.sessionId,
               taskId: options?.taskId,

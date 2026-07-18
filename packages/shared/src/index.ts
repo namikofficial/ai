@@ -664,9 +664,10 @@ export function parseProjectCreateInput(value: unknown): ProjectCreateInput {
 export function parseAskRequest(value: unknown): AskRequest {
   const input = requireObject(value, "ask request");
   const rawContextInput = input.contextInput === undefined ? null : requireObject(input.contextInput, "contextInput");
-  const rawClipboard = rawContextInput?.clipboard === undefined
-    ? null
-    : requireObject(rawContextInput.clipboard, "contextInput.clipboard");
+  const rawClipboard =
+    rawContextInput?.clipboard === undefined
+      ? null
+      : requireObject(rawContextInput.clipboard, "contextInput.clipboard");
   const clipboardContent = rawClipboard ? requireString(rawClipboard.content, "contextInput.clipboard.content") : null;
   if (clipboardContent && clipboardContent.length > 100_000) {
     throw new Error("contextInput.clipboard.content exceeds 100000 characters");
