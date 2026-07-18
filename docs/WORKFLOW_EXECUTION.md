@@ -5,10 +5,10 @@ execution state, logs, check projection, and events; Rofi and CLI are clients an
 
 ## Current execution modes
 
-The first complete slice supports approved, non-interactive, read-only commands through direct supervised execution.
-It intentionally fails closed for project writes, destructive/external commands, interactive terminals, unresolved
-environment references, and unavailable platform capabilities. Those modes require their approval, terminal/tmux,
-or secret-reference adapters before they can run.
+Non-interactive read-only commands run directly under supervision. Project-write, destructive, and external commands
+create a durable, expiring approval first. The approval is bound to the canonical project, complete structured command,
+working directory, mutation class, branch, and base commit; changed review context invalidates it. Interactive terminals,
+unresolved environment references, and unavailable platform capabilities still fail closed until their adapters exist.
 
 ```mermaid
 flowchart LR
@@ -19,14 +19,18 @@ flowchart LR
   CLI --> Run
   Run --> Scope[Canonical project + approved-root check]
   Scope --> Policy[Mutation / terminal / env / capability policy]
-  Policy -->|blocked| Audit[Durable blocked event]
+  Policy -->|adapter unavailable| Audit[Durable blocked event]
+  Policy -->|mutating| Approval[(workflow_approvals)]
+  Approval -->|approved and context unchanged| Exec
+  Approval -->|rejected / expired / stale| Cancelled[Cancelled execution]
   Policy -->|read-only direct| Exec[Allowlisted subprocess]
   Exec --> DB[(workflow_executions)]
   Exec --> Check[Check result when category=check]
   DB --> Events[workflow started/completed/failed events]
 ```
 
-Every accepted execution is inserted as `running` before process launch and updated to a terminal state afterward.
+Every accepted execution is inserted as `running`, or `waiting` when approval is required, before process launch and
+updated to a terminal state afterward.
 The durable record includes the structured executable/arguments, canonical working directory, bounded output,
 duration, exit status, origin, and correlation ID. Ambient process secrets are excluded from the child environment;
 only a small operating-system environment allowlist is inherited. Inline Node/Python evaluation and binaries outside
@@ -38,9 +42,17 @@ the explicit command allowlist are blocked.
 GET  /actions?projectId=<id>
 POST /actions/<workflow-id>/run
 GET  /actions/executions/<execution-id>
+POST /actions/executions/<execution-id>/approve
+POST /actions/executions/<execution-id>/reject
+POST /actions/executions/<execution-id>/cancel
+GET  /approvals/<approval-id>
 
 ai action list [--project <id>]
 ai action run <workflow-id> [--project <id>] [--session <id>] [--task <id>]
+ai action show <execution-id>
+ai action approve <execution-id> [--notes <text>]
+ai action reject <execution-id> [--notes <text>]
+ai action cancel <execution-id>
 ```
 
 Without `projectId`, action listing and execution use the canonical selected project. An unavailable API is a hard
@@ -56,8 +68,8 @@ the cached action label/state only for presentation and submits the stable workf
    conditions explicitly.
 4. Import the project-local manifest as a proposal, review its diff, and approve it into canonical SQLite.
 5. Confirm `ai action list --project <id>` shows the expected availability reason.
-6. For a read-only direct action, run it once from CLI and inspect its execution/event record before exposing it in
-   daily desktop use.
+6. Run it once from CLI and inspect its execution/event record. For a mutating action, review the Workbench approval
+   page and verify its project, branch, base commit, command, and working directory before approving.
 
 Example:
 
@@ -87,9 +99,8 @@ workflow adapter is complete.
 
 ## Remaining adapters
 
-- approval records scoped to mutating workflow definitions and exact arguments;
 - floating Kitty and tmux execution with canonical context variables;
-- background supervision, cancellation endpoint, retry/dependency steps, and recovery workflows;
+- background supervision, retry/dependency steps, restart recovery, and recovery workflows;
 - safe secret-reference resolution without logging values;
 - isolated generic workflows and artifact collection;
 - platform capability discovery and `visibleWhen` evaluation.

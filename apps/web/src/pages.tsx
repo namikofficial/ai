@@ -3507,15 +3507,21 @@ function ApprovalPage(): ReactNode {
   const [error, setError] = useState<string | null>(null);
   const approval = resource.data?.data.approval ?? null;
   const run = resource.data?.data.run ?? null;
+  const execution = resource.data?.data.execution ?? null;
+  const kind = resource.data?.data.kind ?? "development";
   const runId = String(approval?.runId ?? "");
+  const executionId = String(approval?.executionId ?? "");
   const pending = approval?.status === "pending";
 
   const resolve = async (decision: "approve" | "reject") => {
-    if (!runId) return;
+    if (kind === "workflow" ? !executionId : !runId) return;
     setBusy(decision);
     setError(null);
     try {
-      if (decision === "approve") await api.approveDevRun(runId);
+      if (kind === "workflow") {
+        if (decision === "approve") await api.approveActionExecution(executionId);
+        else await api.rejectActionExecution(executionId);
+      } else if (decision === "approve") await api.approveDevRun(runId);
       else await api.cancelDevRun(runId);
       resource.refresh();
     } catch (cause) {
@@ -3527,13 +3533,13 @@ function ApprovalPage(): ReactNode {
 
   return (
     <PageShell title="Approval" subtitle={approvalId}>
-      <Panel title="Scoped development approval" span={6}>
+      <Panel title={kind === "workflow" ? "Scoped workflow approval" : "Scoped development approval"} span={6}>
         {approval ? (
           <KeyValueList
             items={[
               ["Status", String(approval.status ?? "unknown")],
               ["Project", String(approval.projectId ?? "unknown")],
-              ["Run", runId],
+              [kind === "workflow" ? "Execution" : "Run", kind === "workflow" ? executionId : runId],
               ["Risk", String(approval.risk ?? "unknown")],
               ["Reason", String(approval.reason ?? "No reason recorded")],
               ["Requested", String(approval.requestedAt ?? "")],
@@ -3556,8 +3562,24 @@ function ApprovalPage(): ReactNode {
           </div>
         ) : null}
       </Panel>
-      <Panel title="Run context" span={6}>
-        {run ? (
+      <Panel title={kind === "workflow" ? "Workflow context" : "Run context"} span={6}>
+        {kind === "workflow" && execution ? (
+          <div className="stack">
+            <strong>{String((execution.execution as Record<string, unknown> | null)?.workflowId ?? "Workflow")}</strong>
+            <KeyValueList
+              items={[
+                ["Status", String((execution.execution as Record<string, unknown> | null)?.state ?? "unknown")],
+                ["Mutation", String(approval?.mutation ?? "unknown")],
+                ["Branch", String(approval?.branch ?? "not a Git repository")],
+                ["Base commit", String(approval?.baseCommit ?? "not available")],
+                [
+                  "Working directory",
+                  String((execution.command as Record<string, unknown> | null)?.workingDirectory ?? ""),
+                ],
+              ]}
+            />
+          </div>
+        ) : run ? (
           <div className="stack">
             <strong>{String(run.goal ?? "Development run")}</strong>
             <div className="tiny">Status: {String(run.status ?? "unknown")}</div>

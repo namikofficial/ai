@@ -212,7 +212,7 @@ test("recommended actions come from canonical manifest commands without inventin
   assert.ok(!JSON.stringify(actions).includes("npm run dev"));
 });
 
-test("recommended actions expose policy reasons for commands the direct executor cannot run", () => {
+test("recommended actions separate approval requirements from unavailable execution adapters", () => {
   const manifest = {
     id: "project",
     commands: {
@@ -236,7 +236,7 @@ test("recommended actions expose policy reasons for commands the direct executor
   const [action] = recommendedActionsFromManifest(manifest, "2026-07-18T00:00:00.000Z");
   assert.equal(action?.state, "waiting");
   assert.equal(action?.approvalRequired, true);
-  assert.match(action?.disabledReason ?? "", /approval/i);
+  assert.match(action?.disabledReason ?? "", /environment references/i);
 });
 
 test("compact status is human-readable and the offline cache is atomic and versioned", async () => {

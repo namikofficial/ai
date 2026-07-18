@@ -337,16 +337,13 @@ export function recommendedActionsFromManifest(
 ): RecommendedAction[] {
   return Object.entries(manifest.commands)
     .map(([key, command], index): RecommendedAction => {
-      const disabledReason =
-        command.mutation !== "read_only"
-          ? "Requires approval in Workbench"
-          : command.interactive
-            ? "Requires an interactive terminal"
-            : command.environmentRefs.length > 0
-              ? "Requires approved environment references"
-              : command.requiresCapabilities.length > 0
-                ? `Requires capabilities: ${command.requiresCapabilities.join(", ")}`
-                : null;
+      const disabledReason = command.interactive
+        ? "Requires an interactive terminal"
+        : command.environmentRefs.length > 0
+          ? "Requires approved environment references"
+          : command.requiresCapabilities.length > 0
+            ? `Requires capabilities: ${command.requiresCapabilities.join(", ")}`
+            : null;
       return {
         schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
         id: `action:${manifest.id}:${key}`,

@@ -213,6 +213,9 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
+    getActionExecution(executionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}`);
+    },
     approveActionExecution(
       executionId: string,
       notes?: string

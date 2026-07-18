@@ -58,6 +58,10 @@ function printUsage(): void {
   ai context explain
   ai action list [--project <project-id>]
   ai action run <workflow-id> [--project <project-id>] [--session <session-id>] [--task <task-id>]
+  ai action show <execution-id>
+  ai action approve <execution-id> [--notes <text>]
+  ai action reject <execution-id> [--notes <text>]
+  ai action cancel <execution-id>
   ai config show --project <project>
   ai config init --project <project>
   ai config validate --project <project>
@@ -725,7 +729,27 @@ async function run(): Promise<void> {
       );
       return;
     }
-    throw new Error("action requires list or run");
+    const executionId = positionals.shift();
+    if (["show", "approve", "reject", "cancel"].includes(subcommand ?? "") && !executionId) {
+      throw new Error(`action ${subcommand} requires an execution id`);
+    }
+    if (subcommand === "show") {
+      printJson(await client.getActionExecution(executionId as string));
+      return;
+    }
+    if (subcommand === "approve") {
+      printJson(await client.approveActionExecution(executionId as string, options.notes));
+      return;
+    }
+    if (subcommand === "reject") {
+      printJson(await client.rejectActionExecution(executionId as string, options.notes));
+      return;
+    }
+    if (subcommand === "cancel") {
+      printJson(await client.cancelActionExecution(executionId as string));
+      return;
+    }
+    throw new Error("action requires list, run, show, approve, reject, or cancel");
   }
 
   if (command === "config") {

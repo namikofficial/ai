@@ -4,7 +4,6 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { promisify } from "node:util";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
 import type { ProjectManifest } from "../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
@@ -13,7 +12,14 @@ import { runAllowedCommand } from "../packages/execution-engine/src/index.ts";
 const fixture = JSON.parse(
   await readFile(new URL("./fixtures/contracts/v1-control-plane.json", import.meta.url), "utf8")
 ) as { ProjectManifest: ProjectManifest };
-const execFileAsync = promisify(execFile);
+function execFileAsync(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(file, args, { encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) reject(error);
+      else resolve({ stdout, stderr });
+    });
+  });
+}
 
 function command(
   id: string,
