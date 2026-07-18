@@ -892,6 +892,14 @@ export function registerWorkflowRoutes(
             finishedAt: new Date().toISOString(),
           });
           process.kill(-background.processPid, "SIGTERM");
+          const forceKill = setTimeout(() => {
+            try {
+              process.kill(-(background.processPid as number), "SIGKILL");
+            } catch {
+              // The background process group completed before escalation.
+            }
+          }, 2_000);
+          forceKill.unref?.();
           sendJson(res, json("ok", { executionId, state: "cancelling" }), 202);
           return;
         } catch {

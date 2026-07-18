@@ -694,6 +694,22 @@ export async function processNextJob(
         stderr: result.stderr,
         durationMs: result.durationMs,
       });
+      if (prepared.workflow.command.category === "check") {
+        store.createCheckRun({
+          name: prepared.workflow.command.id,
+          projectId: execution.projectId,
+          status: result.status === "completed" ? "completed" : result.status === "blocked" ? "blocked" : "failed",
+          command: result.command,
+          output: result.stdout || null,
+          errorOutput: result.stderr || result.blockedReason,
+          exitCode: result.exitCode,
+          durationMs: result.durationMs,
+          parsedErrors: result.parsedErrors,
+          affectedFiles: result.affectedFiles,
+          startedAt: result.startedAt,
+          finishedAt: result.finishedAt,
+        });
+      }
       if (currentBackground?.state === "running") {
         store.workflows.transitionBackgroundJob({
           executionId,
@@ -941,7 +957,41 @@ export async function processNextJob(
     store.completeJob(job.id, output);
     return true;
   } catch (error) {
-    store.failJob(job.id, error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    if (job.type === "workflow.execute") {
+      const payload = parsePayload(job.payloadJson);
+      const executionId = typeof payload.executionId === "string" ? payload.executionId : null;
+      const record = executionId ? store.workflows.get(executionId) : null;
+      const background = executionId ? store.workflows.getBackgroundJob(executionId) : null;
+      const timestamp = new Date().toISOString();
+      if (record && (record.execution.state === "starting" || record.execution.state === "running")) {
+        store.workflows.save({
+          ...record,
+          execution: {
+            ...record.execution,
+            state: "failed",
+            updatedAt: timestamp,
+            finishedAt: timestamp,
+            currentStepId: null,
+            stepStates: {
+              ...(record.execution.approvalId ? { approval: "completed" } : {}),
+              command: "failed",
+            },
+            errorCode: "background_execution_failed",
+            errorSummary: message.slice(0, 1_000),
+          },
+        });
+      }
+      if (executionId && (background?.state === "queued" || background?.state === "running")) {
+        store.workflows.transitionBackgroundJob({
+          executionId,
+          expectedState: background.state,
+          state: "failed",
+          finishedAt: timestamp,
+        });
+      }
+    }
+    store.failJob(job.id, message);
     return true;
   }
 }
@@ -952,6 +1002,14 @@ export function recoverAbandonedBackgroundWorkflows(store: ReturnType<typeof cre
     if (background.processPid) {
       try {
         process.kill(-background.processPid, "SIGTERM");
+        const forceKill = setTimeout(() => {
+          try {
+            process.kill(-(background.processPid as number), "SIGKILL");
+          } catch {
+            // The abandoned process group completed before escalation.
+          }
+        }, 2_000);
+        forceKill.unref?.();
       } catch {
         // The previous worker's process group is already gone.
       }

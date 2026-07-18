@@ -178,6 +178,7 @@ test("background workflows use the durable queue and recover abandoned supervisi
   const project = store.createProject({ path: workspace, name: "Background Project" });
   const background = command("background-version", "git", ["--version"]);
   background.executionMode = "background";
+  background.category = "check";
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -212,6 +213,7 @@ test("background workflows use the durable queue and recover abandoned supervisi
     assert.equal(await processNextJob(store, { workerInstanceId: "test-worker" }), true);
     assert.equal(store.workflows.get(queuedData.execution.id)?.execution.state, "completed");
     assert.equal(store.workflows.getBackgroundJob(queuedData.execution.id)?.state, "completed");
+    assert.equal(store.listCheckRuns(10, project.id)[0]?.status, "completed");
 
     const cancelled = JSON.parse((await request()).body).data as { execution: { id: string } };
     const cancel = await handle.inject({
@@ -222,6 +224,18 @@ test("background workflows use the durable queue and recover abandoned supervisi
     assert.equal(cancel.statusCode, 200, cancel.body);
     assert.equal(store.workflows.get(cancelled.execution.id)?.execution.state, "cancelled");
     assert.equal(store.workflows.getBackgroundJob(cancelled.execution.id)?.state, "cancelled");
+
+    const changed = JSON.parse((await request()).body).data as { execution: { id: string } };
+    store.projectRegistry.saveApprovedManifest(
+      project.id,
+      { ...manifest, commands: { background: { ...background, executionMode: "direct" } } },
+      "test"
+    );
+    assert.equal(await processNextJob(store, { workerInstanceId: "test-worker" }), true);
+    assert.equal(store.workflows.get(changed.execution.id)?.execution.state, "failed");
+    assert.equal(store.workflows.get(changed.execution.id)?.execution.errorCode, "background_execution_failed");
+    assert.equal(store.workflows.getBackgroundJob(changed.execution.id)?.state, "failed");
+    store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
 
     const abandoned = JSON.parse((await request()).body).data as { execution: { id: string } };
     const claimed = store.claimNextJob();
