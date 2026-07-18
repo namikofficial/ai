@@ -1,0 +1,25 @@
+[Unit]
+Description=AI Workbench web and API control plane
+Documentation=file:%h/Documents/code/ai/docs/RUNTIME_SUPERVISION.md
+After=network.target
+PartOf=ai-workbench.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Documents/code/ai
+EnvironmentFile=-%h/.config/ai-workbench/runtime.env
+Environment=PATH=%h/.local/share/pnpm:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env pnpm web
+ExecStartPost=/usr/bin/env bash scripts/wait-ready.sh
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=45
+TimeoutStopSec=20
+KillMode=control-group
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+UMask=0077
+
+[Install]
+WantedBy=ai-workbench.target

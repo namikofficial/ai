@@ -1,4 +1,5 @@
 import type { Router } from "express";
+import type { RuntimeHealth } from "../../../../../packages/contracts/src/index.ts";
 import type { ConfigSnapshot } from "../../../../../packages/shared/src/index.ts";
 import { json, sendJson } from "../response.ts";
 
@@ -7,6 +8,7 @@ export function registerHealthRoutes(
   deps: {
     buildHealthSnapshot: () => Record<string, unknown>;
     buildDeepHealthSnapshot: () => Promise<Record<string, unknown>>;
+    buildRuntimeHealth: () => Promise<RuntimeHealth>;
     config: ConfigSnapshot;
     listProjects: () => unknown[];
     dashboardSnapshot: () => {
@@ -20,17 +22,24 @@ export function registerHealthRoutes(
   }
 ) {
   router.get("/health", (_req, res) => sendJson(res, json("ok", deps.buildHealthSnapshot())));
+  router.get("/ready", (_req, res) => {
+    const snapshot = deps.buildHealthSnapshot();
+    const ready = snapshot.databaseReachable === true;
+    sendJson(res, json(ready ? "ok" : "error", { ready, databaseReachable: ready }), ready ? 200 : 503);
+  });
+  router.get("/runtime/health", async (_req, res) => {
+    const runtime = await deps.buildRuntimeHealth();
+    sendJson(res, json(runtime.ready ? "ok" : "error", runtime), runtime.ready ? 200 : 503);
+  });
   router.get("/health/deep", async (_req, res) => {
     const snapshot = await deps.buildDeepHealthSnapshot();
     const dependencies = snapshot.dependencies as
       | { qdrant?: { ok?: boolean }; models?: { ok?: boolean }; worker?: { ok?: boolean } }
       | undefined;
-    const ready =
-      Boolean(snapshot.databaseReachable) &&
-      dependencies?.qdrant?.ok !== false &&
-      dependencies?.models?.ok === true &&
-      dependencies?.worker?.ok === true;
-    sendJson(res, json("ok", { ...snapshot, ready, healthStatus: ready ? "ok" : "degraded" }), 200);
+    const ready = Boolean(snapshot.databaseReachable);
+    const optionalReady =
+      dependencies?.qdrant?.ok !== false && dependencies?.models?.ok === true && dependencies?.worker?.ok === true;
+    sendJson(res, json("ok", { ...snapshot, ready, healthStatus: ready && optionalReady ? "ok" : "degraded" }), 200);
   });
   router.get("/version", (_req, res) => sendJson(res, json("ok", { version: "0.1.0", build: "bootstrap" })));
   router.get("/config", (_req, res) =>

@@ -3,6 +3,7 @@ import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
+import { runtimeHealthSchema } from "../packages/contracts/src/index.ts";
 
 test("api: health and status are read-only and redacted", async () => {
   const tmpRuntime = join(process.cwd(), "tmp-api-test");
@@ -41,6 +42,54 @@ test("api: health and status are read-only and redacted", async () => {
     assert.equal(health.data.projectCount, 0);
   } finally {
     await handle.close();
+    rmSync(tmpRuntime, { recursive: true, force: true });
+  }
+});
+
+test("api: core readiness remains available when optional local runtimes are offline", async () => {
+  const tmpRuntime = join(process.cwd(), "tmp-runtime-health-test");
+  rmSync(tmpRuntime, { recursive: true, force: true });
+  mkdirSync(tmpRuntime, { recursive: true });
+  const previousModelUrl = process.env.AI_LOCAL_BASE_URL;
+  const previousEmbeddingUrl = process.env.AI_EMBEDDING_BASE_URL;
+  process.env.AI_LOCAL_BASE_URL = "http://127.0.0.1:1/v1";
+  process.env.AI_EMBEDDING_BASE_URL = "http://127.0.0.1:1/v1";
+
+  const handle = await startWorkbenchServer({
+    config: {
+      runtimeDir: tmpRuntime,
+      databasePath: join(tmpRuntime, "test.db"),
+      apiPort: 0,
+      qdrantEnabled: false,
+      qdrantUrl: null,
+    },
+  });
+
+  try {
+    const readyRes = await handle.inject({ method: "GET", url: "/ready" });
+    assert.equal(readyRes.statusCode, 200);
+    assert.deepEqual(JSON.parse(readyRes.body).data, { ready: true, databaseReachable: true });
+
+    const runtimeRes = await handle.inject({ method: "GET", url: "/runtime/health" });
+    assert.equal(runtimeRes.statusCode, 200);
+    const runtime = runtimeHealthSchema.parse(JSON.parse(runtimeRes.body).data);
+    assert.equal(runtime.ready, true);
+    assert.equal(runtime.state, "stale");
+    assert.equal(runtime.components.find((component) => component.id === "sqlite")?.ready, true);
+    assert.equal(runtime.components.find((component) => component.id === "model-manager")?.state, "offline");
+    assert.equal(runtime.components.find((component) => component.id === "qdrant")?.state, "unknown");
+
+    const deepRes = await handle.inject({ method: "GET", url: "/health/deep" });
+    assert.equal(deepRes.statusCode, 200);
+    const deep = JSON.parse(deepRes.body).data;
+    assert.equal(deep.ready, true);
+    assert.equal(deep.healthStatus, "degraded");
+  } finally {
+    await handle.close();
+    if (previousModelUrl === undefined) delete process.env.AI_LOCAL_BASE_URL;
+    else process.env.AI_LOCAL_BASE_URL = previousModelUrl;
+    if (previousEmbeddingUrl === undefined) delete process.env.AI_EMBEDDING_BASE_URL;
+    else process.env.AI_EMBEDDING_BASE_URL = previousEmbeddingUrl;
     rmSync(tmpRuntime, { recursive: true, force: true });
   }
 });

@@ -3,6 +3,11 @@ import { request as httpRequest } from "node:http";
 import * as path from "node:path";
 import express, { type Request } from "express";
 import { resolveConfig, resolveEmbeddingConfig } from "../../../packages/config/src/index.ts";
+import {
+  CONTROL_PLANE_SCHEMA_VERSION,
+  type RuntimeComponentHealth,
+  type RuntimeHealth,
+} from "../../../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
 import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import type {
@@ -169,6 +174,176 @@ async function buildDeepHealthSnapshot(
   };
 }
 
+function runtimeComponent(
+  checkedAt: string,
+  input: Omit<RuntimeComponentHealth, "checkedAt" | "capabilities"> & { capabilities?: string[] }
+): RuntimeComponentHealth {
+  return { ...input, checkedAt, capabilities: input.capabilities ?? [] };
+}
+
+async function buildRuntimeHealth(
+  store: ReturnType<typeof createStore>,
+  config: ConfigSnapshot
+): Promise<RuntimeHealth> {
+  const checkedAt = new Date().toISOString();
+  const base = buildHealthSnapshot(store, config);
+  const databaseReady = base.databaseReachable === true;
+  const modelBase = (process.env.AI_LOCAL_BASE_URL ?? "http://127.0.0.1:8080/v1").replace(/\/$/, "");
+  const embeddingBase = (process.env.AI_EMBEDDING_BASE_URL ?? "http://127.0.0.1:8081/v1").replace(/\/$/, "");
+  const [modelProbe, embeddingProbe, qdrantProbe] = await Promise.all([
+    probe(`${modelBase}/models`),
+    probe(`${embeddingBase}/models`),
+    config.qdrantEnabled
+      ? probe(config.qdrantUrl ? `${config.qdrantUrl.replace(/\/$/, "")}/collections` : null)
+      : Promise.resolve({ ok: false, latencyMs: 0, error: "disabled" }),
+  ]);
+  const modelIds = modelProbe.ok ? await readModelIds(`${modelBase}/models`) : [];
+  let workerAgeMs: number | null = null;
+  try {
+    const heartbeat = await stat(`${config.runtimeDir}/worker-heartbeat`);
+    workerAgeMs = Math.max(0, Math.round(Date.now() - heartbeat.mtimeMs));
+  } catch {
+    // Missing heartbeat is represented as an offline worker component.
+  }
+  const workerReady = workerAgeMs !== null && workerAgeMs < 15_000;
+  const observation = store.activeContext.getLatestObservation();
+  const desktopAgeMs = observation ? Math.max(0, Date.now() - Date.parse(observation.observedAt)) : null;
+  const desktopReady = desktopAgeMs !== null && desktopAgeMs < 30_000;
+  const modelState = modelProbe.ok ? (modelIds.length > 0 ? "ready" : "loading") : "offline";
+  const components: RuntimeComponentHealth[] = [
+    runtimeComponent(checkedAt, {
+      id: "workbench-api",
+      name: "Workbench API",
+      state: "ready",
+      processAlive: true,
+      ready: true,
+      latencyMs: 0,
+      detail: "API is accepting requests",
+      endpoint: config.apiUrl,
+      capabilities: ["api", "events", "registry"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "sqlite",
+      name: "Workbench SQLite",
+      state: databaseReady ? "ready" : "failed",
+      processAlive: null,
+      ready: databaseReady,
+      latencyMs: null,
+      detail: databaseReady ? "Canonical database is readable" : "Canonical database is unavailable",
+      endpoint: null,
+      capabilities: ["durable-state"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "worker",
+      name: "Background worker",
+      state: workerReady ? "ready" : workerAgeMs === null ? "offline" : "stale",
+      processAlive: workerReady ? true : null,
+      ready: workerReady,
+      latencyMs: workerAgeMs,
+      detail: workerAgeMs === null ? "Worker heartbeat is missing" : `Heartbeat age ${workerAgeMs}ms`,
+      endpoint: null,
+      capabilities: ["jobs", "indexing", "reflection"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "model-manager",
+      name: "Local model manager",
+      state: modelState,
+      processAlive: modelProbe.ok ? true : null,
+      ready: modelState === "ready",
+      latencyMs: modelProbe.latencyMs,
+      detail: modelProbe.ok
+        ? modelIds.length > 0
+          ? `${modelIds.length} model${modelIds.length === 1 ? "" : "s"} exposed`
+          : "Model manager is responding while models load"
+        : (modelProbe.error ?? "Local model manager is unavailable"),
+      endpoint: modelBase,
+      capabilities: ["local-inference"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "embeddings",
+      name: "Embeddings service",
+      state: embeddingProbe.ok ? "ready" : "offline",
+      processAlive: embeddingProbe.ok ? true : null,
+      ready: embeddingProbe.ok,
+      latencyMs: embeddingProbe.latencyMs,
+      detail: embeddingProbe.ok ? "Embeddings API is accepting requests" : (embeddingProbe.error ?? "Unavailable"),
+      endpoint: embeddingBase,
+      capabilities: ["embeddings"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "qdrant",
+      name: "Qdrant",
+      state: config.qdrantEnabled ? (qdrantProbe.ok ? "ready" : "offline") : "unknown",
+      processAlive: config.qdrantEnabled && qdrantProbe.ok ? true : null,
+      ready: config.qdrantEnabled && qdrantProbe.ok,
+      latencyMs: config.qdrantEnabled ? qdrantProbe.latencyMs : null,
+      detail: config.qdrantEnabled
+        ? qdrantProbe.ok
+          ? "Vector store is ready"
+          : (qdrantProbe.error ?? "Unavailable")
+        : "Disabled; SQLite FTS fallback is active",
+      endpoint: config.qdrantUrl,
+      capabilities: ["vector-search"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "mcp",
+      name: "MCP server",
+      state: "ready",
+      processAlive: null,
+      ready: true,
+      latencyMs: null,
+      detail: "Available on demand over stdio",
+      endpoint: null,
+      capabilities: ["mcp-stdio"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "desktop-bridge",
+      name: "Desktop observation bridge",
+      state: desktopReady ? "ready" : observation ? "stale" : "offline",
+      processAlive: desktopReady ? true : null,
+      ready: desktopReady,
+      latencyMs: desktopAgeMs,
+      detail: observation
+        ? `Last observation ${Math.round((desktopAgeMs ?? 0) / 1000)}s ago`
+        : "No desktop observation received",
+      endpoint: null,
+      capabilities: ["focused-window", "active-context"],
+    }),
+  ];
+  const optionalFailures = components.filter(
+    (component) => !component.ready && component.id !== "sqlite" && component.id !== "workbench-api"
+  );
+  const ready = databaseReady;
+  return {
+    schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
+    id: "runtime-local",
+    createdAt: checkedAt,
+    updatedAt: checkedAt,
+    origin: { source: "workbench", instanceId: null, legacyRef: null },
+    capabilities: ["core-readiness", "optional-dependencies", "component-health"],
+    state: ready ? (optionalFailures.length > 0 ? "stale" : "ready") : "failed",
+    ready,
+    checkedAt,
+    components,
+    blockers: [
+      ...(databaseReady
+        ? []
+        : [
+            {
+              code: "database_unavailable",
+              summary: "Canonical SQLite database is unavailable",
+              componentId: "sqlite",
+            },
+          ]),
+      ...optionalFailures.map((component) => ({
+        code: `${component.id.replaceAll("-", "_")}_degraded`,
+        summary: `${component.name} is ${component.state}`,
+        componentId: component.id,
+      })),
+    ],
+  };
+}
+
 function buildRuntimeForStore(store: ReturnType<typeof createStore>, cloudEnabled: boolean): ModelRuntime {
   return createModelRuntime({
     providers: store.models.listProviders(),
@@ -293,6 +468,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   registerHealthRoutes(healthRouter, {
     buildHealthSnapshot: () => buildHealthSnapshot(store, config),
     buildDeepHealthSnapshot: () => buildDeepHealthSnapshot(store, config),
+    buildRuntimeHealth: () => buildRuntimeHealth(store, config),
     config,
     listProjects: () => store.listProjects(),
     dashboardSnapshot: () => store.dashboardSnapshot(),

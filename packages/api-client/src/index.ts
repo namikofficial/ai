@@ -1,5 +1,11 @@
 import type { ProjectContextGraph } from "../../code-intelligence/src/index.ts";
-import type { ActiveContext, DesktopObservation, ProjectManifest, ProjectStatus } from "../../contracts/src/index.ts";
+import type {
+  ActiveContext,
+  DesktopObservation,
+  ProjectManifest,
+  ProjectStatus,
+  RuntimeHealth,
+} from "../../contracts/src/index.ts";
 import type {
   ActiveProjectSelection,
   ManifestProposal,
@@ -101,6 +107,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     healthDeep(): Promise<{ status: "ok" | "degraded"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, "/health/deep");
+    },
+    ready(): Promise<{ status: "ok" | "error"; data: { ready: boolean; databaseReachable: boolean } }> {
+      return requestJson(options.baseUrl, "/ready");
+    },
+    runtimeHealth(): Promise<{ status: "ok" | "error"; data: RuntimeHealth }> {
+      return requestJson(options.baseUrl, "/runtime/health");
     },
     config(): Promise<{ status: "ok"; data: ConfigSnapshot }> {
       return requestJson(options.baseUrl, "/config");

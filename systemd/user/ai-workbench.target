@@ -1,0 +1,8 @@
+[Unit]
+Description=Unified AI Workbench local runtime
+Documentation=file:%h/Documents/code/ai/docs/RUNTIME_SUPERVISION.md
+Wants=ai-workbench.service ai-workbench-worker.service
+After=ai-workbench.service ai-workbench-worker.service
+
+[Install]
+WantedBy=default.target
