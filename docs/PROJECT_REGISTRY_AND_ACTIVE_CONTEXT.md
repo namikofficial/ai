@@ -145,3 +145,14 @@ systemctl --user enable --now ai-workbench-desktop-observer.service
 ## Current compatibility boundary
 
 Kage, Wayle, Rofi, project resume and scratchpads have not been switched to these contracts yet. The Phase 4 status aggregation is available and tested, but these desktop clients remain operational legacy consumers until Phase 5 parity and rollback checks pass. The observer is additive and may be disabled without affecting terminal fallback.
+
+## Verification record
+
+Phase 2 and Phase 3 were reverified on 2026-07-18 with the canonical registry, proposal/import, selection, pinning,
+context precedence, tmux rejection, transient-window hysteresis, persistence, API, and cache tests. The focused suite
+passed 20 tests. The complete Workbench fast suite passed 367 tests after lint and strict TypeScript checking. The
+dotfiles shell/config guardrails and desktop adapter, canonical action, notification bridge, and workflow-launch tests
+also passed.
+
+This verifies the automated contract and compatibility boundary; it does not replace the still-required live
+Hyprland latency and focus-correlation acceptance run described in `CONTINUATION_PLAN.md`.
