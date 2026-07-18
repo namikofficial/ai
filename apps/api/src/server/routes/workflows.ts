@@ -1013,11 +1013,132 @@ export function registerWorkflowRoutes(
       json("ok", {
         ...execution,
         steps: deps.store.workflows.listStepExecutions(executionId),
+        recoveryOptions: execution.execution.recoveryWorkflowIds,
+        recoveries: deps.store.workflows.listRecoveries(executionId),
         approval: deps.store.workflows.getApprovalForExecution(executionId),
         launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)),
       })
     );
   });
+
+  router.post(
+    "/actions/executions/:executionId/recover",
+    asyncRoute(async (req, res) => {
+      const originalExecutionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const original = deps.store.workflows.get(originalExecutionId);
+      if (!original) {
+        sendJson(res, json("error", undefined, { message: "workflow execution not found" }), 404);
+        return;
+      }
+      if (!["failed", "blocked", "cancelled"].includes(original.execution.state)) {
+        sendJson(res, json("error", undefined, { message: "only terminal unsuccessful workflows can be recovered" }), 409);
+        return;
+      }
+      const body = (await readJsonBody(req)) as { workflowId?: unknown; requestedBy?: unknown };
+      const workflowId = typeof body.workflowId === "string" ? body.workflowId.trim() : "";
+      if (!workflowId || !original.execution.recoveryWorkflowIds.includes(workflowId)) {
+        sendJson(res, json("error", undefined, { message: "recovery workflow is not allowed by the failed execution" }), 409);
+        return;
+      }
+      const project = deps.store.getProject(original.execution.projectId);
+      const manifest = deps.store.projectRegistry.getManifest(original.execution.projectId);
+      const definition = deps.store.workflows.getDefinition(original.execution.projectId, workflowId);
+      if (!project || !manifest || !definition || manifest.path !== project.path) {
+        sendJson(res, json("error", undefined, { message: "canonical recovery workflow is unavailable" }), 409);
+        return;
+      }
+      const prepared = await prepareWorkflowPlan(withCanonicalWorkflowDefinitions(manifest), definition, {
+        allowMutating: true,
+        allowInteractive: true,
+      });
+      if (!prepared.ok) {
+        sendJson(res, json("error", undefined, { message: prepared.rejection.summary }), 409);
+        return;
+      }
+      if (
+        prepared.plan.steps.some(
+          (entry) => entry.step.executionMode === "terminal" || entry.step.executionMode === "tmux"
+        )
+      ) {
+        sendJson(res, json("error", undefined, { message: "interactive recovery requires a resumable desktop handoff" }), 409);
+        return;
+      }
+      const initialBase = createWorkflowExecution({
+        workflowId,
+        projectId: original.execution.projectId,
+        sessionId: original.execution.sessionId,
+        taskId: original.execution.taskId,
+        state: prepared.plan.approvalRequired ? "waiting" : prepared.plan.backgroundRequired ? "starting" : "running",
+        recoveryWorkflowIds: [...new Set(prepared.plan.steps.flatMap((entry) => entry.step.recoveryWorkflowIds))],
+        recoveryOfExecutionId: originalExecutionId,
+      });
+      const initial: WorkflowExecution = {
+        ...initialBase,
+        currentStepId: prepared.plan.approvalRequired ? "approval" : (prepared.plan.steps[0]?.step.id ?? null),
+        stepStates: {
+          ...(prepared.plan.approvalRequired ? { approval: "waiting" } : {}),
+          ...Object.fromEntries(prepared.plan.steps.map((entry) => [entry.step.id, "waiting"])),
+        },
+      };
+      let saved = deps.store.workflows.save({
+        execution: initial,
+        command: {
+          executable: "workflow-plan",
+          arguments: prepared.plan.steps.map((entry) => entry.step.id),
+          workingDirectory: project.path,
+        },
+        stdout: "",
+        stderr: "",
+        durationMs: 0,
+      });
+      const recovery = deps.store.workflows.createRecovery({
+        originalExecutionId,
+        recoveryExecutionId: initial.id,
+        workflowId,
+        requestedBy:
+          typeof body.requestedBy === "string" && body.requestedBy.trim() ? body.requestedBy.trim() : "api",
+      });
+      const recoveryEvent = createEvent(
+        "workflow.recovery_started",
+        { originalExecutionId, recoveryExecutionId: initial.id, workflowId },
+        {
+          projectId: initial.projectId,
+          sessionId: initial.sessionId,
+          taskId: initial.taskId,
+          agent: "workflow-recovery",
+          sourceService: "workbench-api",
+          summary: `Recovery workflow ${definition.name} started`,
+          correlationId: initial.id,
+          causationId: originalExecutionId,
+        }
+      );
+      deps.store.appendEvent(recoveryEvent);
+      deps.publish(recoveryEvent);
+      if (prepared.plan.approvalRequired) {
+        const context = await collectWorkflowPlanApprovalContext(prepared.plan);
+        const firstCommandContext = context.steps.find((entry) => entry.context !== null)?.context ?? null;
+        const approval = deps.store.workflows.requestApproval({
+          executionId: initial.id,
+          workflowId,
+          projectId: initial.projectId,
+          mutation: prepared.plan.mutation,
+          contextHash: workflowPlanApprovalContextHash(context),
+          branch: firstCommandContext?.branch ?? null,
+          baseCommit: firstCommandContext?.baseCommit ?? null,
+          reason: `${definition.name} recovery requires approval`,
+        });
+        saved = deps.store.workflows.save({ ...saved, execution: { ...initial, approvalId: approval.id } });
+        sendJson(res, json("ok", { ...saved, recovery, approval }), 202);
+        return;
+      }
+      if (prepared.plan.backgroundRequired) {
+        sendJson(res, json("ok", { ...enqueueBackgroundWorkflow(saved, recoveryEvent.id), recovery }), 202);
+        return;
+      }
+      saved = await executePreparedPlan(prepared.plan, initial, recoveryEvent.id);
+      sendJson(res, json("ok", { ...saved, recovery }), saved.execution.state === "completed" ? 200 : 422);
+    })
+  );
 
   router.post(
     "/actions/executions/:executionId/approve",
@@ -1049,7 +1170,7 @@ export function registerWorkflowRoutes(
       }
       const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
       const definition = deps.store.workflows.getDefinition(record.execution.projectId, record.execution.workflowId);
-      const preparedPlan = definition?.steps.length
+      const preparedPlan = definition && (definition.steps.length > 0 || record.execution.recoveryOfExecutionId !== null)
         ? await prepareWorkflowPlan(canonicalManifest, definition, { allowMutating: true, allowInteractive: true })
         : null;
       const prepared = preparedPlan

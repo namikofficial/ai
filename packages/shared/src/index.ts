@@ -467,6 +467,7 @@ export type EventType =
   | "validation.failed"
   | "workflow.queued"
   | "workflow.definition_saved"
+  | "workflow.recovery_started"
   | "workflow.started"
   | "workflow.attempt_completed"
   | "workflow.step_started"

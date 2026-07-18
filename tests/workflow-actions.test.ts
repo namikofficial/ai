@@ -723,6 +723,8 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
   const project = store.createProject({ path: workspace, name: "Workflow Policy Project" });
   const retry = command("retry", "false", []);
   retry.retryLimit = 2;
+  retry.recoveryWorkflowIds = ["recover"];
+  const recover = command("recover", "true", []);
   const missingArtifact = command("missing-artifact", "true", []);
   missingArtifact.expectedArtifacts = [{ id: "report", path: "report.json", kind: "file", required: true }];
   const unsafeRetry = command("unsafe-retry", "git", ["tag", "unsafe-retry"], "project_write");
@@ -738,7 +740,7 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    commands: { retry, missingArtifact, unsafeRetry, escapingArtifact },
+    commands: { retry, recover, missingArtifact, unsafeRetry, escapingArtifact },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
   const handle = await startWorkbenchServer({
@@ -757,12 +759,39 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     const retried = await request("retry");
     assert.equal(retried.statusCode, 422, retried.body);
     const retriedExecution = JSON.parse(retried.body).data.execution as {
+      id: string;
       stepStates: Record<string, string>;
     };
     assert.equal(retriedExecution.stepStates["command.attempt.1"], "failed");
     assert.equal(retriedExecution.stepStates["command.attempt.2"], "failed");
     assert.equal(retriedExecution.stepStates["command.attempt.3"], "failed");
     assert.equal(store.listEvents().filter((event) => event.type === "workflow.attempt_completed").length, 3);
+
+    const recovered = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${retriedExecution.id}/recover`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { workflowId: "recover", requestedBy: "workflow-policy-test" },
+    });
+    assert.equal(recovered.statusCode, 200, recovered.body);
+    const recoveryExecution = JSON.parse(recovered.body).data.execution as {
+      id: string;
+      state: string;
+      recoveryOfExecutionId: string;
+    };
+    assert.equal(recoveryExecution.state, "completed");
+    assert.equal(recoveryExecution.recoveryOfExecutionId, retriedExecution.id);
+    const originalStatus = await handle.inject({
+      method: "GET",
+      url: `/actions/executions/${retriedExecution.id}`,
+      headers: { accept: "application/json" },
+    });
+    const originalStatusData = JSON.parse(originalStatus.body).data as {
+      recoveryOptions: string[];
+      recoveries: Array<{ recoveryExecutionId: string }>;
+    };
+    assert.deepEqual(originalStatusData.recoveryOptions, ["recover"]);
+    assert.equal(originalStatusData.recoveries[0]?.recoveryExecutionId, recoveryExecution.id);
 
     const artifact = await request("missing-artifact");
     assert.equal(artifact.statusCode, 422, artifact.body);
