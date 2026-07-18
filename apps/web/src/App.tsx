@@ -19,6 +19,7 @@ import {
   PlannerPage,
   ProjectDetailPage,
   ProjectsPage,
+  ProjectWorkPage,
   PromptDetailPage,
   PromptLabPage,
   PromptsPage,
@@ -26,6 +27,7 @@ import {
   RetrievalQueryDetailPage,
   ReviewDetailPage,
   ReviewsPage,
+  RunReviewPage,
   SessionDetailPage,
   SessionsPage,
   SettingsPage,
@@ -347,7 +349,7 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
-          <Route path="/projects/:projectId/work" element={<DevPage />} />
+          <Route path="/projects/:projectId/work" element={<ProjectWorkPage />} />
           <Route path="/projects/:projectId/ask" element={<AskPage />} />
           <Route path="/projects/:projectId/planner" element={<PlannerPage />} />
           <Route path="/projects/:projectId/checks" element={<ChecksPage />} />
@@ -371,6 +373,7 @@ export function App() {
           <Route path="/eval" element={<EvalPage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/reviews/:reviewId" element={<ReviewDetailPage />} />
+          <Route path="/runs/:runId" element={<RunReviewPage />} />
           <Route path="/dev" element={<DevPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/mcp" element={<McpPage />} />

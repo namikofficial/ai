@@ -2995,6 +2995,275 @@ function SettingsPage(): ReactNode {
   );
 }
 
+function ProjectWorkPage(): ReactNode {
+  const { projectId = "" } = useParams();
+  const resource = useResource(
+    () =>
+      Promise.all([
+        api.getProjectStatus(projectId),
+        api.listSessions(),
+        api.listTasks(),
+        api.listDevRuns(projectId),
+        api.listChecks(),
+        api.listReviews(),
+      ]),
+    [projectId]
+  );
+
+  if (resource.error) {
+    return (
+      <PageShell title="Project Work" subtitle={projectId}>
+        <Panel title="Work unavailable" span={12}>
+          <EmptyState title="Unable to load project work" body={resource.error} />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  const status = resource.data?.[0].data ?? null;
+  const sessions = (resource.data?.[1].data ?? []).filter((session) => session.projectId === projectId);
+  const sessionIds = new Set(sessions.map((session) => session.id));
+  const tasks = (resource.data?.[2].data ?? []).filter((task) => sessionIds.has(task.sessionId));
+  const runs = resource.data?.[3].data.runs ?? [];
+  const checks = (resource.data?.[4].data ?? []).filter((check) => check.projectId === projectId);
+  const reviews = (resource.data?.[5].data ?? []).filter((review) => review.projectId === projectId);
+  const work = status?.activeWork ?? null;
+
+  return (
+    <PageShell title={`${status?.project?.name ?? "Project"} Work`} subtitle="Plan → task → run → check → review">
+      <StatCard label="Current task" value={work?.taskTitle ?? "None"} detail={work?.state ?? "unknown"} />
+      <StatCard label="Active run" value={work?.runId ?? "None"} detail={work?.resumable ? "resumable" : "idle"} />
+      <StatCard
+        label="Checks"
+        value={`${status?.checks.failed ?? 0} failed`}
+        detail={`${status?.checks.running ?? 0} running`}
+      />
+      <StatCard
+        label="Approval"
+        value={work?.approvalId ? "Pending" : "None"}
+        detail={work?.blocker?.summary ?? "No active blocker"}
+      />
+
+      <Panel title="Current goal and next actions" span={8}>
+        {work ? (
+          <div className="stack">
+            <strong>{work.goal ?? "No goal recorded"}</strong>
+            <div className="tiny">{work.taskTitle ?? "No active task"}</div>
+            {work.taskProgress ? (
+              <div className="tiny">
+                Progress: {work.taskProgress.completed}/{work.taskProgress.total}
+              </div>
+            ) : null}
+            {work.blocker ? <div className="error">{work.blocker.summary}</div> : null}
+            <div className="row">
+              <a className="button-link" href={`/projects/${projectId}/ask`}>
+                Ask
+              </a>
+              <a className="button-link" href={`/projects/${projectId}/planner`}>
+                Planner
+              </a>
+              <a className="button-link" href={`/projects/${projectId}/checks`}>
+                Checks
+              </a>
+              <a className="button-link" href={`/dev?projectId=${encodeURIComponent(projectId)}`}>
+                New dev run
+              </a>
+            </div>
+          </div>
+        ) : (
+          <EmptyState title="No active work" body="Start with Planner or create a development run for this project." />
+        )}
+      </Panel>
+
+      <Panel title="Task graph" span={4}>
+        <div className="list">
+          {tasks.length > 0 ? (
+            tasks.slice(0, 12).map((task) => (
+              <a className="list-item" href={`/tasks/${task.id}`} key={task.id}>
+                <div className="row">
+                  <strong>{task.title}</strong>
+                  <Badge tone={task.status === "failed" || task.status === "blocked" ? "bad" : "neutral"}>
+                    {task.status}
+                  </Badge>
+                </div>
+                <div className="tiny">
+                  priority {task.priority} · risk {task.risk}
+                </div>
+              </a>
+            ))
+          ) : (
+            <EmptyState title="No tasks" body="A generated plan will create the project task graph." />
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Development runs" span={8}>
+        <div className="list">
+          {runs.length > 0 ? (
+            runs.slice(0, 10).map((run) => (
+              <a className="list-item" href={`/runs/${String(run.id ?? "")}`} key={String(run.id ?? "run")}>
+                <div className="row">
+                  <strong>{String(run.goal ?? run.id ?? "Development run")}</strong>
+                  <Badge
+                    tone={
+                      run.status === "failed" || run.status === "blocked"
+                        ? "bad"
+                        : run.status === "completed" || run.status === "applied"
+                          ? "good"
+                          : "warn"
+                    }
+                  >
+                    {String(run.status ?? "unknown")}
+                  </Badge>
+                </div>
+                <div className="tiny">{String(run.diffSummary ?? "No diff summary yet")}</div>
+              </a>
+            ))
+          ) : (
+            <EmptyState title="No development runs" body="Start an isolated run from this Work view." />
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Checks and reviews" span={4}>
+        <div className="list">
+          {checks.slice(0, 6).map((check) => (
+            <div className="list-item" key={check.id}>
+              <div className="row">
+                <strong>{check.name}</strong>
+                <Badge tone={check.status === "failed" ? "bad" : check.status === "completed" ? "good" : "warn"}>
+                  {check.status}
+                </Badge>
+              </div>
+            </div>
+          ))}
+          {reviews.slice(0, 4).map((review) => (
+            <a className="list-item" href={`/reviews/${String(review.id ?? "")}`} key={String(review.id ?? "review")}>
+              <strong>{String(review.title ?? "Review")}</strong>
+              <div className="tiny">{String(review.summary ?? "")}</div>
+            </a>
+          ))}
+          {checks.length === 0 && reviews.length === 0 ? (
+            <EmptyState title="No evidence yet" body="Check results and reviews will be grouped here." />
+          ) : null}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
+function RunReviewPage(): ReactNode {
+  const { runId = "" } = useParams();
+  const resource = useResource(() => Promise.all([api.getDevRun(runId), api.getDevRunDiff(runId)]), [runId]);
+  const [busy, setBusy] = useState<"approve" | "apply" | "cancel" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const detail = resource.data?.[0].data ?? null;
+  const diff = resource.data?.[1].data ?? null;
+  const run = (detail?.run as Record<string, unknown> | undefined) ?? null;
+  const edits = (detail?.edits as Array<Record<string, unknown>> | undefined) ?? [];
+  const checks = (run?.checks as Array<Record<string, unknown>> | undefined) ?? [];
+  const status = String(run?.status ?? "loading");
+
+  const mutate = async (action: "approve" | "apply" | "cancel") => {
+    setBusy(action);
+    setError(null);
+    try {
+      if (action === "approve") await api.approveDevRun(runId);
+      if (action === "apply") await api.applyDevRun(runId);
+      if (action === "cancel") await api.cancelDevRun(runId);
+      resource.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (resource.error) {
+    return (
+      <PageShell title="Run review" subtitle={runId}>
+        <Panel title="Run unavailable" span={12}>
+          <EmptyState title="Unable to load run" body={resource.error} />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  return (
+    <PageShell title="Run review" subtitle={runId}>
+      <Panel title="Summary and approval" span={12}>
+        <div className="row">
+          <div>
+            <strong>{String(run?.goal ?? "Loading run")}</strong>
+            <div className="tiny">{String(run?.summary ?? run?.diffSummary ?? "No summary yet")}</div>
+          </div>
+          <Badge tone={status === "failed" || status === "blocked" ? "bad" : "neutral"}>{status}</Badge>
+        </div>
+        {error ? <div className="error">{error}</div> : null}
+        <div className="row">
+          {status === "awaiting_approval" ? (
+            <button type="button" disabled={busy !== null} onClick={() => void mutate("approve")}>
+              {busy === "approve" ? "Approving..." : "Approve"}
+            </button>
+          ) : null}
+          {status === "approved" ? (
+            <button type="button" disabled={busy !== null} onClick={() => void mutate("apply")}>
+              {busy === "apply" ? "Applying..." : "Apply reviewed patch"}
+            </button>
+          ) : null}
+          {["queued", "planning", "editing", "checking", "repairing", "awaiting_approval"].includes(status) ? (
+            <button className="secondary" type="button" disabled={busy !== null} onClick={() => void mutate("cancel")}>
+              Cancel
+            </button>
+          ) : null}
+        </div>
+      </Panel>
+
+      <Panel title="Diff" span={8}>
+        {diff?.diffText ? (
+          <pre className="diff-view">{String(diff.diffText)}</pre>
+        ) : (
+          <EmptyState title="No diff" body="The proposed patch will appear here before it can be applied." />
+        )}
+      </Panel>
+      <Panel title="Changed files" span={4}>
+        <div className="list">
+          {edits.length > 0 ? (
+            edits.map((edit) => (
+              <div className="list-item" key={String(edit.id ?? edit.path ?? "edit")}>
+                <strong>{String(edit.path ?? "unknown file")}</strong>
+                <div className="tiny">{String(edit.reason ?? "")}</div>
+                <Badge>{String(edit.status ?? "proposed")}</Badge>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No changed files" body="This run has not proposed edits yet." />
+          )}
+        </div>
+      </Panel>
+      <Panel title="Checks and warnings" span={12}>
+        <div className="list">
+          {checks.length > 0 ? (
+            checks.map((check, index) => (
+              <div className="list-item" key={String(check.name ?? index)}>
+                <div className="row">
+                  <strong>{String(check.name ?? "check")}</strong>
+                  <Badge tone={check.status === "completed" ? "good" : "bad"}>
+                    {String(check.status ?? "unknown")}
+                  </Badge>
+                </div>
+                <div className="tiny">{String(check.stderr ?? check.stdout ?? "")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No checks" body="Validation evidence will be shown here before approval." />
+          )}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
 function DevPage(): ReactNode {
   const { projectId: routeProjectId } = useParams();
   const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
@@ -3325,6 +3594,7 @@ export {
   PlannerPage,
   ProjectDetailPage,
   ProjectsPage,
+  ProjectWorkPage,
   PromptDetailPage,
   PromptLabPage,
   PromptsPage,
@@ -3332,6 +3602,7 @@ export {
   RetrievalQueryDetailPage,
   ReviewDetailPage,
   ReviewsPage,
+  RunReviewPage,
   SessionDetailPage,
   SessionsPage,
   SettingsPage,
