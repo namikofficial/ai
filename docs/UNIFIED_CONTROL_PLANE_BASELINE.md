@@ -190,7 +190,9 @@ At discovery time:
 
 - Typecheck passed.
 - Focused schema/config/migration/event tests passed.
-- Repository-wide Biome was already failing with 93 errors and 208 warnings, mainly existing formatting and import-order diagnostics. New contract files are checked independently and must remain clean.
+- Repository-wide Biome was failing with 93 errors and 208 warnings, mainly formatting, import-order, unsafe type assertions and stale React dependencies.
+
+After the Phase 1 cleanup, repository-wide `pnpm lint`, `pnpm typecheck` and the full fast test suite pass. The cleanup preserved lint rules rather than suppressing the diagnostics.
 
 ## Migration backup procedure
 
@@ -218,6 +220,17 @@ No destructive migration is authorized until an automated backup command and res
 - The Python RAG database needs a dry-run inventory before any import.
 - Qdrant remains optional and rebuildable; SQLite is the baseline.
 
+## Phase 2 registry foundation
+
+Migration `0013_control_plane_registry` introduces the first canonical SQLite ownership slice:
+
+- `project_manifests` stores only validated `ProjectManifest` contracts.
+- `project_manifest_proposals` keeps detected or imported changes pending until explicitly approved or rejected.
+- `active_project_selection` stores one durable selected project with an optional workspace, session or persistent pin scope.
+- `ProjectRegistryRepo` validates project identity, rejects unknown projects, resolves proposals transactionally and returns public contract types rather than database rows.
+
+This foundation does not yet alter the existing `/projects` API, desktop cache, Kage, Rofi or Wayle. Existing consumers remain compatible until API/import/cache parity exists.
+
 ## Next coherent slice
 
-Phase 2 should add migrations and repositories for canonical manifests, selection/pins and import proposals, then expose import/diff/approve/export operations and an atomic XDG read-only cache. Wayle and Kage must remain unchanged until that status path is working and tested.
+Continue Phase 2 by exposing registry read/import/diff/approve/export operations, building the legacy `project-profile.sh` dry-run importer, and generating an atomic XDG read-only cache. Automated backup/restore must be implemented before applying this migration to a durable user database. Wayle and Kage must remain unchanged until that status path is working and tested.

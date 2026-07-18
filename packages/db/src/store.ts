@@ -79,6 +79,7 @@ import {
   createExecutionRepo,
   createMemoryRepo,
   createModelsRepo,
+  createProjectRegistryRepo,
   createPromptLabRepo,
   createPromptRepo,
   createRetrievalRepo,
@@ -317,6 +318,7 @@ export function createStore(db: DatabaseSync) {
   const evalRepo = createEvalRepo(db);
   const promptLabRepo = createPromptLabRepo(db);
   const promptRepo = createPromptRepo(db);
+  const projectRegistryRepo = createProjectRegistryRepo(db);
   const devRunsRepo = createDevRunsRepo(db);
   const executionRepo = createExecutionRepo(db);
   const embeddingCacheRepo = createEmbeddingCacheRepo(db);
@@ -2246,6 +2248,7 @@ export function createStore(db: DatabaseSync) {
     skills: skillsRepo,
     evals: evalRepo,
     promptLab: promptLabRepo,
+    projectRegistry: projectRegistryRepo,
     dev: devRunsRepo,
     execution: executionRepo,
   };

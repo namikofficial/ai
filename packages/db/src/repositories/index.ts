@@ -8,6 +8,7 @@ export { createEvalRepo, type EvalRepo } from "./eval.ts";
 export { createExecutionRepo, type ExecutionRepo } from "./execution.ts";
 export { createMemoryRepo, type MemoryRepo } from "./memory.ts";
 export { createModelsRepo, type ModelsRepo } from "./models.ts";
+export { createProjectRegistryRepo, type ProjectRegistryRepo } from "./project-registry.ts";
 export { createPromptLabRepo, type PromptLabRepo } from "./prompt-lab.ts";
 export { createPromptRepo, type PromptRepo } from "./prompts.ts";
 export { createRetrievalRepo, type RetrievalRepo } from "./retrieval.ts";

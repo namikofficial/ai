@@ -6,7 +6,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { listMigrations, runMigrations } from "../packages/db/src/migrate.ts";
 
-test("migrations list includes 0001 through 0010", () => {
+test("migrations list includes the complete control-plane baseline", () => {
   const migrations = listMigrations();
   const versions = migrations.map((entry) => entry.version);
   assert.ok(versions.includes("0001_init"));
@@ -21,6 +21,7 @@ test("migrations list includes 0001 through 0010", () => {
   assert.ok(versions.includes("0010_check_run_evidence"));
   assert.ok(versions.includes("0011_memory_events"));
   assert.ok(versions.includes("0012_memory_graph"));
+  assert.ok(versions.includes("0013_control_plane_registry"));
 });
 
 test("migrations apply cleanly and create all expected tables", async () => {
@@ -29,7 +30,7 @@ test("migrations apply cleanly and create all expected tables", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 12);
+    assert.equal(result.applied.length, 13);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -49,6 +50,9 @@ test("migrations apply cleanly and create all expected tables", async () => {
     assert.ok(tableNames.includes("session_replays"), "session_replays table must exist");
     assert.ok(tableNames.includes("prompt_lab_runs"), "prompt_lab_runs table must exist");
     assert.ok(tableNames.includes("prompt_lab_results"), "prompt_lab_results table must exist");
+    assert.ok(tableNames.includes("project_manifests"), "project_manifests table must exist");
+    assert.ok(tableNames.includes("project_manifest_proposals"), "project_manifest_proposals table must exist");
+    assert.ok(tableNames.includes("active_project_selection"), "active_project_selection table must exist");
 
     const executionCommandColumns = db.prepare("PRAGMA table_info(execution_commands)").all() as Array<{
       name: string;
