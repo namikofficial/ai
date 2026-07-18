@@ -85,6 +85,7 @@ import {
   createPromptRepo,
   createRetrievalRepo,
   createSkillsRepo,
+  createWorkflowsRepo,
 } from "./repositories/index.ts";
 
 type Row = Record<string, unknown>;
@@ -367,6 +368,7 @@ export function createStore(db: DatabaseSync) {
   const devRunsRepo = createDevRunsRepo(db);
   const executionRepo = createExecutionRepo(db);
   const embeddingCacheRepo = createEmbeddingCacheRepo(db);
+  const workflowsRepo = createWorkflowsRepo(db);
 
   seedDefaultModelCatalog(modelsRepo);
 
@@ -2352,6 +2354,7 @@ export function createStore(db: DatabaseSync) {
     projectRegistry: projectRegistryRepo,
     dev: devRunsRepo,
     execution: executionRepo,
+    workflows: workflowsRepo,
   };
   return store;
 }

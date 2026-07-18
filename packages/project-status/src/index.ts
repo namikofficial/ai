@@ -336,8 +336,18 @@ export function recommendedActionsFromManifest(
   now = new Date().toISOString()
 ): RecommendedAction[] {
   return Object.entries(manifest.commands)
-    .map(
-      ([key, command], index): RecommendedAction => ({
+    .map(([key, command], index): RecommendedAction => {
+      const disabledReason =
+        command.mutation !== "read_only"
+          ? "Requires approval in Workbench"
+          : command.interactive
+            ? "Requires an interactive terminal"
+            : command.environmentRefs.length > 0
+              ? "Requires approved environment references"
+              : command.requiresCapabilities.length > 0
+                ? `Requires capabilities: ${command.requiresCapabilities.join(", ")}`
+                : null;
+      return {
         schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
         id: `action:${manifest.id}:${key}`,
         createdAt: now,
@@ -348,15 +358,15 @@ export function recommendedActionsFromManifest(
         label: command.name,
         description: command.description,
         category: command.category,
-        state: "ready",
+        state: disabledReason ? "waiting" : "ready",
         workflowId: command.id,
         deepLink: null,
-        disabledReason: null,
+        disabledReason,
         priority: index,
         mutation: command.mutation,
         approvalRequired: command.mutation !== "read_only",
-      })
-    )
+      };
+    })
     .sort((left, right) => left.priority - right.priority || left.label.localeCompare(right.label));
 }
 

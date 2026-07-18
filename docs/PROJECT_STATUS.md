@@ -32,6 +32,9 @@ The cache is a projection, not a durable state owner. Canonical mutations still 
 | `ai context status --compact` | Compact selected-project status with offline fallback |
 | `ai project status <id>` | Explicit-project status |
 | `ai project status <id> --compact` | Explicit compact status |
+| `GET /actions?projectId=<id>` | Canonical approved actions with availability reasons |
+| `POST /actions/<workflow-id>/run` | Policy-gated canonical workflow execution |
+| `ai action list` / `ai action run <id>` | CLI action discovery and execution |
 
 Successful requests atomically refresh `${XDG_CACHE_HOME:-~/.cache}/ai-workbench/project-status-v1.json`. The payload records `generatedAt` and `staleAfter`. CLI fallback explicitly wraps cached data with `status: offline` and `stale: true`; it never fabricates a successful mutation.
 
@@ -61,13 +64,20 @@ Runtime state comes from `docker compose ps --all --format json`. This keeps vol
 
 Explicit `ProjectManifest.packageManager` always wins. Bounded root-marker detection supports pnpm, npm, Yarn, Bun, Cargo, uv, Poetry, Gradle, Maven, Go, Make, and Just without repository-wide scanning.
 
-Recommended actions are projected only from approved canonical manifest commands. The status layer does not invent `npm run dev` or execute a command. Execution remains behind the workflow policy and approval system.
+Recommended actions are projected only from approved canonical manifest commands. The status layer does not invent
+`npm run dev` or execute a command. Rofi uses this projection for labels and disabled reasons, while all mutation is
+submitted back to Workbench. The current executor accepts only non-interactive, read-only direct workflows and
+persists their structured result; every other mode fails closed pending its approval/terminal adapter. See
+[WORKFLOW_EXECUTION.md](./WORKFLOW_EXECUTION.md).
 
 ## Active work and check scoping
 
 The status builder scopes sessions, tasks, development runs, and checks to the selected or explicitly requested project. It exposes the latest active task/run, task progress, branch, involved files, model profile, blockers, and resumability. Check aggregation uses the latest result per check name and does not leak results from another project.
 
-The runtime section currently proves Workbench API readiness only. Model manager, embeddings, Qdrant, index worker, MCP, and desktop-bridge readiness remain Phase 9 supervision work and must not be inferred from an open port.
+The runtime section uses the normalized `RuntimeHealth` projection for API/database readiness plus worker, model
+manager, embeddings, optional Qdrant, MCP, desktop bridge, and event-stream state. Optional offline components
+degrade capabilities without making the canonical registry unavailable; an open port alone is never considered
+readiness.
 
 ## Verification
 
@@ -82,4 +92,8 @@ The regression suite uses command-runner fakes for Docker isolation, parser fixt
 
 ## Compatibility boundary
 
-The first Phase 5 compatibility slice is implemented in the dotfiles repository: Wayle’s grouped Work chips, Kage status output, the Rofi cockpit, project resume, AI helper context, and AI/log scratchpad launch prefer this compact cache. Kage’s legacy detector and cache remain available only as an explicit offline/rollback fallback. Canonical workflow execution and manual desktop parity checks must pass before those duplicated probes are retired.
+The Phase 5 compatibility slice is implemented in the dotfiles repository: Wayle’s grouped Work chips, Kage status
+output, the Rofi cockpit, project resume, AI helper context, and AI/log scratchpad launch prefer this compact cache.
+Rofi can execute available canonical read-only workflows through the API; unavailable actions display their policy
+reason. Kage’s legacy detector/cache remain an explicit offline rollback fallback until mutating/interactive workflow
+parity and manual desktop checks pass.

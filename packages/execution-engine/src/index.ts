@@ -50,6 +50,7 @@ import {
 
 export * from "./files.ts";
 export * from "./shell.ts";
+export * from "./workflows.ts";
 export * from "./worktree.ts";
 
 export interface ExecutionEventEmitter {

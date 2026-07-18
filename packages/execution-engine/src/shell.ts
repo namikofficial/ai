@@ -6,7 +6,7 @@
 
 import { spawn } from "node:child_process";
 
-export type CommandStatus = "running" | "completed" | "failed" | "blocked";
+export type CommandStatus = "running" | "completed" | "failed" | "blocked" | "cancelled";
 
 export interface CommandSpec {
   id: string;
@@ -193,6 +193,71 @@ const DENIED_BINARIES = new Set([
   "service",
 ]);
 
+const ALLOWED_BINARIES = new Set([
+  "biome",
+  "bun",
+  "cargo",
+  "docker",
+  "echo",
+  "eslint",
+  "false",
+  "git",
+  "go",
+  "gradle",
+  "gradlew",
+  "jest",
+  "just",
+  "make",
+  "mvn",
+  "mvnw",
+  "node",
+  "npm",
+  "osv-scanner",
+  "playwright",
+  "pnpm",
+  "poetry",
+  "printenv",
+  "printf",
+  "pytest",
+  "python",
+  "python3",
+  "ruff",
+  "semgrep",
+  "true",
+  "tsc",
+  "uv",
+  "vitest",
+  "yarn",
+]);
+
+const SAFE_ENVIRONMENT_KEYS = [
+  "PATH",
+  "HOME",
+  "USER",
+  "LOGNAME",
+  "SHELL",
+  "TERM",
+  "LANG",
+  "LC_ALL",
+  "TMPDIR",
+  "XDG_RUNTIME_DIR",
+  "CI",
+  "NO_COLOR",
+  "FORCE_COLOR",
+] as const;
+
+export function buildSafeCommandEnvironment(
+  source: NodeJS.ProcessEnv = process.env,
+  additions: Record<string, string> = {}
+): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  for (const key of SAFE_ENVIRONMENT_KEYS) {
+    const value = source[key];
+    if (value !== undefined) environment[key] = value;
+  }
+  return { ...environment, ...additions };
+}
+
 const DENIED_ARG_PATTERNS: RegExp[] = [
   /\$\(/,
   /`/,
@@ -334,6 +399,7 @@ export interface RunAllowedCommandInput {
   command: CommandSpec;
   timeoutMs?: number;
   env?: Record<string, string>;
+  signal?: AbortSignal;
 }
 
 export interface RunAllowedCommandResult {
@@ -357,6 +423,9 @@ export function renderCommand(command: CommandSpec): string {
 }
 
 export function isCommandSafe(command: CommandSpec): { safe: boolean; reason: string } {
+  if (!ALLOWED_BINARIES.has(command.binary)) {
+    return { safe: false, reason: `binary ${command.binary} is not in the command allowlist` };
+  }
   if (DENIED_BINARIES.has(command.binary)) {
     return { safe: false, reason: `binary ${command.binary} is not allowed` };
   }
@@ -367,6 +436,12 @@ export function isCommandSafe(command: CommandSpec): { safe: boolean; reason: st
     if (/^--?[^=]*[|&;()<>]/.test(arg)) {
       return { safe: false, reason: `argument ${arg} contains shell metacharacter` };
     }
+  }
+  if (
+    (command.binary === "node" && command.args.some((arg) => arg === "-e" || arg === "--eval")) ||
+    ((command.binary === "python" || command.binary === "python3") && command.args.includes("-c"))
+  ) {
+    return { safe: false, reason: `inline code execution is not allowed for ${command.binary}` };
   }
   return { safe: true, reason: "ok" };
 }
@@ -416,18 +491,61 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
       blockedReason: safety.reason,
     };
   }
+  if (input.signal?.aborted) {
+    return {
+      name: input.command.id,
+      command: renderCommand(input.command),
+      cwd: input.cwd,
+      status: "cancelled",
+      exitCode: null,
+      stdout: "",
+      stderr: "",
+      durationMs: 0,
+      parsedErrors: [],
+      affectedFiles: [],
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      blockedReason: "command cancelled before launch",
+    };
+  }
   return new Promise<RunAllowedCommandResult>((resolve) => {
     const child = spawn(input.command.binary, input.command.args, {
       cwd: input.cwd,
-      env: { ...process.env, ...(input.env ?? {}) },
+      env: buildSafeCommandEnvironment(process.env, input.env ?? {}),
       stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
     });
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const terminateProcessGroup = (): void => {
+      if (process.platform !== "win32" && child.pid) {
+        const processGroupId = child.pid;
+        try {
+          process.kill(-processGroupId, "SIGTERM");
+        } catch {
+          child.kill("SIGTERM");
+        }
+        const forceKillTimer = setTimeout(() => {
+          try {
+            process.kill(-processGroupId, "SIGKILL");
+          } catch {
+            // The process group already exited.
+          }
+        }, 2_000);
+        forceKillTimer.unref?.();
+      } else {
+        child.kill("SIGTERM");
+      }
+    };
+    const onAbort = (): void => {
+      terminateProcessGroup();
+      settle("cancelled", null, "command cancelled");
+    };
     const settle = (status: CommandStatus, exitCode: number | null, blockedReason: string | null): void => {
       if (settled) return;
       settled = true;
+      input.signal?.removeEventListener("abort", onAbort);
       const evidence = parseCheckEvidence(`${stderr}\n${stdout}`);
       resolve({
         name: input.command.id,
@@ -460,9 +578,10 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
       }
     });
     const timer = setTimeout(() => {
-      child.kill("SIGTERM");
+      terminateProcessGroup();
       settle("failed", null, `command exceeded ${timeoutMs}ms timeout`);
     }, timeoutMs);
+    input.signal?.addEventListener("abort", onAbort, { once: true });
     child.on("error", (error: Error) => {
       clearTimeout(timer);
       settle("failed", null, error.message);

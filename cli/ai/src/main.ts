@@ -56,6 +56,8 @@ function printUsage(): void {
   ai context explain "<question>" --project <project>
   ai context status [--json] [--compact]
   ai context explain
+  ai action list [--project <project-id>]
+  ai action run <workflow-id> [--project <project-id>] [--session <session-id>] [--task <task-id>]
   ai config show --project <project>
   ai config init --project <project>
   ai config validate --project <project>
@@ -703,6 +705,27 @@ async function run(): Promise<void> {
       printJson(result);
       return;
     }
+  }
+
+  if (command === "action") {
+    const subcommand = positionals.shift();
+    if (subcommand === "list") {
+      printJson(await client.listActions(options.project));
+      return;
+    }
+    if (subcommand === "run") {
+      const workflowId = positionals.shift();
+      if (!workflowId) throw new Error("action run requires a workflow id");
+      printJson(
+        await client.runAction(workflowId, {
+          ...(options.project ? { projectId: options.project } : {}),
+          ...(options.session ? { sessionId: options.session } : {}),
+          ...(options.task ? { taskId: options.task } : {}),
+        })
+      );
+      return;
+    }
+    throw new Error("action requires list or run");
   }
 
   if (command === "config") {

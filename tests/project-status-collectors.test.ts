@@ -207,7 +207,36 @@ test("recommended actions come from canonical manifest commands without inventin
   const actions = recommendedActionsFromManifest(manifest, "2026-07-18T00:00:00.000Z");
   assert.equal(actions[0]?.workflowId, "verify");
   assert.equal(actions[0]?.approvalRequired, false);
+  assert.equal(actions[0]?.state, "ready");
+  assert.equal(actions[0]?.disabledReason, null);
   assert.ok(!JSON.stringify(actions).includes("npm run dev"));
+});
+
+test("recommended actions expose policy reasons for commands the direct executor cannot run", () => {
+  const manifest = {
+    id: "project",
+    commands: {
+      deploy: {
+        id: "deploy",
+        name: "Deploy",
+        description: "Deploy the project",
+        category: "development",
+        executable: "just",
+        arguments: ["deploy"],
+        workingDirectory: null,
+        environmentRefs: ["deploy-token"],
+        interactive: false,
+        mutation: "external",
+        timeoutSeconds: 60,
+        requiresCapabilities: [],
+        visibleWhen: [],
+      },
+    },
+  } as unknown as ProjectManifest;
+  const [action] = recommendedActionsFromManifest(manifest, "2026-07-18T00:00:00.000Z");
+  assert.equal(action?.state, "waiting");
+  assert.equal(action?.approvalRequired, true);
+  assert.match(action?.disabledReason ?? "", /approval/i);
 });
 
 test("compact status is human-readable and the offline cache is atomic and versioned", async () => {

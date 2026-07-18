@@ -450,7 +450,7 @@ async function runCheckStage(input: {
     });
     input.execution.completeCommand({
       id: command.id,
-      status: result.status,
+      status: result.status === "cancelled" ? "failed" : result.status,
       exitCode: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr,
@@ -463,7 +463,7 @@ async function runCheckStage(input: {
     });
     return {
       name: result.name,
-      status: result.status,
+      status: result.status === "cancelled" ? "failed" : result.status,
       exitCode: result.exitCode,
       stdout: result.stdout,
       stderr: result.stderr,

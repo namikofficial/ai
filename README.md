@@ -55,6 +55,8 @@ The `pnpm cli` command provides the main entry point for managing the workbench.
 - `pnpm cli -- project graph <project>`: View the project context graph (entrypoints, route files, hot paths).
 - `pnpm cli -- project symbols <project> --query auth`: Search for extracted code symbols in a project.
 - `pnpm cli -- project symbol <symbol-id>`: View details for a specific code symbol, including linked chunks and edges.
+- `pnpm cli -- action list [--project <project-id>]`: List approved project workflows and availability reasons.
+- `pnpm cli -- action run <workflow-id> [--project <project-id>]`: Run an available canonical read-only workflow.
 
 ### Interaction & Debugging
 - `pnpm cli -- ask "where is auth handled?" --project <project> --depth deep`: Run the hybrid RAG pipeline.

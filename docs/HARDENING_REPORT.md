@@ -16,6 +16,9 @@ on `127.0.0.1:55417`. It did not read or mutate the canonical Workbench database
   branch, dirty reviewed paths, and workspace/target symlinks.
 - Project reads, writes, edits, removals, and text search now reject symlink components and canonical-root escapes.
 - Safe-copy workspaces skip repository symlinks instead of following them.
+- Approved read-only manifest workflows now execute through an explicit binary policy, reduced environment,
+  canonical working-directory guard, durable execution record, and correlated events. Rofi and CLI are clients of
+  this path; unsupported mutation/terminal/environment/capability modes fail closed.
 - The complete threat inventory and remaining clipboard/MCP-authentication gaps are documented in
   [SECURITY_THREAT_MODEL.md](./SECURITY_THREAT_MODEL.md).
 
@@ -51,9 +54,9 @@ backup-first import.
 ## Verification
 
 ```text
-pnpm lint       -> 199 files, zero errors or warnings
+pnpm lint       -> 202 files, zero errors or warnings
 pnpm typecheck  -> passed
-pnpm test:fast  -> 349/349 passed
+pnpm test:fast  -> 352/352 passed
 shellcheck scripts/measure-runtime.sh -> passed
 bash -n scripts/measure-runtime.sh    -> passed
 ```

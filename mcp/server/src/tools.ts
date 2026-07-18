@@ -830,7 +830,7 @@ async function handleTool(
         name: nameValue,
         projectId: project.id,
         sessionId,
-        status: result.status,
+        status: result.status === "cancelled" ? "failed" : result.status,
         command: result.command,
         output: result.stdout,
         errorOutput: result.stderr || result.blockedReason,

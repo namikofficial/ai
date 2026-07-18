@@ -4,7 +4,9 @@ import type {
   DesktopObservation,
   ProjectManifest,
   ProjectStatus,
+  RecommendedAction,
   RuntimeHealth,
+  WorkflowExecution,
 } from "../../contracts/src/index.ts";
 import type {
   ActiveProjectSelection,
@@ -185,6 +187,56 @@ export function createApiClient(options: ApiClientOptions) {
     getCompactProjectStatus(projectId?: string): Promise<{ status: "ok"; data: CompactProjectStatus }> {
       const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
       return requestJson(options.baseUrl, `/project-status/compact${query}`);
+    },
+    listActions(projectId?: string): Promise<{ status: "ok"; data: RecommendedAction[] }> {
+      const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+      return requestJson(options.baseUrl, `/actions${query}`);
+    },
+    runAction(
+      workflowId: string,
+      input: { projectId?: string; sessionId?: string; taskId?: string } = {}
+    ): Promise<{
+      status: "ok";
+      data: {
+        execution: WorkflowExecution;
+        command: { executable: string; arguments: string[]; workingDirectory: string };
+        stdout: string;
+        stderr: string;
+        durationMs: number;
+        approval?: Record<string, unknown> | null;
+        deepLink?: string;
+      };
+    }> {
+      return requestJson(options.baseUrl, `/actions/${encodeURIComponent(workflowId)}/run`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    approveActionExecution(
+      executionId: string,
+      notes?: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/approve`, {
+        method: "POST",
+        body: JSON.stringify(notes ? { notes } : {}),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    rejectActionExecution(
+      executionId: string,
+      notes?: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/reject`, {
+        method: "POST",
+        body: JSON.stringify(notes ? { notes } : {}),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    cancelActionExecution(executionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/cancel`, {
+        method: "POST",
+      });
     },
     explainActiveContext(): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, "/context/explain");
@@ -731,7 +783,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getApproval(approvalId: string): Promise<{
       status: "ok";
-      data: { approval: Record<string, unknown>; run: Record<string, unknown> | null };
+      data: {
+        kind: "development" | "workflow";
+        approval: Record<string, unknown>;
+        run: Record<string, unknown> | null;
+        execution: Record<string, unknown> | null;
+      };
     }> {
       return requestJson(options.baseUrl, `/approvals/${encodeURIComponent(approvalId)}`);
     },
