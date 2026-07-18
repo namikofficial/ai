@@ -1031,13 +1031,21 @@ export function registerWorkflowRoutes(
         return;
       }
       if (!["failed", "blocked", "cancelled"].includes(original.execution.state)) {
-        sendJson(res, json("error", undefined, { message: "only terminal unsuccessful workflows can be recovered" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, { message: "only terminal unsuccessful workflows can be recovered" }),
+          409
+        );
         return;
       }
       const body = (await readJsonBody(req)) as { workflowId?: unknown; requestedBy?: unknown };
       const workflowId = typeof body.workflowId === "string" ? body.workflowId.trim() : "";
       if (!workflowId || !original.execution.recoveryWorkflowIds.includes(workflowId)) {
-        sendJson(res, json("error", undefined, { message: "recovery workflow is not allowed by the failed execution" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, { message: "recovery workflow is not allowed by the failed execution" }),
+          409
+        );
         return;
       }
       const project = deps.store.getProject(original.execution.projectId);
@@ -1060,7 +1068,11 @@ export function registerWorkflowRoutes(
           (entry) => entry.step.executionMode === "terminal" || entry.step.executionMode === "tmux"
         )
       ) {
-        sendJson(res, json("error", undefined, { message: "interactive recovery requires a resumable desktop handoff" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, { message: "interactive recovery requires a resumable desktop handoff" }),
+          409
+        );
         return;
       }
       const initialBase = createWorkflowExecution({
@@ -1095,8 +1107,7 @@ export function registerWorkflowRoutes(
         originalExecutionId,
         recoveryExecutionId: initial.id,
         workflowId,
-        requestedBy:
-          typeof body.requestedBy === "string" && body.requestedBy.trim() ? body.requestedBy.trim() : "api",
+        requestedBy: typeof body.requestedBy === "string" && body.requestedBy.trim() ? body.requestedBy.trim() : "api",
       });
       const recoveryEvent = createEvent(
         "workflow.recovery_started",
@@ -1170,9 +1181,10 @@ export function registerWorkflowRoutes(
       }
       const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
       const definition = deps.store.workflows.getDefinition(record.execution.projectId, record.execution.workflowId);
-      const preparedPlan = definition && (definition.steps.length > 0 || record.execution.recoveryOfExecutionId !== null)
-        ? await prepareWorkflowPlan(canonicalManifest, definition, { allowMutating: true, allowInteractive: true })
-        : null;
+      const preparedPlan =
+        definition && (definition.steps.length > 0 || record.execution.recoveryOfExecutionId !== null)
+          ? await prepareWorkflowPlan(canonicalManifest, definition, { allowMutating: true, allowInteractive: true })
+          : null;
       const prepared = preparedPlan
         ? null
         : await prepareManifestWorkflow(canonicalManifest, record.execution.workflowId, {
@@ -1682,9 +1694,7 @@ export function registerWorkflowRoutes(
           projectId,
           sessionId,
           taskId,
-          recoveryWorkflowIds: [
-            ...new Set(preparedPlan.plan.steps.flatMap((entry) => entry.step.recoveryWorkflowIds)),
-          ],
+          recoveryWorkflowIds: [...new Set(preparedPlan.plan.steps.flatMap((entry) => entry.step.recoveryWorkflowIds))],
           state: preparedPlan.plan.approvalRequired
             ? "waiting"
             : preparedPlan.plan.backgroundRequired
