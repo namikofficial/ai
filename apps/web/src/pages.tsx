@@ -2057,6 +2057,8 @@ function HandoffPage(): ReactNode {
     else if (!project && projects[0]?.id) setProject(projects[0].id);
     if (projectSessions.length > 0 && !projectSessions.some((session) => session.id === sessionId)) {
       setSessionId(projectSessions[0]?.id ?? "");
+    } else if (projectSessions.length === 0 && sessionId) {
+      setSessionId("");
     }
   }, [project, projectSessions, projects, routeProjectId, selectedProjectId, sessionId]);
 
@@ -2481,6 +2483,8 @@ function RetrievalPage(): ReactNode {
     else if (!project && projects[0]?.id) setProject(projects[0].id);
     if (projectSessions.length > 0 && !projectSessions.some((session) => session.id === sessionId)) {
       setSessionId(projectSessions[0]?.id ?? "");
+    } else if (projectSessions.length === 0 && sessionId) {
+      setSessionId("");
     }
   }, [project, projectSessions, projects, routeProjectId, selectedProjectId, sessionId]);
 
@@ -2512,15 +2516,9 @@ function RetrievalPage(): ReactNode {
     }
   };
 
-  const ranked = Array.isArray(explanation?.ranked)
-    ? (explanation.ranked as Array<Record<string, unknown>>)
-    : [];
-  const selected = Array.isArray(explanation?.selected)
-    ? (explanation.selected as Array<Record<string, unknown>>)
-    : [];
-  const dropped = Array.isArray(explanation?.dropped)
-    ? (explanation.dropped as Array<Record<string, unknown>>)
-    : [];
+  const ranked = Array.isArray(explanation?.ranked) ? (explanation.ranked as Array<Record<string, unknown>>) : [];
+  const selected = Array.isArray(explanation?.selected) ? (explanation.selected as Array<Record<string, unknown>>) : [];
+  const dropped = Array.isArray(explanation?.dropped) ? (explanation.dropped as Array<Record<string, unknown>>) : [];
 
   return (
     <PageShell title="Retrieval" subtitle="Search, recent queries, and misses">
@@ -2573,7 +2571,7 @@ function RetrievalPage(): ReactNode {
                 confidence {Number(explanation.confidence ?? 0).toFixed(2)}
               </Badge>
               <span className="tiny">
-                {selected.length} selected · {ranked.length} ranked · {dropped.length} dropped · {" "}
+                {selected.length} selected · {ranked.length} ranked · {dropped.length} dropped ·{" "}
                 {Number(explanation.usedTokens ?? 0)} tokens
               </span>
             </div>
@@ -2590,7 +2588,8 @@ function RetrievalPage(): ReactNode {
                   </div>
                   <div className="tiny">{String(entry.rerankReason ?? "No ranking explanation")}</div>
                   <div className="tiny">
-                    boosters: {Array.isArray(entry.boosters) ? (entry.boosters as string[]).join(", ") || "none" : "none"}
+                    boosters:{" "}
+                    {Array.isArray(entry.boosters) ? (entry.boosters as string[]).join(", ") || "none" : "none"}
                   </div>
                 </div>
               ))}
