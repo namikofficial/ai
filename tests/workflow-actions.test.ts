@@ -492,6 +492,21 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
     assert.equal(approvedData.launch.mode, "tmux");
     assert.equal(approvedData.launch.tmuxSession, "interactive-project");
     assert.ok(store.listEvents().some((event) => event.type === "workflow.launch_ready"));
+    const cancelled = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${pendingData.execution.id}/cancel`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(cancelled.statusCode, 200);
+    assert.equal(JSON.parse(cancelled.body).data.execution.state, "cancelled");
+    assert.equal(store.workflows.getLaunchForExecution(pendingData.execution.id)?.launch.state, "cancelled");
+    const authorizeCancelled = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${pendingData.execution.id}/launch/authorize`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: {},
+    });
+    assert.equal(authorizeCancelled.statusCode, 409);
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });
