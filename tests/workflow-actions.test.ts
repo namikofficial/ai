@@ -691,12 +691,17 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
 
 test("workflow definition DAGs execute in dependency order and block downstream steps after failure", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-dag-"));
+  await execFileAsync("git", ["init", "-q", workspace]);
+  await execFileAsync("git", ["-C", workspace, "config", "user.email", "workflow-dag@example.test"]);
+  await execFileAsync("git", ["-C", workspace, "config", "user.name", "Workflow DAG Test"]);
+  await execFileAsync("git", ["-C", workspace, "commit", "--allow-empty", "-qm", "initial"]);
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
   const project = store.createProject({ path: workspace, name: "Workflow DAG Project" });
   const first = command("first", "true", []);
   const second = command("second", "true", []);
   const failing = command("failing", "false", []);
   const never = command("never", "true", []);
+  const tag = command("tag", "git", ["tag", "--no-sign", "workflow-dag-approved"], "project_write");
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -704,7 +709,7 @@ test("workflow definition DAGs execute in dependency order and block downstream 
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    commands: { first, second, failing, never },
+    commands: { first, second, failing, never, tag },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
   const timestamp = new Date().toISOString();
@@ -725,6 +730,18 @@ test("workflow definition DAGs execute in dependency order and block downstream 
       workflowStep("second-step", "second", ["first-step"]),
       workflowStep("first-step", "first"),
     ]),
+    "manual"
+  );
+  const mutatingStep: WorkflowStepDefinition = {
+    ...workflowStep("tag-step", "tag", ["first-step"]),
+    mutation: "project_write",
+    approvalRequired: true,
+  };
+  store.workflows.saveDefinition(
+    {
+      ...definition("approval-pipeline", [workflowStep("first-step", "first"), mutatingStep]),
+      approvalRequired: true,
+    },
     "manual"
   );
   store.workflows.saveDefinition(
@@ -785,7 +802,25 @@ test("workflow definition DAGs execute in dependency order and block downstream 
     assert.equal(failedData.execution.state, "failed");
     assert.equal(failedData.execution.stepStates["failure-step"], "failed");
     assert.equal(failedData.execution.stepStates["downstream-step"], "blocked");
-    assert.equal(store.workflows.listStepExecutions(failedData.execution.id)[2]?.errorCode, "dependency_failed");
+    assert.equal(
+      store.workflows.listStepExecutions(failedData.execution.id).find((step) => step.stepId === "downstream-step")
+        ?.errorCode,
+      "dependency_failed"
+    );
+
+    const pending = await request("approval-pipeline");
+    assert.equal(pending.statusCode, 202, pending.body);
+    const pendingData = JSON.parse(pending.body).data as { execution: { id: string; state: string } };
+    assert.equal(pendingData.execution.state, "waiting");
+    const approved = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${pendingData.execution.id}/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { decidedBy: "workflow-dag-test" },
+    });
+    assert.equal(approved.statusCode, 200, approved.body);
+    assert.equal(JSON.parse(approved.body).data.execution.state, "completed");
+    assert.match((await execFileAsync("git", ["-C", workspace, "tag", "--list"])).stdout, /workflow-dag-approved/);
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });
