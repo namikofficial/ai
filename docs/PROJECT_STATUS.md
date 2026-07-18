@@ -97,3 +97,9 @@ output, the Rofi cockpit, project resume, AI helper context, and AI/log scratchp
 Rofi can execute available canonical read-only workflows through the API; unavailable actions display their policy
 reason. Kage’s legacy detector/cache remain an explicit offline rollback fallback until mutating/interactive workflow
 parity and manual desktop checks pass.
+
+`ActiveWork` also projects the newest active or recoverable canonical workflow execution through
+`workflowExecutionId`, `workflowId`, and its snapshotted `recoveryWorkflowIds`. The compact cache therefore gives
+Rofi and Wayle one source for task, development-run, approval, workflow, blocker, and recovery state. Rofi opens the
+Workbench workflow review route or posts an allowed recovery to the canonical API; it never runs a cached recovery
+command.

@@ -225,7 +225,7 @@ a protected secret-delivery channel is required before enabling them.
 
 ## Remaining adapters
 
-- visual recovery and artifact metadata controls in run review and Rofi;
+- approval-gated artifact cleanup and isolated artifact diff presentation;
 - protected secret delivery for terminal/tmux workflows;
 - isolated artifact diff presentation and explicit cleanup controls;
 - platform capability discovery and `visibleWhen` evaluation.

@@ -34,14 +34,17 @@ lists concrete remaining gates rather than treating compatibility slices as fini
 - Failed, blocked, and cancelled workflow executions expose only their snapshotted recovery allowlist. Recovery runs
   preserve causation, reapply canonical policy and approvals, and are available through API and CLI. Workflow
   artifacts have a metadata-only inspection endpoint that redacts paths outside approved project/runtime roots.
+- Workflow review now presents canonical policy, DAG evidence, redacted output, safe artifact metadata, approval
+  controls, recovery history, and recovery actions. `ActiveWork` projects workflow execution/recovery identity into
+  the shared status cache, and Rofi uses only those fields plus the canonical API for review and recovery.
 
 ## Priority 1 — Complete workflow modes
 
 Build on `workflow_executions` rather than adding another runner:
 
-1. Expose canonical recovery choices and artifact metadata in the visual run review and Rofi cockpit.
-2. Add a protected desktop secret-delivery channel without returning values to APIs, logs, or caches.
-3. Add approval-gated artifact cleanup without allowing arbitrary path deletion.
+1. Add a protected desktop secret-delivery channel without returning values to APIs, logs, or caches.
+2. Add approval-gated artifact cleanup without allowing arbitrary path deletion.
+3. Add isolated artifact diff presentation without weakening the separate apply approval.
 
 Acceptance evidence: API/CLI/Rofi integration tests for success, denial, approval replay, cancellation, timeout,
 wrong-project invocation, secret redaction, process-tree cleanup, and restart recovery.

@@ -144,7 +144,10 @@ systemctl --user enable --now ai-workbench-desktop-observer.service
 
 ## Current compatibility boundary
 
-Kage, Wayle, Rofi, project resume and scratchpads have not been switched to these contracts yet. The Phase 4 status aggregation is available and tested, but these desktop clients remain operational legacy consumers until Phase 5 parity and rollback checks pass. The observer is additive and may be disabled without affecting terminal fallback.
+Kage status, Wayle, Rofi, project resume, AI helpers, and scratchpads now prefer the shared compact status and active
+context contracts. The old Kage/profile cache remains a read-only offline compatibility fallback until the live
+Hyprland parity and rollback gates pass; it is not permitted to create canonical workflow, task, session, or memory
+state. The observer remains additive and may be disabled without affecting terminal fallback.
 
 ## Verification record
 

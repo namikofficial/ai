@@ -24,6 +24,11 @@ The global shell shows a compact context strip with selected project, active tas
 
 The project Work view groups current goal/task/progress/blocker, task graph, development runs, project-scoped checks and reviews, and next actions. The run route is diff-first: summary/approval controls, proposed diff, changed files, then checks and warnings. Pending execution approvals are projected into `ActiveWork.approvalId`; the approval route shows project, run, risk, reason and requested time. Approve/apply/reject/cancel remain gated by persisted run and approval state, so stale approvals fail rather than applying to a different state.
 
+`/workflow-executions/:executionId` is the workflow-specific review surface. It reads canonical execution and
+artifact-metadata endpoints and presents policy context, command or DAG step evidence, redacted output, safe artifact
+metadata, approval controls, recovery history, and only the recovery choices snapshotted on the failed execution.
+Workflow approval pages deep-link to this evidence rather than rendering raw execution JSON.
+
 Desktop `open-ai-workbench.sh` reads the canonical XDG status cache and generates the corresponding project route. It starts Workbench when necessary and retains the root URL as an offline/cache-miss fallback.
 
 ## Current boundary
