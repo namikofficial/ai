@@ -315,6 +315,11 @@ export function importLegacyProjectProfiles(
         executionMode: "direct",
         mutation: "read_only",
         timeoutSeconds: 900,
+        retryLimit: 0,
+        retryDelaySeconds: 0,
+        expectedArtifacts: [],
+        successCriteria: [],
+        recoveryWorkflowIds: [],
         requiresCapabilities: ["legacy-shell-approval"],
         visibleWhen: ["approved-import"],
       };
@@ -335,6 +340,11 @@ export function importLegacyProjectProfiles(
         executionMode: "terminal",
         mutation: "workspace_write",
         timeoutSeconds: null,
+        retryLimit: 0,
+        retryDelaySeconds: 0,
+        expectedArtifacts: [],
+        successCriteria: [],
+        recoveryWorkflowIds: [],
         requiresCapabilities: ["legacy-shell-approval"],
         visibleWhen: ["approved-import"],
       };

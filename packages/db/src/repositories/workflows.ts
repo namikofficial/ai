@@ -1,6 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { WorkflowExecution, WorkflowLaunch } from "../../../contracts/src/index.ts";
-import { workflowExecutionSchema, workflowLaunchSchema } from "../../../contracts/src/index.ts";
+import type { ProjectManifest, WorkflowDefinition, WorkflowExecution, WorkflowLaunch } from "../../../contracts/src/index.ts";
+import {
+  workflowDefinitionSchema,
+  workflowExecutionSchema,
+  workflowLaunchSchema,
+} from "../../../contracts/src/index.ts";
 import { asNumber, asString, asStringOrNull, newId, now, safeParseJson, safeParseJsonArray } from "./_shared.ts";
 
 interface WorkflowExecutionRow {
@@ -222,6 +226,93 @@ function rowToRecord(row: WorkflowExecutionRow): WorkflowExecutionRecord {
 
 export function createWorkflowsRepo(db: DatabaseSync) {
   return {
+    saveDefinition(
+      definition: unknown,
+      source: "manifest" | "manual" | "import" = "manual"
+    ): WorkflowDefinition {
+      const parsed = workflowDefinitionSchema.parse(definition);
+      if (!parsed.projectId) throw new Error("workflow definition requires a projectId");
+      const timestamp = now();
+      const existing = this.getDefinition(parsed.projectId, parsed.id);
+      const normalized = { ...parsed, createdAt: existing?.createdAt ?? parsed.createdAt, updatedAt: timestamp };
+      db.prepare(
+        `INSERT INTO workflow_definitions (project_id, id, definition_json, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(project_id, id) DO UPDATE SET
+           definition_json = excluded.definition_json,
+           source = excluded.source,
+           updated_at = excluded.updated_at`
+      ).run(normalized.projectId, normalized.id, JSON.stringify(normalized), source, normalized.createdAt, timestamp);
+      const saved = this.getDefinition(parsed.projectId, parsed.id);
+      if (!saved) throw new Error(`workflow definition ${parsed.id} was not persisted`);
+      return saved;
+    },
+
+    getDefinition(projectId: string, id: string): WorkflowDefinition | null {
+      const row = db
+        .prepare("SELECT definition_json FROM workflow_definitions WHERE project_id = ? AND id = ? LIMIT 1")
+        .get(projectId, id) as { definition_json: string } | undefined;
+      return row ? workflowDefinitionSchema.parse(JSON.parse(row.definition_json)) : null;
+    },
+
+    listDefinitions(projectId: string): WorkflowDefinition[] {
+      const rows = db
+        .prepare("SELECT definition_json FROM workflow_definitions WHERE project_id = ? ORDER BY updated_at DESC, id")
+        .all(projectId) as Array<{ definition_json: string }>;
+      return rows.map((row) => workflowDefinitionSchema.parse(JSON.parse(row.definition_json)));
+    },
+
+    syncManifestDefinitions(manifest: ProjectManifest): WorkflowDefinition[] {
+      const timestamp = now();
+      const definitions = Object.values(manifest.commands).map((command): WorkflowDefinition => ({
+        schemaVersion: 1,
+        id: command.id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        origin: { source: "workbench", instanceId: "manifest-sync", legacyRef: `manifest-command:${command.id}` },
+        capabilities: [...command.requiresCapabilities],
+        projectId: manifest.id,
+        name: command.name,
+        description: command.description,
+        category: command.category,
+        command,
+        steps: [],
+        preconditions: [],
+        expectedArtifacts: command.expectedArtifacts.map((artifact) => artifact.id),
+        isolationRequired: command.executionMode === "isolated",
+        approvalRequired: command.mutation !== "read_only",
+        enabled: true,
+      }));
+      const manifestIds = new Set(definitions.map((definition) => definition.id));
+      const existingManifestRows = db
+        .prepare("SELECT id FROM workflow_definitions WHERE project_id = ? AND source = 'manifest'")
+        .all(manifest.id) as Array<{ id: string }>;
+      db.exec("SAVEPOINT sync_manifest_workflows");
+      try {
+        for (const definition of definitions) {
+          const existing = db
+            .prepare("SELECT source FROM workflow_definitions WHERE project_id = ? AND id = ? LIMIT 1")
+            .get(manifest.id, definition.id) as { source: string } | undefined;
+          if (existing?.source === "manual") continue;
+          this.saveDefinition(definition, "manifest");
+        }
+        for (const row of existingManifestRows) {
+          if (!manifestIds.has(row.id)) {
+            db.prepare("DELETE FROM workflow_definitions WHERE project_id = ? AND id = ? AND source = 'manifest'").run(
+              manifest.id,
+              row.id
+            );
+          }
+        }
+        db.exec("RELEASE SAVEPOINT sync_manifest_workflows");
+      } catch (error) {
+        db.exec("ROLLBACK TO SAVEPOINT sync_manifest_workflows");
+        db.exec("RELEASE SAVEPOINT sync_manifest_workflows");
+        throw error;
+      }
+      return this.listDefinitions(manifest.id).filter((definition) => manifestIds.has(definition.id));
+    },
+
     createBackgroundJob(input: { executionId: string; jobId: string }): WorkflowBackgroundJobRecord {
       const timestamp = now();
       db.prepare(

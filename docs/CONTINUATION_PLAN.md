@@ -23,13 +23,17 @@ lists concrete remaining gates rather than treating compatibility slices as fini
   Git-worktree/safe-copy workspace and expose that workspace as a review artifact without touching the original tree.
 - Background workflows use a durable queue association, worker-side canonical revalidation, tracked process groups,
   queued/running cancellation, and fail-safe restart recovery that never silently replays possible side effects.
+- Direct, isolated, and background workflows resolve manifest-approved names through a user-owned mode-0600 secret
+  provider and redact resolved values before any result is persisted; desktop secret delivery remains blocked.
+- Read-only workflow retries are bounded, abort-aware, and attempt-audited; mutating retries are rejected. Required
+  artifacts are type- and containment-validated and become canonical execution artifacts.
 
 ## Priority 1 — Complete workflow modes
 
 Build on `workflow_executions` rather than adding another runner:
 
-1. Implement workflow dependencies/retries, expected-artifact validation, and explicit recovery workflows.
-2. Resolve environment references from an approved secret provider without returning values to logs/caches.
+1. Implement workflow dependency DAGs and explicit recovery workflow execution.
+2. Add a protected desktop secret-delivery channel without returning values to APIs, logs, or caches.
 3. Add recovery workflows and artifact inspection to workflow reviews.
 
 Acceptance evidence: API/CLI/Rofi integration tests for success, denial, approval replay, cancellation, timeout,

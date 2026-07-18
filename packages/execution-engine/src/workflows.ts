@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import { stat } from "node:fs/promises";
+import { realpath, stat } from "node:fs/promises";
 import * as path from "node:path";
 import type { CommandDefinition, ProjectManifest } from "../../contracts/src/index.ts";
-import { guardPathCanonical } from "./files.ts";
+import { guardPathCanonical, isSecretFile } from "./files.ts";
 import { type CommandSpec, type RunAllowedCommandResult, runAllowedCommand } from "./shell.ts";
 import { getCurrentBranch, getCurrentCommit } from "./worktree.ts";
 
@@ -19,9 +19,11 @@ export interface ManifestWorkflowRejection {
     | "workflow_not_found"
     | "approval_required"
     | "interactive_terminal_required"
-    | "environment_resolution_required"
+    | "environment_reference_rejected"
+    | "environment_delivery_unavailable"
     | "capability_unavailable"
     | "read_only_policy_violation"
+    | "unsafe_retry_policy"
     | "working_directory_rejected";
   summary: string;
 }
@@ -57,12 +59,24 @@ export async function prepareManifestWorkflow(
       },
     };
   }
-  if (command.environmentRefs.length > 0) {
+  const unapprovedEnvironmentRef = command.environmentRefs.find(
+    (reference) => !manifest.secretRefs.includes(reference)
+  );
+  if (unapprovedEnvironmentRef) {
     return {
       ok: false,
       rejection: {
-        code: "environment_resolution_required",
-        summary: `workflow ${command.id} requires approved environment references`,
+        code: "environment_reference_rejected",
+        summary: `workflow ${command.id} requests an environment reference not approved by the manifest: ${unapprovedEnvironmentRef}`,
+      },
+    };
+  }
+  if (desktopLaunch && command.environmentRefs.length > 0) {
+    return {
+      ok: false,
+      rejection: {
+        code: "environment_delivery_unavailable",
+        summary: `workflow ${command.id} cannot deliver secret references through a desktop launch`,
       },
     };
   }
@@ -109,6 +123,15 @@ export async function prepareManifestWorkflow(
         },
       };
     }
+  }
+  if (command.retryLimit > 0 && command.mutation !== "read_only") {
+    return {
+      ok: false,
+      rejection: {
+        code: "unsafe_retry_policy",
+        summary: `workflow ${command.id} cannot automatically retry a ${command.mutation} command`,
+      },
+    };
   }
 
   const requestedCwd = command.workingDirectory
@@ -191,6 +214,11 @@ export function workflowApprovalContextHash(context: WorkflowApprovalContext): s
       executionMode: context.command.executionMode,
       mutation: context.command.mutation,
       timeoutSeconds: context.command.timeoutSeconds,
+      retryLimit: context.command.retryLimit,
+      retryDelaySeconds: context.command.retryDelaySeconds,
+      expectedArtifacts: context.command.expectedArtifacts,
+      successCriteria: context.command.successCriteria,
+      recoveryWorkflowIds: context.command.recoveryWorkflowIds,
       requiresCapabilities: context.command.requiresCapabilities,
     },
     cwd: context.cwd,
@@ -202,7 +230,12 @@ export function workflowApprovalContextHash(context: WorkflowApprovalContext): s
 
 export async function runPreparedManifestWorkflow(
   workflow: PreparedManifestWorkflow,
-  options: { signal?: AbortSignal; onSpawn?: (pid: number) => void } = {}
+  options: {
+    signal?: AbortSignal;
+    onSpawn?: (pid: number) => void;
+    env?: Record<string, string>;
+    redactValues?: string[];
+  } = {}
 ): Promise<RunAllowedCommandResult> {
   return runAllowedCommand({
     cwd: workflow.cwd,
@@ -210,5 +243,107 @@ export async function runPreparedManifestWorkflow(
     timeoutMs: (workflow.command.timeoutSeconds ?? 300) * 1_000,
     signal: options.signal,
     onSpawn: options.onSpawn,
+    env: options.env,
+    redactValues: options.redactValues,
   });
+}
+
+export interface ExpectedArtifactValidation {
+  valid: boolean;
+  artifacts: string[];
+  missing: string[];
+  invalid: Array<{ id: string; reason: string }>;
+}
+
+export async function validateExpectedArtifacts(
+  workflow: PreparedManifestWorkflow
+): Promise<ExpectedArtifactValidation> {
+  const canonicalRoot = await realpath(workflow.cwd);
+  const artifacts: string[] = [];
+  const missing: string[] = [];
+  const invalid: Array<{ id: string; reason: string }> = [];
+  for (const artifact of workflow.command.expectedArtifacts) {
+    const resolved = path.resolve(workflow.cwd, artifact.path);
+    const relativePath = path.relative(workflow.cwd, resolved);
+    if (relativePath.startsWith("..") || path.isAbsolute(relativePath)) {
+      invalid.push({ id: artifact.id, reason: "artifact path escapes workflow working directory" });
+      continue;
+    }
+    if (isSecretFile(relativePath.replaceAll("\\", "/"))) {
+      invalid.push({ id: artifact.id, reason: "artifact path matches a secret file pattern" });
+      continue;
+    }
+    const info = await stat(resolved).catch(() => null);
+    if (!info) {
+      if (artifact.required) missing.push(artifact.id);
+      continue;
+    }
+    const canonical = await realpath(resolved).catch(() => null);
+    if (!canonical) {
+      if (artifact.required) missing.push(artifact.id);
+      continue;
+    }
+    const canonicalRelative = path.relative(canonicalRoot, canonical);
+    if (canonicalRelative.startsWith("..") || path.isAbsolute(canonicalRelative)) {
+      invalid.push({ id: artifact.id, reason: "artifact resolves outside workflow working directory" });
+      continue;
+    }
+    if (artifact.kind === "file" && !info.isFile()) {
+      invalid.push({ id: artifact.id, reason: "artifact is not a file" });
+      continue;
+    }
+    if (artifact.kind === "directory" && !info.isDirectory()) {
+      invalid.push({ id: artifact.id, reason: "artifact is not a directory" });
+      continue;
+    }
+    artifacts.push(canonical);
+  }
+  return { valid: missing.length === 0 && invalid.length === 0, artifacts, missing, invalid };
+}
+
+export interface ManifestWorkflowRunResult {
+  result: RunAllowedCommandResult;
+  attempts: RunAllowedCommandResult[];
+}
+
+function retryDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (delayMs <= 0 || signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(finish, delayMs);
+    const onAbort = (): void => finish();
+    function finish(): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+export async function runPreparedManifestWorkflowWithRetry(
+  workflow: PreparedManifestWorkflow,
+  options: Parameters<typeof runPreparedManifestWorkflow>[1] & {
+    run?: typeof runPreparedManifestWorkflow;
+    onAttempt?: (result: RunAllowedCommandResult, attempt: number) => void | Promise<void>;
+    shouldRetry?: (result: RunAllowedCommandResult, attempt: number) => boolean | Promise<boolean>;
+  } = {}
+): Promise<ManifestWorkflowRunResult> {
+  const attempts: RunAllowedCommandResult[] = [];
+  const run = options.run ?? runPreparedManifestWorkflow;
+  const maxAttempts = workflow.command.retryLimit + 1;
+  let result: RunAllowedCommandResult | null = null;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    result = await run(workflow, options);
+    attempts.push(result);
+    await options.onAttempt?.(result, attempt);
+    if (result.status === "completed" || result.status === "blocked" || result.status === "cancelled") break;
+    const retryAllowed = options.shouldRetry ? await options.shouldRetry(result, attempt) : true;
+    if (!retryAllowed) break;
+    if (attempt < maxAttempts) {
+      await retryDelay(workflow.command.retryDelaySeconds * 1_000, options.signal);
+      if (options.signal?.aborted) break;
+    }
+  }
+  if (!result) throw new Error("workflow retry runner produced no result");
+  return { result, attempts };
 }

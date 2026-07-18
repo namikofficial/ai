@@ -364,11 +364,13 @@ export function createStore(db: DatabaseSync) {
   const evalRepo = createEvalRepo(db);
   const promptLabRepo = createPromptLabRepo(db);
   const promptRepo = createPromptRepo(db);
-  const projectRegistryRepo = createProjectRegistryRepo(db);
+  const workflowsRepo = createWorkflowsRepo(db);
+  const projectRegistryRepo = createProjectRegistryRepo(db, (manifest) => {
+    workflowsRepo.syncManifestDefinitions(manifest);
+  });
   const devRunsRepo = createDevRunsRepo(db);
   const executionRepo = createExecutionRepo(db);
   const embeddingCacheRepo = createEmbeddingCacheRepo(db);
-  const workflowsRepo = createWorkflowsRepo(db);
 
   seedDefaultModelCatalog(modelsRepo);
 

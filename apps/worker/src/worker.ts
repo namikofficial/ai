@@ -3,9 +3,11 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import type { WorkflowExecution } from "../../../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
+import { resolveManifestWorkflowEnvironment } from "../../../packages/execution-engine/src/secrets.ts";
 import {
   prepareManifestWorkflow,
-  runPreparedManifestWorkflow,
+  runPreparedManifestWorkflowWithRetry,
+  validateExpectedArtifacts,
 } from "../../../packages/execution-engine/src/workflows.ts";
 import { compilePrompt } from "../../../packages/prompt-compiler/src/index.ts";
 import type { ReflectInput } from "../../../packages/reflection-engine/src/index.ts";
@@ -624,6 +626,10 @@ export async function processNextJob(
       if (prepared.workflow.command.executionMode !== "background") {
         throw new Error("queued workflow no longer has background execution mode");
       }
+      const environment = await resolveManifestWorkflowEnvironment({
+        requestedRefs: prepared.workflow.command.environmentRefs,
+        approvedRefs: manifest.secretRefs,
+      });
       const startedAt = new Date().toISOString();
       const running: WorkflowExecution = {
         ...record.execution,
@@ -656,8 +662,11 @@ export async function processNextJob(
           }
         )
       );
-      const result = await runPreparedManifestWorkflow(prepared.workflow, {
+      const attemptStates: Record<string, WorkflowExecution["state"]> = {};
+      const run = await runPreparedManifestWorkflowWithRetry(prepared.workflow, {
         signal: options.signal,
+        env: environment,
+        redactValues: Object.values(environment),
         onSpawn(pid) {
           store.workflows.transitionBackgroundJob({
             executionId,
@@ -668,7 +677,56 @@ export async function processNextJob(
             startedAt,
           });
         },
+        onAttempt(attemptResult, attempt) {
+          attemptStates[`command.attempt.${attempt}`] = attemptResult.status;
+          store.appendEvent(
+            createEvent(
+              "workflow.attempt_completed",
+              {
+                workflowId: running.workflowId,
+                executionId,
+                jobId: job.id,
+                attempt,
+                status: attemptResult.status,
+                exitCode: attemptResult.exitCode,
+              },
+              {
+                projectId: running.projectId,
+                sessionId: running.sessionId,
+                taskId: running.taskId,
+                agent: "workflow-worker",
+                sourceService: "workbench-worker",
+                level: attemptResult.status === "completed" ? "info" : "warn",
+                summary: `${prepared.workflow.command.name} attempt ${attempt} ${attemptResult.status}`,
+                correlationId: executionId,
+              }
+            )
+          );
+        },
+        shouldRetry() {
+          return store.workflows.getBackgroundJob(executionId)?.state === "running";
+        },
       });
+      let result = run.result;
+      let artifactFailure: string | null = null;
+      let artifacts = [...running.artifacts];
+      if (result.status === "completed") {
+        const validation = await validateExpectedArtifacts(prepared.workflow);
+        artifacts = [...new Set([...artifacts, ...validation.artifacts])];
+        if (!validation.valid) {
+          artifactFailure = [
+            validation.missing.length > 0 ? `missing: ${validation.missing.join(", ")}` : "",
+            ...validation.invalid.map((entry) => `${entry.id}: ${entry.reason}`),
+          ]
+            .filter(Boolean)
+            .join("; ");
+          result = {
+            ...result,
+            status: "failed",
+            blockedReason: `expected artifact validation failed: ${artifactFailure}`,
+          };
+        }
+      }
       const currentBackground = store.workflows.getBackgroundJob(executionId);
       const cancelled = currentBackground?.state === "cancelled" || result.status === "cancelled";
       const state = cancelled ? "cancelled" : result.status === "completed" ? "completed" : result.status;
@@ -678,9 +736,21 @@ export async function processNextJob(
         updatedAt: result.finishedAt,
         finishedAt: result.finishedAt,
         currentStepId: null,
-        stepStates: { ...(running.approvalId ? { approval: "completed" } : {}), command: state },
+        stepStates: {
+          ...(running.approvalId ? { approval: "completed" } : {}),
+          ...attemptStates,
+          command: state,
+        },
         exitCode: result.exitCode,
-        errorCode: state === "completed" ? null : state === "cancelled" ? "command_cancelled" : "command_failed",
+        artifacts,
+        errorCode:
+          state === "completed"
+            ? null
+            : state === "cancelled"
+              ? "command_cancelled"
+              : artifactFailure
+                ? "expected_artifact_failed"
+                : "command_failed",
         errorSummary: state === "completed" ? null : (result.blockedReason ?? (result.stderr.slice(0, 1_000) || null)),
       };
       store.workflows.save({
@@ -692,7 +762,7 @@ export async function processNextJob(
         },
         stdout: result.stdout,
         stderr: result.stderr,
-        durationMs: result.durationMs,
+        durationMs: run.attempts.reduce((total, attempt) => total + attempt.durationMs, 0),
       });
       if (prepared.workflow.command.category === "check") {
         store.createCheckRun({

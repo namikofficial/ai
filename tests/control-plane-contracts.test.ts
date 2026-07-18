@@ -84,10 +84,29 @@ test("normalizes legacy command execution modes without allowing an interactive 
   const legacy = structuredClone(fixtures.ProjectManifest) as Record<string, unknown>;
   const commands = legacy.commands as Record<string, Record<string, unknown>>;
   delete commands.verify?.executionMode;
+  delete commands.verify?.retryLimit;
+  delete commands.verify?.retryDelaySeconds;
+  delete commands.verify?.expectedArtifacts;
+  delete commands.verify?.successCriteria;
+  delete commands.verify?.recoveryWorkflowIds;
   commands.verify.interactive = true;
-  assert.equal(projectManifestSchema.parse(legacy).commands.verify?.executionMode, "terminal");
+  const normalized = projectManifestSchema.parse(legacy).commands.verify;
+  assert.equal(normalized?.executionMode, "terminal");
+  assert.equal(normalized?.retryLimit, 0);
+  assert.equal(normalized?.retryDelaySeconds, 0);
+  assert.deepEqual(normalized?.expectedArtifacts, []);
   commands.verify.executionMode = "direct";
   assert.throws(() => projectManifestSchema.parse(legacy), /must be terminal or tmux/);
+});
+
+test("validates bounded retry and typed expected-artifact policy", () => {
+  const manifest = structuredClone(fixtures.ProjectManifest) as Record<string, unknown>;
+  const verify = (manifest.commands as Record<string, Record<string, unknown>>).verify;
+  verify.retryLimit = 6;
+  assert.throws(() => projectManifestSchema.parse(manifest), /retryLimit must be <= 5/);
+  verify.retryLimit = 1;
+  verify.expectedArtifacts = [{ id: "report", path: "report.json", kind: "socket", required: true }];
+  assert.throws(() => projectManifestSchema.parse(manifest), /kind must be one of/);
 });
 
 test("represents an untracked-only repository as dirty", () => {

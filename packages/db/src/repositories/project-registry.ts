@@ -79,7 +79,7 @@ function rowToProposal(row: ProposalRow): ManifestProposal {
   };
 }
 
-export function createProjectRegistryRepo(db: DatabaseSync) {
+export function createProjectRegistryRepo(db: DatabaseSync, onApprovedManifest?: (manifest: ProjectManifest) => void) {
   const upsertManifest = db.prepare(
     `INSERT INTO project_manifests (
        project_id, schema_version, manifest_json, approved_source, approved_at, created_at, updated_at
@@ -111,15 +111,23 @@ export function createProjectRegistryRepo(db: DatabaseSync) {
       ensureProjectExists(db, projectId);
       const parsed = validateManifestForProject(manifest, projectId);
       const timestamp = now();
-      upsertManifest.run(
-        projectId,
-        parsed.schemaVersion,
-        JSON.stringify(parsed),
-        approvedSource,
-        timestamp,
-        timestamp,
-        timestamp
-      );
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        upsertManifest.run(
+          projectId,
+          parsed.schemaVersion,
+          JSON.stringify(parsed),
+          approvedSource,
+          timestamp,
+          timestamp,
+          timestamp
+        );
+        onApprovedManifest?.(parsed);
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
       return parsed;
     },
 
@@ -171,6 +179,7 @@ export function createProjectRegistryRepo(db: DatabaseSync) {
             timestamp,
             timestamp
           );
+          onApprovedManifest?.(proposal.manifest);
         }
         db.prepare("UPDATE project_manifest_proposals SET status = ?, resolved_at = ? WHERE id = ?").run(
           resolution,

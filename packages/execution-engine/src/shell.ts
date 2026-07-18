@@ -401,6 +401,7 @@ export interface RunAllowedCommandInput {
   env?: Record<string, string>;
   signal?: AbortSignal;
   onSpawn?: (pid: number) => void;
+  redactValues?: string[];
 }
 
 export interface RunAllowedCommandResult {
@@ -548,15 +549,24 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
       if (settled) return;
       settled = true;
       input.signal?.removeEventListener("abort", onAbort);
-      const evidence = parseCheckEvidence(`${stderr}\n${stdout}`);
+      const redact = (value: string): string => {
+        let safe = value;
+        for (const secret of input.redactValues ?? []) {
+          if (secret) safe = safe.replaceAll(secret, "[REDACTED_SECRET]");
+        }
+        return safe;
+      };
+      const safeStdout = redact(stdout);
+      const safeStderr = redact(stderr);
+      const evidence = parseCheckEvidence(`${safeStderr}\n${safeStdout}`);
       resolve({
         name: input.command.id,
         command: renderCommand(input.command),
         cwd: input.cwd,
         status,
         exitCode,
-        stdout,
-        stderr,
+        stdout: safeStdout,
+        stderr: safeStderr,
         durationMs: Date.now() - startMs,
         parsedErrors: evidence.parsedErrors,
         affectedFiles: evidence.affectedFiles,

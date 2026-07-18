@@ -64,6 +64,16 @@ export interface CommandDefinition {
   executionMode: ExecutionMode;
   mutation: MutationClass;
   timeoutSeconds: number | null;
+  retryLimit: number;
+  retryDelaySeconds: number;
+  expectedArtifacts: Array<{
+    id: string;
+    path: string;
+    kind: "file" | "directory" | "either";
+    required: boolean;
+  }>;
+  successCriteria: string[];
+  recoveryWorkflowIds: string[];
   requiresCapabilities: string[];
   visibleWhen: string[];
 }

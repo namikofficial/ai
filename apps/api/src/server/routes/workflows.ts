@@ -18,12 +18,15 @@ import {
 import {
   createTaskWorkspace,
   readProjectChecksConfig,
+  resolveManifestWorkflowEnvironment,
   runAllowedChecks,
+  SecretResolutionError,
 } from "../../../../../packages/execution-engine/src/index.ts";
 import {
   collectWorkflowApprovalContext,
   prepareManifestWorkflow,
-  runPreparedManifestWorkflow,
+  runPreparedManifestWorkflowWithRetry,
+  validateExpectedArtifacts,
   workflowApprovalContextHash,
 } from "../../../../../packages/execution-engine/src/workflows.ts";
 import { createModelRuntime } from "../../../../../packages/model-runtime/src/index.ts";
@@ -301,7 +304,14 @@ export function registerWorkflowRoutes(
   ) {
     let runnable = prepared.workflow;
     let artifacts = [...existing.artifacts];
+    let environment: Record<string, string> = {};
     try {
+      const manifest = deps.store.projectRegistry.getManifest(existing.projectId);
+      if (!manifest) throw new Error(`approved manifest for ${existing.projectId} is unavailable`);
+      environment = await resolveManifestWorkflowEnvironment({
+        requestedRefs: prepared.workflow.command.environmentRefs,
+        approvedRefs: manifest.secretRefs,
+      });
       if (prepared.workflow.command.executionMode === "isolated") {
         const project = deps.store.getProject(existing.projectId);
         if (!project) throw new Error(`project ${existing.projectId} not found for isolated workflow`);
@@ -327,7 +337,7 @@ export function registerWorkflowRoutes(
         currentStepId: null,
         stepStates: { ...(existing.approvalId ? { approval: "completed" } : {}), command: "failed" },
         finishedAt: timestamp,
-        errorCode: "workspace_setup_failed",
+        errorCode: error instanceof SecretResolutionError ? `secret_${error.code}` : "workspace_setup_failed",
         errorSummary: error instanceof Error ? error.message : String(error),
       };
       const saved = deps.store.workflows.save({
@@ -347,7 +357,7 @@ export function registerWorkflowRoutes(
           agent: "workflow-executor",
           sourceService: "workbench-api",
           level: "error",
-          summary: execution.errorSummary ?? "Isolated workspace setup failed",
+          summary: execution.errorSummary ?? "Workflow preparation failed",
           correlationId: execution.id,
           causationId,
         }
@@ -395,11 +405,63 @@ export function registerWorkflowRoutes(
 
     const controller = new AbortController();
     activeWorkflowControllers.set(running.id, controller);
-    let result: Awaited<ReturnType<typeof runPreparedManifestWorkflow>>;
+    let result: Awaited<ReturnType<typeof runPreparedManifestWorkflowWithRetry>>["result"];
+    let attemptResults: Awaited<ReturnType<typeof runPreparedManifestWorkflowWithRetry>>["attempts"] = [];
+    const attemptStates: Record<string, WorkflowExecution["state"]> = {};
     try {
-      result = await runPreparedManifestWorkflow(runnable, { signal: controller.signal });
+      const run = await runPreparedManifestWorkflowWithRetry(runnable, {
+        signal: controller.signal,
+        env: environment,
+        redactValues: Object.values(environment),
+        onAttempt(attemptResult, attempt) {
+          attemptStates[`command.attempt.${attempt}`] = attemptResult.status;
+          const event = createEvent(
+            "workflow.attempt_completed",
+            {
+              workflowId: running.workflowId,
+              executionId: running.id,
+              attempt,
+              status: attemptResult.status,
+              exitCode: attemptResult.exitCode,
+            },
+            {
+              projectId: running.projectId,
+              sessionId: running.sessionId,
+              taskId: running.taskId,
+              agent: "workflow-executor",
+              sourceService: "workbench-api",
+              level: attemptResult.status === "completed" ? "info" : "warn",
+              summary: `${prepared.workflow.command.name} attempt ${attempt} ${attemptResult.status}`,
+              correlationId: running.id,
+              causationId: startedEvent.id,
+            }
+          );
+          deps.store.appendEvent(event);
+          deps.publish(event);
+        },
+      });
+      result = run.result;
+      attemptResults = run.attempts;
     } finally {
       activeWorkflowControllers.delete(running.id);
+    }
+    let artifactFailure: string | null = null;
+    if (result.status === "completed") {
+      const validation = await validateExpectedArtifacts(runnable);
+      artifacts = [...new Set([...artifacts, ...validation.artifacts])];
+      if (!validation.valid) {
+        artifactFailure = [
+          validation.missing.length > 0 ? `missing: ${validation.missing.join(", ")}` : "",
+          ...validation.invalid.map((entry) => `${entry.id}: ${entry.reason}`),
+        ]
+          .filter(Boolean)
+          .join("; ");
+        result = {
+          ...result,
+          status: "failed",
+          blockedReason: `expected artifact validation failed: ${artifactFailure}`,
+        };
+      }
     }
     const state =
       result.status === "completed"
@@ -414,9 +476,10 @@ export function registerWorkflowRoutes(
       updatedAt: result.finishedAt,
       state,
       currentStepId: null,
-      stepStates: { ...(running.approvalId ? { approval: "completed" } : {}), command: state },
+      stepStates: { ...(running.approvalId ? { approval: "completed" } : {}), ...attemptStates, command: state },
       finishedAt: result.finishedAt,
       exitCode: result.exitCode,
+      artifacts,
       errorCode:
         state === "completed"
           ? null
@@ -424,7 +487,9 @@ export function registerWorkflowRoutes(
             ? "command_blocked"
             : result.status === "cancelled"
               ? "command_cancelled"
-              : "command_failed",
+              : artifactFailure
+                ? "expected_artifact_failed"
+                : "command_failed",
       errorSummary: state === "completed" ? null : (result.blockedReason ?? (result.stderr.slice(0, 1_000) || null)),
     };
     const saved = deps.store.workflows.save({
@@ -432,7 +497,7 @@ export function registerWorkflowRoutes(
       command: commandRecord(runnable),
       stdout: result.stdout,
       stderr: result.stderr,
-      durationMs: result.durationMs,
+      durationMs: attemptResults.reduce((total, attempt) => total + attempt.durationMs, 0),
     });
 
     if (prepared.workflow.command.category === "check") {

@@ -88,6 +88,40 @@ test("configuration precedence keeps manual and persisted settings above detecte
   assert.ok(compareConfigPrecedence("imported_legacy", "automatic_detection") < 0);
 });
 
+test("approved manifest commands synchronize canonical workflow definitions without overwriting manual definitions", () => {
+  const store = createStore(initializeStore(":memory:"));
+  const project = store.createProject({ path: "/tmp/workflow-definition-project", name: "Workflow Definitions" });
+  const imported = importLegacyProjectProfiles(legacySource, { home: "/home/test" })[1] as ProjectManifest;
+  const manifest: ProjectManifest = {
+    ...imported,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const generated = store.workflows.getDefinition(project.id, "check");
+  assert.equal(generated?.command?.id, "check");
+  assert.equal(generated?.origin.legacyRef, "manifest-command:check");
+
+  assert.ok(generated);
+  store.workflows.saveDefinition(
+    { ...generated, name: "Manual verification policy", updatedAt: new Date().toISOString() },
+    "manual"
+  );
+  const changedManifest = {
+    ...manifest,
+    commands: { ...manifest.commands, check: { ...manifest.commands.check, name: "Imported name changed" } },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, changedManifest, "test");
+  assert.equal(store.workflows.getDefinition(project.id, "check")?.name, "Manual verification policy");
+
+  store.projectRegistry.saveApprovedManifest(project.id, { ...changedManifest, commands: {} }, "test");
+  assert.equal(store.workflows.getDefinition(project.id, "check")?.name, "Manual verification policy");
+  store.db.close();
+});
+
 test("SQLite backup is consistent and restore validation records migrations", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-registry-backup-"));
   const databasePath = join(workspace, "workbench.db");

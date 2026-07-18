@@ -49,6 +49,7 @@ import {
 } from "./worktree.ts";
 
 export * from "./files.ts";
+export * from "./secrets.ts";
 export * from "./shell.ts";
 export * from "./workflows.ts";
 export * from "./worktree.ts";

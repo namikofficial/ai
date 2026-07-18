@@ -28,6 +28,13 @@
         "executionMode": "direct",
         "mutation": "read_only",
         "timeoutSeconds": 900,
+        "retryLimit": 1,
+        "retryDelaySeconds": 2,
+        "expectedArtifacts": [
+          { "id": "verification-report", "path": "artifacts/verify.json", "kind": "file", "required": false }
+        ],
+        "successCriteria": ["exit code is zero"],
+        "recoveryWorkflowIds": ["show-failed-checks"],
         "requiresCapabilities": ["pnpm"],
         "visibleWhen": []
       }

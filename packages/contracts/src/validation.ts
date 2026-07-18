@@ -156,6 +156,12 @@ const baseShape = {
 };
 const projectRefSchema = objectSchema({ id: nonEmptyString, name: nonEmptyString, path: nonEmptyString });
 const blockerSchema = objectSchema({ code: nonEmptyString, summary: nonEmptyString });
+const expectedArtifactSchema = objectSchema({
+  id: nonEmptyString,
+  path: nonEmptyString,
+  kind: enumSchema(["file", "directory", "either"] as const),
+  required: booleanSchema,
+});
 
 const gitStatusSchema = objectSchema({
   branch: nullable(nonEmptyString),
@@ -187,6 +193,11 @@ const commandRaw = objectSchema({
   executionMode: defaulted(enumSchema(["direct", "terminal", "tmux", "isolated", "background"] as const), "direct"),
   mutation: enumSchema(["read_only", "workspace_write", "project_write", "destructive", "external"] as const),
   timeoutSeconds: nullable(numberSchema({ minimum: 1, integer: true })),
+  retryLimit: defaulted(numberSchema({ minimum: 0, maximum: 5, integer: true }), 0),
+  retryDelaySeconds: defaulted(numberSchema({ minimum: 0, maximum: 300, integer: true }), 0),
+  expectedArtifacts: defaulted(arraySchema(expectedArtifactSchema), []),
+  successCriteria: defaulted(strings, []),
+  recoveryWorkflowIds: defaulted(strings, []),
   requiresCapabilities: strings,
   visibleWhen: strings,
 });

@@ -126,6 +126,13 @@ Example:
     "executionMode": "direct",
     "mutation": "read_only",
     "timeoutSeconds": 600,
+    "retryLimit": 1,
+    "retryDelaySeconds": 2,
+    "expectedArtifacts": [
+      { "id": "verification-report", "path": "artifacts/verify.json", "kind": "file", "required": true }
+    ],
+    "successCriteria": ["exit code is zero", "verification report exists"],
+    "recoveryWorkflowIds": ["show-failed-checks"],
     "requiresCapabilities": [],
     "visibleWhen": []
   }
@@ -157,10 +164,33 @@ without launching it; running work is cancelled by process group. On worker star
 is terminated when possible and finalized with `worker_restarted` rather than being replayed and risking duplicate
 side effects. Retry is intentionally not implicit.
 
+## Retries and expected artifacts
+
+`retryLimit` is the number of retries after the first attempt and is capped by the schema. Every attempt is recorded
+in `WorkflowExecution.stepStates` and as a normalized `workflow.attempt_completed` event. Automatic retries are
+allowed only for read-only commands; mutating commands must use an explicit recovery workflow so an uncertain side
+effect is never repeated. Cancellation stops further attempts. `retryDelaySeconds` is abort-aware.
+
+Expected artifacts are typed file/directory declarations relative to the actual workflow working directory. After a
+zero exit code, required artifacts are checked for existence, type, canonical-root containment, and secret-path
+exclusion. A missing or escaping artifact changes the execution to `failed` with `expected_artifact_failed`; verified
+canonical paths are appended to `WorkflowExecution.artifacts`. In isolated mode this validation runs inside the
+retained workspace.
+
+## Secret environment references
+
+Direct, isolated, and background commands may request names from `environmentRefs` only when the approved manifest
+also lists those names in `secretRefs`. Values come from the file named by `AI_WORKBENCH_SECRET_FILE`; that file must
+be a regular file owned by the Workbench user with mode 0600 or stricter. Values are passed only to the structured
+child process, are redacted from stdout/stderr before persistence, and are never placed in registry/status caches or
+workflow audit records. Missing, unapproved, or insecure providers fail the workflow explicitly. Terminal/tmux
+workflows with secret references remain blocked because their current desktop handoff is an inspectable API payload;
+a protected secret-delivery channel is required before enabling them.
+
 ## Remaining adapters
 
-- retry/dependency steps, expected-artifact validation, and explicit recovery workflows;
-- safe secret-reference resolution without logging values;
+- dependency steps and explicit recovery workflow execution;
+- protected secret delivery for terminal/tmux workflows;
 - isolated artifact diff presentation and explicit cleanup controls;
 - platform capability discovery and `visibleWhen` evaluation.
 

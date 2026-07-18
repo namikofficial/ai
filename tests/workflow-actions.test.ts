@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -41,6 +41,11 @@ function command(
     executionMode: "direct",
     mutation,
     timeoutSeconds: 30,
+    retryLimit: 0,
+    retryDelaySeconds: 0,
+    expectedArtifacts: [],
+    successCriteria: [],
+    recoveryWorkflowIds: [],
     requiresCapabilities: [],
     visibleWhen: [],
   };
@@ -71,6 +76,11 @@ test("workflow actions list approved commands, execute read-only work, and persi
         executionMode: "direct",
         mutation: "read_only",
         timeoutSeconds: 10,
+        retryLimit: 0,
+        retryDelaySeconds: 0,
+        expectedArtifacts: [],
+        successCriteria: [],
+        recoveryWorkflowIds: [],
         requiresCapabilities: [],
         visibleWhen: [],
       },
@@ -87,6 +97,11 @@ test("workflow actions list approved commands, execute read-only work, and persi
         executionMode: "direct",
         mutation: "read_only",
         timeoutSeconds: 10,
+        retryLimit: 0,
+        retryDelaySeconds: 0,
+        expectedArtifacts: [],
+        successCriteria: [],
+        recoveryWorkflowIds: [],
         requiresCapabilities: [],
         visibleWhen: [],
       },
@@ -179,6 +194,9 @@ test("background workflows use the durable queue and recover abandoned supervisi
   const background = command("background-version", "git", ["--version"]);
   background.executionMode = "background";
   background.category = "check";
+  const backgroundRetry = command("background-retry", "false", []);
+  backgroundRetry.executionMode = "background";
+  backgroundRetry.retryLimit = 1;
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -186,7 +204,7 @@ test("background workflows use the durable queue and recover abandoned supervisi
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    commands: { background },
+    commands: { background, backgroundRetry },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
   const handle = await startWorkbenchServer({
@@ -194,10 +212,10 @@ test("background workflows use the durable queue and recover abandoned supervisi
     inProcess: true,
     config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
   });
-  const request = () =>
+  const request = (workflowId = "background-version") =>
     handle.inject({
       method: "POST",
-      url: "/actions/background-version/run",
+      url: `/actions/${workflowId}/run`,
       headers: { accept: "application/json", "content-type": "application/json" },
       body: { projectId: project.id },
     });
@@ -214,6 +232,15 @@ test("background workflows use the durable queue and recover abandoned supervisi
     assert.equal(store.workflows.get(queuedData.execution.id)?.execution.state, "completed");
     assert.equal(store.workflows.getBackgroundJob(queuedData.execution.id)?.state, "completed");
     assert.equal(store.listCheckRuns(10, project.id)[0]?.status, "completed");
+
+    const retryData = JSON.parse((await request("background-retry")).body).data as {
+      execution: { id: string };
+    };
+    assert.equal(await processNextJob(store, { workerInstanceId: "test-worker" }), true);
+    const retried = store.workflows.get(retryData.execution.id)?.execution;
+    assert.equal(retried?.state, "failed");
+    assert.equal(retried?.stepStates["command.attempt.1"], "failed");
+    assert.equal(retried?.stepStates["command.attempt.2"], "failed");
 
     const cancelled = JSON.parse((await request()).body).data as { execution: { id: string } };
     const cancel = await handle.inject({
@@ -304,6 +331,86 @@ test("execution environment excludes ambient secrets and inline code", async () 
   } finally {
     if (previous === undefined) delete process.env.AI_WORKBENCH_TEST_SECRET;
     else process.env.AI_WORKBENCH_TEST_SECRET = previous;
+  }
+});
+
+test("approved secret references reach commands without entering responses or audit logs", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-secrets-"));
+  const secretFile = join(workspace, "workflow-secrets.env");
+  const secretValue = "workflow-secret-value-should-never-persist";
+  await writeFile(secretFile, `WORKBENCH_TEST_TOKEN=${secretValue}\n`, { mode: 0o600 });
+  const previousProvider = process.env.AI_WORKBENCH_SECRET_FILE;
+  process.env.AI_WORKBENCH_SECRET_FILE = secretFile;
+  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const project = store.createProject({ path: workspace, name: "Secret Workflow Project" });
+  const approved = command("approved-secret", "printenv", ["WORKBENCH_TEST_TOKEN"]);
+  approved.environmentRefs = ["WORKBENCH_TEST_TOKEN"];
+  const unapproved = command("unapproved-secret", "printenv", ["OTHER_TOKEN"]);
+  unapproved.environmentRefs = ["OTHER_TOKEN"];
+  const desktop = { ...approved, id: "desktop-secret", name: "desktop-secret", executionMode: "terminal" as const };
+  const background = {
+    ...approved,
+    id: "background-secret",
+    name: "background-secret",
+    executionMode: "background" as const,
+  };
+  const manifest: ProjectManifest = {
+    ...fixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+    secretRefs: ["WORKBENCH_TEST_TOKEN"],
+    commands: { approved, unapproved, desktop, background },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const handle = await startWorkbenchServer({
+    store,
+    inProcess: true,
+    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  const request = (workflowId: string) =>
+    handle.inject({
+      method: "POST",
+      url: `/actions/${workflowId}/run`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id },
+    });
+  try {
+    const ran = await request("approved-secret");
+    assert.equal(ran.statusCode, 200, ran.body);
+    const executionId = (JSON.parse(ran.body).data as { execution: { id: string } }).execution.id;
+    assert.match(ran.body, /REDACTED_SECRET/);
+    assert.doesNotMatch(ran.body, new RegExp(secretValue));
+    assert.doesNotMatch(JSON.stringify(store.workflows.get(executionId)), new RegExp(secretValue));
+
+    const queued = await request("background-secret");
+    assert.equal(queued.statusCode, 202, queued.body);
+    const backgroundExecutionId = (JSON.parse(queued.body).data as { execution: { id: string } }).execution.id;
+    assert.equal(await processNextJob(store, { workerInstanceId: "secret-test-worker" }), true);
+    const backgroundRecord = store.workflows.get(backgroundExecutionId);
+    assert.equal(backgroundRecord?.execution.state, "completed");
+    assert.match(backgroundRecord?.stdout ?? "", /REDACTED_SECRET/);
+    assert.doesNotMatch(JSON.stringify(backgroundRecord), new RegExp(secretValue));
+
+    const rejected = await request("unapproved-secret");
+    assert.equal(rejected.statusCode, 409);
+    assert.match(rejected.body, /not approved by the manifest/);
+    const desktopRejected = await request("desktop-secret");
+    assert.equal(desktopRejected.statusCode, 409);
+    assert.match(desktopRejected.body, /cannot deliver secret references/);
+
+    await chmod(secretFile, 0o644);
+    const insecure = await request("approved-secret");
+    assert.equal(insecure.statusCode, 422, insecure.body);
+    assert.match(insecure.body, /mode 0600/);
+    assert.doesNotMatch(insecure.body, new RegExp(secretValue));
+  } finally {
+    if (previousProvider === undefined) delete process.env.AI_WORKBENCH_SECRET_FILE;
+    else process.env.AI_WORKBENCH_SECRET_FILE = previousProvider;
+    await handle.close();
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 
@@ -461,6 +568,76 @@ test("running workflow cancellation terminates execution and persists cancelled 
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("workflow retries are audited, required artifacts are enforced, and mutating retries are rejected", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-policy-"));
+  const outside = await mkdtemp(join(tmpdir(), "ai-workflow-artifact-outside-"));
+  await writeFile(join(outside, "result.json"), "{}\n");
+  await symlink(join(outside, "result.json"), join(workspace, "escaped-result.json"));
+  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const project = store.createProject({ path: workspace, name: "Workflow Policy Project" });
+  const retry = command("retry", "false", []);
+  retry.retryLimit = 2;
+  const missingArtifact = command("missing-artifact", "true", []);
+  missingArtifact.expectedArtifacts = [{ id: "report", path: "report.json", kind: "file", required: true }];
+  const unsafeRetry = command("unsafe-retry", "git", ["tag", "unsafe-retry"], "project_write");
+  unsafeRetry.retryLimit = 1;
+  const escapingArtifact = command("escaping-artifact", "true", []);
+  escapingArtifact.expectedArtifacts = [
+    { id: "escaped-report", path: "escaped-result.json", kind: "file", required: true },
+  ];
+  const manifest: ProjectManifest = {
+    ...fixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+    commands: { retry, missingArtifact, unsafeRetry, escapingArtifact },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const handle = await startWorkbenchServer({
+    store,
+    inProcess: true,
+    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  const request = (workflowId: string) =>
+    handle.inject({
+      method: "POST",
+      url: `/actions/${workflowId}/run`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id },
+    });
+  try {
+    const retried = await request("retry");
+    assert.equal(retried.statusCode, 422, retried.body);
+    const retriedExecution = JSON.parse(retried.body).data.execution as {
+      stepStates: Record<string, string>;
+    };
+    assert.equal(retriedExecution.stepStates["command.attempt.1"], "failed");
+    assert.equal(retriedExecution.stepStates["command.attempt.2"], "failed");
+    assert.equal(retriedExecution.stepStates["command.attempt.3"], "failed");
+    assert.equal(store.listEvents().filter((event) => event.type === "workflow.attempt_completed").length, 3);
+
+    const artifact = await request("missing-artifact");
+    assert.equal(artifact.statusCode, 422, artifact.body);
+    const artifactExecution = JSON.parse(artifact.body).data.execution as { errorCode: string; errorSummary: string };
+    assert.equal(artifactExecution.errorCode, "expected_artifact_failed");
+    assert.match(artifactExecution.errorSummary, /missing: report/);
+
+    const escaped = await request("escaping-artifact");
+    assert.equal(escaped.statusCode, 422, escaped.body);
+    assert.match(escaped.body, /resolves outside workflow working directory/);
+
+    const unsafe = await request("unsafe-retry");
+    assert.equal(unsafe.statusCode, 409, unsafe.body);
+    assert.match(unsafe.body, /cannot automatically retry/);
+  } finally {
+    await handle.close();
+    await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
 
@@ -625,6 +802,7 @@ test("isolated workflows retain review artifacts without mutating the canonical 
   const project = store.createProject({ path: workspace, name: "Isolated Project" });
   const isolated = command("compile", "python3", ["-m", "compileall", "app.py"], "workspace_write");
   isolated.executionMode = "isolated";
+  isolated.expectedArtifacts = [{ id: "bytecode", path: "__pycache__", kind: "directory", required: true }];
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -671,9 +849,10 @@ test("isolated workflows retain review artifacts without mutating the canonical 
       command: { workingDirectory: string };
     };
     assert.equal(completed.execution.state, "completed");
-    assert.equal(completed.execution.artifacts.length, 1);
+    assert.equal(completed.execution.artifacts.length, 2);
     assert.equal(completed.command.workingDirectory, completed.execution.artifacts[0]);
-    await access(join(completed.execution.artifacts[0] ?? "", "__pycache__"));
+    assert.equal(completed.execution.artifacts[1], join(completed.execution.artifacts[0] ?? "", "__pycache__"));
+    await access(completed.execution.artifacts[1] ?? "");
     await assert.rejects(access(join(workspace, "__pycache__")));
   } finally {
     await handle.close();

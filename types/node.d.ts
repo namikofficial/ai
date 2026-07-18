@@ -52,6 +52,7 @@ declare module "node:util" {
 }
 
 declare module "node:fs/promises" {
+  export function chmod(path: string, mode: number): Promise<void>;
   export interface Dirent {
     name: string;
     isDirectory(): boolean;
@@ -79,13 +80,16 @@ declare module "node:fs/promises" {
     isFile(): boolean;
     size: number;
     mtimeMs: number;
+    mode: number;
+    uid: number;
   }>;
+  export function symlink(target: string, path: string): Promise<void>;
   export function rm(path: string, options?: { recursive?: boolean; force?: boolean }): Promise<void>;
   export function unlink(path: string): Promise<void>;
   export function writeFile(
     path: string,
     data: string | Uint8Array,
-    options?: { encoding?: BufferEncoding }
+    options?: { encoding?: BufferEncoding; mode?: number }
   ): Promise<void>;
 }
 
