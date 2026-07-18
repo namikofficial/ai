@@ -383,6 +383,64 @@ test("background workflows use the durable queue and recover abandoned supervisi
   }
 });
 
+test("running background worker processes are cancelled by process group without retry", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-background-cancel-"));
+  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const project = store.createProject({ path: workspace, name: "Background Cancellation Project" });
+  const server = command("background-server", "python3", ["-m", "http.server", "0"]);
+  server.executionMode = "background";
+  server.retryLimit = 1;
+  const manifest: ProjectManifest = {
+    ...fixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+    commands: { server },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const handle = await startWorkbenchServer({
+    store,
+    inProcess: true,
+    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  try {
+    const queued = await handle.inject({
+      method: "POST",
+      url: "/actions/background-server/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id },
+    });
+    const executionId = (JSON.parse(queued.body).data as { execution: { id: string } }).execution.id;
+    const processing = processNextJob(store, {
+      workerInstanceId: "background-cancel-worker",
+      runtimeDir: join(workspace, "runtime"),
+    });
+    let running = false;
+    for (let attempt = 0; attempt < 100 && !running; attempt += 1) {
+      const background = store.workflows.getBackgroundJob(executionId);
+      running = background?.state === "running" && background.processPid !== null;
+      if (!running) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(running, true);
+    const cancel = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/cancel`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(cancel.statusCode, 202, cancel.body);
+    assert.equal(await processing, true);
+    const execution = store.workflows.get(executionId)?.execution;
+    assert.equal(execution?.state, "cancelled");
+    assert.equal(execution?.stepStates["command.attempt.2"], undefined);
+    assert.equal(store.workflows.getBackgroundJob(executionId)?.state, "cancelled");
+  } finally {
+    await handle.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("execution environment excludes ambient secrets and inline code", async () => {
   const previous = process.env.AI_WORKBENCH_TEST_SECRET;
   process.env.AI_WORKBENCH_TEST_SECRET = "must-not-leak";
