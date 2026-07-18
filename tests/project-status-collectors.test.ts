@@ -3,11 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import {
-  type ProjectManifest,
-  type WorkflowExecution,
-  projectStatusSchema,
-} from "../packages/contracts/src/index.ts";
+import { type ProjectManifest, projectStatusSchema, type WorkflowExecution } from "../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import {
   buildProjectStatus,
