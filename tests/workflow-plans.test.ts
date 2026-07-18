@@ -14,11 +14,7 @@ const fixture = JSON.parse(
   await readFile(new URL("./fixtures/contracts/v1-control-plane.json", import.meta.url), "utf8")
 ) as { ProjectManifest: ProjectManifest; WorkflowDefinition: WorkflowDefinition };
 
-function step(
-  id: string,
-  workflowId: string,
-  dependsOn: string[] = []
-): WorkflowStepDefinition {
+function step(id: string, workflowId: string, dependsOn: string[] = []): WorkflowStepDefinition {
   return {
     id,
     name: id,
@@ -57,7 +53,10 @@ test("workflow plans topologically order canonical command references and bind c
     const prepared = await prepareWorkflowPlan(manifest, definition, { allowMutating: true });
     assert.equal(prepared.ok, true);
     if (!prepared.ok) return;
-    assert.deepEqual(prepared.plan.steps.map((entry) => entry.step.id), ["first-step", "second-step"]);
+    assert.deepEqual(
+      prepared.plan.steps.map((entry) => entry.step.id),
+      ["first-step", "second-step"]
+    );
     assert.equal(prepared.plan.mutation, "read_only");
     assert.equal(prepared.plan.approvalRequired, false);
     const context = await collectWorkflowPlanApprovalContext(prepared.plan);

@@ -51,8 +51,8 @@ import {
 export * from "./files.ts";
 export * from "./secrets.ts";
 export * from "./shell.ts";
-export * from "./workflows.ts";
 export * from "./workflow-plans.ts";
+export * from "./workflows.ts";
 export * from "./worktree.ts";
 
 export interface ExecutionEventEmitter {
