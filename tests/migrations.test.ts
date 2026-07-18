@@ -24,6 +24,7 @@ test("migrations list includes the complete control-plane baseline", () => {
   assert.ok(versions.includes("0013_control_plane_registry"));
   assert.ok(versions.includes("0014_active_context"));
   assert.ok(versions.includes("0015_pin_anchors"));
+  assert.ok(versions.includes("0016_normalized_events"));
 });
 
 test("migrations apply cleanly and create all expected tables", async () => {
@@ -32,7 +33,7 @@ test("migrations apply cleanly and create all expected tables", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 15);
+    assert.equal(result.applied.length, 16);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -57,6 +58,20 @@ test("migrations apply cleanly and create all expected tables", async () => {
     assert.ok(tableNames.includes("active_project_selection"), "active_project_selection table must exist");
     assert.ok(tableNames.includes("desktop_observations"), "desktop_observations table must exist");
     assert.ok(tableNames.includes("active_context_state"), "active_context_state table must exist");
+
+    const eventColumns = db.prepare("PRAGMA table_info(agent_events)").all() as Array<{ name: string }>;
+    const eventColumnNames = eventColumns.map((column) => column.name);
+    for (const name of [
+      "run_id",
+      "schema_version",
+      "source_service",
+      "severity",
+      "summary",
+      "correlation_id",
+      "causation_id",
+    ]) {
+      assert.ok(eventColumnNames.includes(name), `agent_events.${name} must exist`);
+    }
 
     const executionCommandColumns = db.prepare("PRAGMA table_info(execution_commands)").all() as Array<{
       name: string;

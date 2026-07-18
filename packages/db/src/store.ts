@@ -146,6 +146,49 @@ function asString(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
+function rowToEvent(row: Row): EventEnvelope {
+  const ts = asString(row.ts);
+  const sourceService = asString(row.source_service) || asString(row.agent) || "workbench";
+  const originSource = sourceService === "mcp" || sourceService === "desktop" || sourceService === "cli"
+    ? sourceService
+    : "workbench";
+  const level = asString(row.level) as EventEnvelope["level"];
+  const severityValue = asString(row.severity);
+  const severity: EventEnvelope["severity"] =
+    severityValue === "debug" ||
+    severityValue === "info" ||
+    severityValue === "warning" ||
+    severityValue === "error" ||
+    severityValue === "critical"
+      ? severityValue
+      : level === "warn"
+        ? "warning"
+        : level;
+  return {
+    schemaVersion: 1,
+    id: asString(row.id),
+    createdAt: ts,
+    updatedAt: ts,
+    origin: { source: originSource, instanceId: null, legacyRef: null },
+    capabilities: ["normalized-event", "correlation"],
+    type: asString(row.type),
+    occurredAt: ts,
+    sessionId: row.session_id == null ? null : asString(row.session_id),
+    taskId: row.task_id == null ? null : asString(row.task_id),
+    runId: row.run_id == null ? null : asString(row.run_id),
+    projectId: row.project_id == null ? null : asString(row.project_id),
+    sourceService,
+    severity,
+    summary: asString(row.summary) || asString(row.type).replaceAll(".", " "),
+    correlationId: asString(row.correlation_id) || asString(row.id),
+    causationId: row.causation_id == null ? null : asString(row.causation_id),
+    agent: row.agent == null ? null : asString(row.agent),
+    level,
+    ts,
+    payload: JSON.parse(asString(row.payload_json)) as Record<string, unknown>,
+  };
+}
+
 function rowToProject(row: Row): ProjectRecord {
   return {
     id: asString(row.id),
@@ -631,18 +674,27 @@ export function createStore(db: DatabaseSync) {
     },
     appendEvent(event: EventEnvelope): EventEnvelope {
       db.prepare(
-        `INSERT INTO agent_events (id, session_id, task_id, project_id, type, agent, level, ts, payload_json)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO agent_events (
+           id, session_id, task_id, run_id, project_id, type, agent, level, ts, payload_json,
+           schema_version, source_service, severity, summary, correlation_id, causation_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         event.id,
         event.sessionId,
         event.taskId,
+        event.runId,
         event.projectId,
         event.type,
         event.agent,
         event.level,
         event.ts,
-        JSON.stringify(event.payload)
+        JSON.stringify(event.payload),
+        event.schemaVersion,
+        event.sourceService,
+        event.severity,
+        event.summary,
+        event.correlationId,
+        event.causationId
       );
       return event;
     },
@@ -652,17 +704,7 @@ export function createStore(db: DatabaseSync) {
             .prepare("SELECT * FROM agent_events WHERE session_id = ? ORDER BY ts ASC LIMIT ?")
             .all(sessionId, limit) as Row[])
         : (db.prepare("SELECT * FROM agent_events ORDER BY ts ASC LIMIT ?").all(limit) as Row[]);
-      return rows.map((row) => ({
-        id: asString(row.id),
-        type: asString(row.type),
-        sessionId: row.session_id == null ? null : asString(row.session_id),
-        taskId: row.task_id == null ? null : asString(row.task_id),
-        projectId: row.project_id == null ? null : asString(row.project_id),
-        agent: row.agent == null ? null : asString(row.agent),
-        level: asString(row.level) as EventEnvelope["level"],
-        ts: asString(row.ts),
-        payload: JSON.parse(asString(row.payload_json)) as Record<string, unknown>,
-      }));
+      return rows.map(rowToEvent);
     },
     listEventsSince(since: string, sessionId?: string, limit = 500): EventEnvelope[] {
       // Cursor can be an event ID or a timestamp.
@@ -686,17 +728,7 @@ export function createStore(db: DatabaseSync) {
             .prepare("SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC LIMIT ?")
             .all(sessionId, tsCursor, limit) as Row[])
         : (db.prepare("SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC LIMIT ?").all(tsCursor, limit) as Row[]);
-      return rows.map((row) => ({
-        id: asString(row.id),
-        type: asString(row.type),
-        sessionId: row.session_id == null ? null : asString(row.session_id),
-        taskId: row.task_id == null ? null : asString(row.task_id),
-        projectId: row.project_id == null ? null : asString(row.project_id),
-        agent: row.agent == null ? null : asString(row.agent),
-        level: asString(row.level) as EventEnvelope["level"],
-        ts: asString(row.ts),
-        payload: JSON.parse(asString(row.payload_json)) as Record<string, unknown>,
-      }));
+      return rows.map(rowToEvent);
     },
     listRecentLessons(limit = 20): Array<{
       id: string;
@@ -1992,6 +2024,11 @@ export function createStore(db: DatabaseSync) {
         { taskId: task.id, agent: "orchestrator" }
       );
       push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
+      push(
+        "index.started",
+        { projectName: project.name, manualRequest: true },
+        { taskId: task.id, agent: "indexer" }
+      );
 
       const embeddingProfileId = session.modelProfile ?? "embedding-local";
       const embeddingConfig = readEmbeddingConfig({
@@ -2118,6 +2155,16 @@ export function createStore(db: DatabaseSync) {
       push(
         "task.completed",
         { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed },
+        { taskId: task.id, agent: "indexer" }
+      );
+      push(
+        "index.completed",
+        {
+          projectName: project.name,
+          filesIndexed: indexSummary.filesIndexed,
+          chunksIndexed: indexSummary.chunksIndexed,
+          manualRequest: true,
+        },
         { taskId: task.id, agent: "indexer" }
       );
       push("session.completed", { summary: completedSession.finalSummary }, { agent: "orchestrator" });

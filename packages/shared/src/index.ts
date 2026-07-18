@@ -301,11 +301,23 @@ export interface MemoryEntry {
 }
 
 export interface EventEnvelope<TPayload = Record<string, unknown>> {
+  schemaVersion: 1;
   id: string;
+  createdAt: string;
+  updatedAt: string;
+  origin: { source: "workbench" | "desktop" | "cli" | "mcp" | "import" | "legacy" | "detector"; instanceId: string | null; legacyRef: string | null };
+  capabilities: string[];
   type: string;
+  occurredAt: string;
   sessionId: string | null;
   taskId: string | null;
+  runId: string | null;
   projectId: string | null;
+  sourceService: string;
+  severity: "debug" | "info" | "warning" | "error" | "critical";
+  summary: string;
+  correlationId: string;
+  causationId: string | null;
   agent: string | null;
   level: EventLevel;
   ts: string;
@@ -461,7 +473,29 @@ export type EventType =
   | "project.unpinned"
   | "active_context.changed"
   | "context.confidence_reduced"
-  | "desktop.observed";
+  | "desktop.observed"
+  | "run.queued"
+  | "run.started"
+  | "plan.ready"
+  | "workspace.ready"
+  | "edit.proposed"
+  | "edit.applied"
+  | "edit.rejected"
+  | "repair.attempted"
+  | "approval.required"
+  | "approval.granted"
+  | "approval.rejected"
+  | "patch.applied"
+  | "run.completed"
+  | "run.failed"
+  | "run.cancelled"
+  | "review.rejected"
+  | "review.passed"
+  | "index.started"
+  | "index.progressed"
+  | "index.completed"
+  | "runtime.degraded"
+  | "runtime.recovered";
 
 export interface ConfigSnapshot {
   databasePath: string;
@@ -528,6 +562,20 @@ export function createId(prefix: string): string {
   return `${prefix}_${globalThis.crypto.randomUUID()}`;
 }
 
+function severityForLevel(level: EventLevel): EventEnvelope["severity"] {
+  if (level === "warn") return "warning";
+  return level;
+}
+
+function eventSummary(type: string, payload: Record<string, unknown>, explicit?: string): string {
+  if (explicit?.trim()) return explicit.trim();
+  for (const key of ["summary", "message", "reason", "title", "name"]) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim().slice(0, 500);
+  }
+  return type.replaceAll(".", " ");
+}
+
 export function createEvent<TPayload extends Record<string, unknown>>(
   type: EventType,
   payload: TPayload,
@@ -537,19 +585,43 @@ export function createEvent<TPayload extends Record<string, unknown>>(
     projectId?: string | null;
     agent?: string | null;
     level?: EventLevel;
+    runId?: string | null;
+    sourceService?: string;
+    summary?: string;
+    severity?: EventEnvelope["severity"];
+    correlationId?: string;
+    causationId?: string | null;
+    originSource?: EventEnvelope["origin"]["source"];
     id?: string;
     ts?: string;
   } = {}
 ): EventEnvelope<TPayload> {
+  const id = details.id ?? createId("evt");
+  const ts = details.ts ?? new Date().toISOString();
+  const level = details.level ?? "info";
+  const sourceService = details.sourceService ?? details.agent ?? "workbench";
   return {
-    id: details.id ?? createId("evt"),
+    schemaVersion: 1,
+    id,
+    createdAt: ts,
+    updatedAt: ts,
+    origin: { source: details.originSource ?? "workbench", instanceId: null, legacyRef: null },
+    capabilities: ["normalized-event", "correlation"],
     type,
+    occurredAt: ts,
     sessionId: details.sessionId ?? null,
     taskId: details.taskId ?? null,
+    runId: details.runId ?? null,
     projectId: details.projectId ?? null,
+    sourceService,
+    severity: details.severity ?? severityForLevel(level),
+    summary: eventSummary(type, payload, details.summary),
+    correlationId:
+      details.correlationId ?? details.runId ?? details.sessionId ?? details.projectId ?? id,
+    causationId: details.causationId ?? null,
     agent: details.agent ?? null,
-    level: details.level ?? "info",
-    ts: details.ts ?? new Date().toISOString(),
+    level,
+    ts,
     payload,
   };
 }
@@ -577,19 +649,72 @@ export function parseAskRequest(value: unknown): AskRequest {
 
 export function parseEventEnvelope(value: unknown): EventEnvelope {
   const input = requireObject(value, "event");
+  const id = requireString(input.id, "id");
+  const type = requireString(input.type, "type");
+  const ts = requireString(input.occurredAt ?? input.ts, "occurredAt");
+  const payload = requireObject(input.payload, "payload");
+  const level: EventLevel =
+    input.level === "debug" || input.level === "info" || input.level === "warn" || input.level === "error"
+      ? input.level
+      : input.severity === "warning"
+        ? "warn"
+        : input.severity === "debug" || input.severity === "info" || input.severity === "error"
+          ? input.severity
+          : "info";
+  const severity: EventEnvelope["severity"] =
+    input.severity === "debug" ||
+    input.severity === "info" ||
+    input.severity === "warning" ||
+    input.severity === "error" ||
+    input.severity === "critical"
+      ? input.severity
+      : severityForLevel(level);
+  const rawOrigin = typeof input.origin === "object" && input.origin !== null ? input.origin as Record<string, unknown> : {};
+  const source = rawOrigin.source;
+  const originSource: EventEnvelope["origin"]["source"] =
+    source === "desktop" || source === "cli" || source === "mcp" || source === "import" || source === "legacy" || source === "detector"
+      ? source
+      : "workbench";
+  const sourceService = typeof input.sourceService === "string" && input.sourceService.trim()
+    ? input.sourceService.trim()
+    : typeof input.agent === "string" && input.agent.trim()
+      ? input.agent.trim()
+      : "workbench";
   return {
-    id: requireString(input.id, "id"),
-    type: requireString(input.type, "type"),
+    schemaVersion: 1,
+    id,
+    createdAt: typeof input.createdAt === "string" ? input.createdAt : ts,
+    updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : ts,
+    origin: {
+      source: originSource,
+      instanceId: typeof rawOrigin.instanceId === "string" ? rawOrigin.instanceId : null,
+      legacyRef: typeof rawOrigin.legacyRef === "string" ? rawOrigin.legacyRef : input.schemaVersion === 1 ? null : id,
+    },
+    capabilities: Array.isArray(input.capabilities)
+      ? input.capabilities.filter((item): item is string => typeof item === "string")
+      : ["normalized-event", "legacy-adapter"],
+    type,
+    occurredAt: ts,
     sessionId: typeof input.sessionId === "string" ? input.sessionId : null,
     taskId: typeof input.taskId === "string" ? input.taskId : null,
+    runId: typeof input.runId === "string" ? input.runId : null,
     projectId: typeof input.projectId === "string" ? input.projectId : null,
+    sourceService,
+    severity,
+    summary: eventSummary(type, payload, typeof input.summary === "string" ? input.summary : undefined),
+    correlationId:
+      typeof input.correlationId === "string" && input.correlationId.trim()
+        ? input.correlationId
+        : typeof input.runId === "string"
+          ? input.runId
+          : typeof input.sessionId === "string"
+            ? input.sessionId
+            : id,
+    causationId: typeof input.causationId === "string" ? input.causationId : null,
     agent: typeof input.agent === "string" ? input.agent : null,
-    level:
-      input.level === "debug" || input.level === "info" || input.level === "warn" || input.level === "error"
-        ? input.level
-        : "info",
-    ts: requireString(input.ts, "ts"),
-    payload: requireObject(input.payload, "payload"),
+    level,
+    ts,
+    payload,
   };
 }
 

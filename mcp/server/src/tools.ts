@@ -982,6 +982,7 @@ async function handleTool(
             modelProfile: "dev-editor-local",
           });
       await store.ensureRuntimeDirs(config.runtimeDir);
+      let previousExecutionEventId: string | null = null;
       const result = await runDevWorkflow({
         request: devRequest,
         project: {
@@ -1012,6 +1013,24 @@ async function handleTool(
         runtimeDir: config.runtimeDir,
         sessionId: session.id,
         source: "mcp",
+        emit: (executionEvent) => {
+          const event = createEvent(executionEvent.kind, executionEvent.data, {
+            id: executionEvent.id,
+            sessionId: executionEvent.sessionId,
+            projectId: executionEvent.projectId,
+            runId: executionEvent.runId,
+            agent: "mcp",
+            sourceService: "mcp",
+            originSource: "mcp",
+            level: executionEvent.level,
+            summary: executionEvent.message,
+            correlationId: executionEvent.runId,
+            causationId: previousExecutionEventId,
+            ts: executionEvent.ts,
+          });
+          store.appendEvent(event);
+          previousExecutionEventId = event.id;
+        },
       });
       return result.result;
     }

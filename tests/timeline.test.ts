@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { createEvent } from "../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../packages/timeline/src/index.ts";
 
 const session = {
@@ -25,28 +26,18 @@ test("timeline builder sorts items chronologically and links related context", (
   const timeline = buildSessionTimeline({
     session,
     events: [
-      {
+      createEvent("session.completed", { ok: true }, {
         id: "event-2",
-        type: "session.completed",
         sessionId: session.id,
-        taskId: null,
         projectId: session.projectId,
-        agent: null,
-        level: "info",
         ts: "2026-01-01T00:00:03.000Z",
-        payload: { ok: true },
-      },
-      {
+      }),
+      createEvent("session.started", { ok: true }, {
         id: "event-1",
-        type: "session.started",
         sessionId: session.id,
-        taskId: null,
         projectId: session.projectId,
-        agent: null,
-        level: "info",
         ts: "2026-01-01T00:00:01.000Z",
-        payload: { ok: true },
-      },
+      }),
     ],
     messages: [
       {

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
+import { createEvent } from "../packages/shared/src/index.ts";
 
 async function startQdrantStub(vectorSize: number): Promise<{
   url: string;
@@ -79,17 +80,13 @@ test("applies the migration and stores projects", async () => {
     source: "test",
   });
 
-  store.appendEvent({
-    id: "evt_test",
-    type: "session.started",
-    sessionId: session.id,
-    taskId: null,
-    projectId: project.id,
-    agent: "test",
-    level: "info",
-    ts: new Date().toISOString(),
-    payload: { ok: true },
-  });
+  store.appendEvent(
+    createEvent(
+      "session.started",
+      { ok: true },
+      { id: "evt_test", sessionId: session.id, projectId: project.id, agent: "test" }
+    )
+  );
 
   const events = store.listEvents(session.id);
   assert.equal(events.length, 1);

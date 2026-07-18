@@ -333,13 +333,20 @@ export function registerWorkflowRoutes(
         finishedAt: result?.finishedAt ?? new Date().toISOString(),
       });
 
-      deps.store.appendEvent(
-        createEvent(
-          result?.status === "blocked" ? "tool.blocked" : "check.completed",
-          { tool: name },
-          { projectId, agent: "checks" }
-        )
+      const checkEvent = createEvent(
+        result?.status === "blocked" ? "tool.blocked" : result?.status === "completed" ? "check.completed" : "check.failed",
+        { name, status: result?.status ?? "blocked", checkId: check.id },
+        {
+          projectId,
+          agent: "checks",
+          sourceService: "workbench-api",
+          level: result?.status === "completed" ? "info" : "error",
+          summary: result?.status === "completed" ? `${name} passed` : `${name} ${result?.status ?? "blocked"}`,
+          correlationId: check.id,
+        }
       );
+      deps.store.appendEvent(checkEvent);
+      deps.publish(checkEvent);
 
       if (isHtmlRequest(req)) {
         sendHtml(res, renderChecksPage(deps.store));
@@ -462,6 +469,7 @@ export function registerWorkflowRoutes(
             modelProfile: "dev-editor-local",
           });
       await deps.store.ensureRuntimeDirs(deps.config.runtimeDir);
+      let previousExecutionEventId: string | null = null;
       const result = await runDevWorkflow({
         request: devRequest,
         project: {
@@ -492,6 +500,24 @@ export function registerWorkflowRoutes(
         runtimeDir: deps.config.runtimeDir,
         sessionId: session.id,
         source: "api",
+        emit: (executionEvent) => {
+          const event = createEvent(executionEvent.kind, executionEvent.data, {
+            id: executionEvent.id,
+            sessionId: executionEvent.sessionId,
+            projectId: executionEvent.projectId,
+            runId: executionEvent.runId,
+            agent: "dev-runner",
+            sourceService: "workbench-api",
+            level: executionEvent.level,
+            summary: executionEvent.message,
+            correlationId: executionEvent.runId,
+            causationId: previousExecutionEventId,
+            ts: executionEvent.ts,
+          });
+          deps.store.appendEvent(event);
+          deps.publish(event);
+          previousExecutionEventId = event.id;
+        },
       });
       sendJson(res, json("ok", result.result));
     })
@@ -567,6 +593,24 @@ export function registerWorkflowRoutes(
         decidedBy: typeof body?.decidedBy === "string" ? body.decidedBy : "api",
         notes: typeof body?.notes === "string" ? body.notes : undefined,
       });
+      if (approval.ok && approval.run) {
+        const approvalRecord = deps.store.execution.listApprovals(approval.run.id).at(-1) ?? null;
+        const event = createEvent(
+          "approval.granted",
+          { approvalId: approvalRecord?.id ?? null, decidedBy: typeof body?.decidedBy === "string" ? body.decidedBy : "api" },
+          {
+            sessionId: approval.run.sessionId,
+            projectId: approval.run.projectId,
+            runId: approval.run.id,
+            agent: "approvals",
+            sourceService: "workbench-api",
+            summary: "Development run approved",
+            correlationId: approval.run.id,
+          }
+        );
+        deps.store.appendEvent(event);
+        deps.publish(event);
+      }
       sendJson(
         res,
         approval.ok
@@ -596,6 +640,23 @@ export function registerWorkflowRoutes(
         projectPath: project.path,
         runtime: { devRuns: deps.store.dev, execution: deps.store.execution },
       });
+      if (outcome.ok && outcome.run) {
+        const event = createEvent(
+          "run.completed",
+          { appliedFiles: outcome.applied },
+          {
+            sessionId: outcome.run.sessionId,
+            projectId: outcome.run.projectId,
+            runId: outcome.run.id,
+            agent: "dev-runner",
+            sourceService: "workbench-api",
+            summary: outcome.run.summary,
+            correlationId: outcome.run.id,
+          }
+        );
+        deps.store.appendEvent(event);
+        deps.publish(event);
+      }
       sendJson(
         res,
         outcome.ok
@@ -618,6 +679,23 @@ export function registerWorkflowRoutes(
         runtime: { devRuns: deps.store.dev, execution: deps.store.execution },
         reason: typeof body?.reason === "string" ? body.reason : undefined,
       });
+      if (outcome.ok && outcome.run) {
+        const event = createEvent(
+          "run.cancelled",
+          { reason: typeof body?.reason === "string" ? body.reason : null },
+          {
+            sessionId: outcome.run.sessionId,
+            projectId: outcome.run.projectId,
+            runId: outcome.run.id,
+            agent: "dev-runner",
+            sourceService: "workbench-api",
+            summary: outcome.run.summary,
+            correlationId: outcome.run.id,
+          }
+        );
+        deps.store.appendEvent(event);
+        deps.publish(event);
+      }
       sendJson(
         res,
         outcome.ok ? json("ok", outcome.run) : json("error", undefined, { message: outcome.error ?? "cancel failed" }),
