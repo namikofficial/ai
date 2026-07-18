@@ -6,13 +6,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
 import { processNextJob, recoverAbandonedBackgroundWorkflows } from "../apps/worker/src/worker.ts";
-import type { ProjectManifest } from "../packages/contracts/src/index.ts";
+import type { ProjectManifest, WorkflowDefinition, WorkflowStepDefinition } from "../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import { runAllowedCommand } from "../packages/execution-engine/src/index.ts";
 
 const fixture = JSON.parse(
   await readFile(new URL("./fixtures/contracts/v1-control-plane.json", import.meta.url), "utf8")
-) as { ProjectManifest: ProjectManifest };
+) as { ProjectManifest: ProjectManifest; WorkflowDefinition: WorkflowDefinition };
 function execFileAsync(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(file, args, { encoding: "utf8" }, (error, stdout, stderr) => {
@@ -48,6 +48,22 @@ function command(
     recoveryWorkflowIds: [],
     requiresCapabilities: [],
     visibleWhen: [],
+  };
+}
+
+function workflowStep(id: string, workflowId: string, dependsOn: string[] = []): WorkflowStepDefinition {
+  return {
+    id,
+    name: id,
+    workflowId,
+    dependsOn,
+    executionMode: "direct",
+    mutation: "read_only",
+    approvalRequired: false,
+    timeoutSeconds: 30,
+    retryLimit: 0,
+    successCriteria: ["exit code is zero"],
+    recoveryWorkflowIds: [],
   };
 }
 
@@ -670,6 +686,109 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     await handle.close();
     await rm(workspace, { recursive: true, force: true });
     await rm(outside, { recursive: true, force: true });
+  }
+});
+
+test("workflow definition DAGs execute in dependency order and block downstream steps after failure", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-dag-"));
+  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const project = store.createProject({ path: workspace, name: "Workflow DAG Project" });
+  const first = command("first", "true", []);
+  const second = command("second", "true", []);
+  const failing = command("failing", "false", []);
+  const never = command("never", "true", []);
+  const manifest: ProjectManifest = {
+    ...fixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+    commands: { first, second, failing, never },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const timestamp = new Date().toISOString();
+  const definition = (id: string, steps: WorkflowStepDefinition[]): WorkflowDefinition => ({
+    ...fixture.WorkflowDefinition,
+    id,
+    projectId: project.id,
+    name: id,
+    command: null,
+    steps,
+    expectedArtifacts: [],
+    approvalRequired: false,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
+  store.workflows.saveDefinition(
+    definition("success-pipeline", [
+      workflowStep("second-step", "second", ["first-step"]),
+      workflowStep("first-step", "first"),
+    ]),
+    "manual"
+  );
+  store.workflows.saveDefinition(
+    definition("failure-pipeline", [
+      workflowStep("first-step", "first"),
+      workflowStep("failure-step", "failing", ["first-step"]),
+      workflowStep("downstream-step", "never", ["failure-step"]),
+    ]),
+    "manual"
+  );
+  const handle = await startWorkbenchServer({
+    store,
+    inProcess: true,
+    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  const request = (workflowId: string) =>
+    handle.inject({
+      method: "POST",
+      url: `/actions/${workflowId}/run`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id },
+    });
+  try {
+    const actions = await handle.inject({
+      method: "GET",
+      url: `/actions?projectId=${project.id}`,
+      headers: { accept: "application/json" },
+    });
+    assert.ok(
+      (JSON.parse(actions.body).data as Array<{ workflowId: string }>).some(
+        (item) => item.workflowId === "success-pipeline"
+      )
+    );
+
+    const succeeded = await request("success-pipeline");
+    assert.equal(succeeded.statusCode, 200, succeeded.body);
+    const succeededData = JSON.parse(succeeded.body).data as { execution: { id: string; state: string } };
+    assert.equal(succeededData.execution.state, "completed");
+    assert.deepEqual(
+      store.workflows.listStepExecutions(succeededData.execution.id).map((step) => [step.stepId, step.state]),
+      [
+        ["first-step", "completed"],
+        ["second-step", "completed"],
+      ]
+    );
+    const status = await handle.inject({
+      method: "GET",
+      url: `/actions/executions/${succeededData.execution.id}`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal((JSON.parse(status.body).data.steps as unknown[]).length, 2);
+
+    const failed = await request("failure-pipeline");
+    assert.equal(failed.statusCode, 422, failed.body);
+    const failedData = JSON.parse(failed.body).data as {
+      execution: { id: string; state: string; stepStates: Record<string, string> };
+    };
+    assert.equal(failedData.execution.state, "failed");
+    assert.equal(failedData.execution.stepStates["failure-step"], "failed");
+    assert.equal(failedData.execution.stepStates["downstream-step"], "blocked");
+    assert.equal(store.workflows.listStepExecutions(failedData.execution.id)[2]?.errorCode, "dependency_failed");
+  } finally {
+    await handle.close();
+    await rm(workspace, { recursive: true, force: true });
   }
 });
 

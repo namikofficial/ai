@@ -203,14 +203,21 @@ export function registerWorkflowRoutes(
       updatedAt: startedAt,
       startedAt,
       currentStepId: plan.steps[0]?.step.id ?? null,
-      stepStates: Object.fromEntries(plan.steps.map((entry) => [entry.step.id, "waiting"])),
+      stepStates: {
+        ...(existing.approvalId ? { approval: "completed" } : {}),
+        ...Object.fromEntries(plan.steps.map((entry) => [entry.step.id, "waiting"])),
+      },
       artifacts: workspacePath ? [workspacePath] : [],
       errorCode: null,
       errorSummary: null,
     };
     let record = deps.store.workflows.save({
       execution,
-      command: { executable: "workflow-plan", arguments: plan.steps.map((entry) => entry.step.id), workingDirectory: project.path },
+      command: {
+        executable: "workflow-plan",
+        arguments: plan.steps.map((entry) => entry.step.id),
+        workingDirectory: project.path,
+      },
       stdout: "",
       stderr: "",
       durationMs: 0,
@@ -398,6 +405,31 @@ export function registerWorkflowRoutes(
       activeWorkflowControllers.delete(execution.id);
     }
     const missingPlanArtifacts = plan.definition.expectedArtifacts.filter((id) => !satisfiedArtifacts.has(id));
+    if (failedStep) {
+      for (const entry of plan.steps) {
+        if (execution.stepStates[entry.step.id] !== "waiting") continue;
+        execution = {
+          ...execution,
+          stepStates: { ...execution.stepStates, [entry.step.id]: "blocked" },
+        };
+        deps.store.workflows.saveStepExecution({
+          executionId: execution.id,
+          stepId: entry.step.id,
+          workflowId: entry.step.workflowId,
+          state: "blocked",
+          command: entry.workflow ? commandRecord(entry.workflow) : null,
+          attempts: [],
+          artifacts: [],
+          stdout: "",
+          stderr: "",
+          durationMs: 0,
+          startedAt: null,
+          finishedAt: new Date().toISOString(),
+          errorCode: "dependency_failed",
+          errorSummary: `Dependency step ${failedStep} did not complete`,
+        });
+      }
+    }
     if (!failedStep && missingPlanArtifacts.length > 0) {
       execution = {
         ...execution,
@@ -519,7 +551,7 @@ export function registerWorkflowRoutes(
       updatedAt: timestamp,
       state: "cancelled",
       currentStepId: null,
-      stepStates: { ...(record.execution.approvalId ? { approval: "cancelled" } : {}), command: "cancelled" },
+      stepStates: Object.fromEntries(Object.keys(record.execution.stepStates).map((stepId) => [stepId, "cancelled"])),
       finishedAt: timestamp,
       errorCode,
       errorSummary,
@@ -831,20 +863,22 @@ export function registerWorkflowRoutes(
   router.get(
     "/actions",
     asyncRoute(async (req, res) => {
-    const explicitProjectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
-    const projectId = explicitProjectId ?? deps.store.projectRegistry.getSelection()?.projectId ?? null;
-    if (!projectId) {
-      sendJson(res, json("error", undefined, { message: "no active project; select a project first" }), 409);
+      const explicitProjectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
+      const projectId = explicitProjectId ?? deps.store.projectRegistry.getSelection()?.projectId ?? null;
+      if (!projectId) {
+        sendJson(res, json("error", undefined, { message: "no active project; select a project first" }), 409);
         return;
-    }
-    const manifest = deps.store.projectRegistry.getManifest(projectId);
-    if (!manifest) {
-      sendJson(res, json("error", undefined, { message: `project ${projectId} has no approved manifest` }), 404);
+      }
+      const manifest = deps.store.projectRegistry.getManifest(projectId);
+      if (!manifest) {
+        sendJson(res, json("error", undefined, { message: `project ${projectId} has no approved manifest` }), 404);
         return;
-    }
+      }
       const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
       const actions = recommendedActionsFromManifest(canonicalManifest);
-      const definitions = deps.store.workflows.listDefinitions(projectId).filter((definition) => definition.steps.length > 0);
+      const definitions = deps.store.workflows
+        .listDefinitions(projectId)
+        .filter((definition) => definition.steps.length > 0);
       for (const [index, definition] of definitions.entries()) {
         const prepared = await prepareWorkflowPlan(canonicalManifest, definition, {
           allowMutating: true,
@@ -958,6 +992,7 @@ export function registerWorkflowRoutes(
       res,
       json("ok", {
         ...execution,
+        steps: deps.store.workflows.listStepExecutions(executionId),
         approval: deps.store.workflows.getApprovalForExecution(executionId),
         launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)),
       })
@@ -1482,7 +1517,106 @@ export function registerWorkflowRoutes(
         sendJson(res, json("error", undefined, { message: "executionMode must be terminal or tmux" }), 400);
         return;
       }
-      const prepared = await prepareManifestWorkflow(withCanonicalWorkflowDefinitions(manifest), workflowId, {
+      const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
+      const definition = deps.store.workflows.getDefinition(projectId, workflowId);
+      if (definition?.steps.length) {
+        if (requestedMode) {
+          sendJson(
+            res,
+            json("error", undefined, { message: "executionMode override is unavailable for workflow plans" }),
+            409
+          );
+          return;
+        }
+        const preparedPlan = await prepareWorkflowPlan(canonicalManifest, definition, {
+          allowMutating: true,
+          allowInteractive: true,
+        });
+        if (!preparedPlan.ok) {
+          sendJson(res, json("error", undefined, { message: preparedPlan.rejection.summary }), 409);
+          return;
+        }
+        const initialBase = createWorkflowExecution({
+          workflowId,
+          projectId,
+          sessionId,
+          taskId,
+          state: preparedPlan.plan.approvalRequired
+            ? "waiting"
+            : preparedPlan.plan.backgroundRequired
+              ? "starting"
+              : "running",
+        });
+        const initial: WorkflowExecution = {
+          ...initialBase,
+          currentStepId: preparedPlan.plan.approvalRequired
+            ? "approval"
+            : (preparedPlan.plan.steps[0]?.step.id ?? null),
+          stepStates: {
+            ...(preparedPlan.plan.approvalRequired ? { approval: "waiting" } : {}),
+            ...Object.fromEntries(preparedPlan.plan.steps.map((entry) => [entry.step.id, "waiting"])),
+          },
+        };
+        let saved = deps.store.workflows.save({
+          execution: initial,
+          command: {
+            executable: "workflow-plan",
+            arguments: preparedPlan.plan.steps.map((entry) => entry.step.id),
+            workingDirectory: project.path,
+          },
+          stdout: "",
+          stderr: "",
+          durationMs: 0,
+        });
+        if (preparedPlan.plan.approvalRequired) {
+          const context = await collectWorkflowPlanApprovalContext(preparedPlan.plan);
+          const firstCommandContext = context.steps.find((entry) => entry.context !== null)?.context ?? null;
+          const approval = deps.store.workflows.requestApproval({
+            executionId: initial.id,
+            workflowId,
+            projectId,
+            mutation: preparedPlan.plan.mutation,
+            contextHash: workflowPlanApprovalContextHash(context),
+            branch: firstCommandContext?.branch ?? null,
+            baseCommit: firstCommandContext?.baseCommit ?? null,
+            reason: `${definition.name} requires approval for its workflow plan`,
+          });
+          saved = deps.store.workflows.save({
+            ...saved,
+            execution: { ...initial, approvalId: approval.id },
+          });
+          const event = createEvent(
+            "approval.required",
+            { approvalId: approval.id, executionId: initial.id, workflowId, kind: "workflow-plan" },
+            {
+              projectId,
+              sessionId,
+              taskId,
+              agent: "workflow-approvals",
+              sourceService: "workbench-api",
+              level: "warn",
+              summary: approval.reason,
+              correlationId: initial.id,
+            }
+          );
+          deps.store.appendEvent(event);
+          deps.publish(event);
+          sendJson(
+            res,
+            json("ok", { ...saved, approval, deepLink: `/approvals/${encodeURIComponent(approval.id)}` }),
+            202
+          );
+          return;
+        }
+        if (preparedPlan.plan.backgroundRequired) {
+          sendJson(res, json("ok", enqueueBackgroundWorkflow(saved)), 202);
+          return;
+        }
+        saved = await executePreparedPlan(preparedPlan.plan, initial);
+        sendJson(res, json("ok", saved), saved.execution.state === "completed" ? 200 : 422);
+        return;
+      }
+      const prepared = await prepareManifestWorkflow(canonicalManifest, workflowId, {
         allowMutating: true,
         allowInteractive: true,
       });
