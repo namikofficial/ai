@@ -444,6 +444,7 @@ export type EventType =
   | "task.started"
   | "task.completed"
   | "task.failed"
+  | "task.blocked"
   | "agent.started"
   | "agent.completed"
   | "agent.failed"
@@ -498,6 +499,7 @@ export type EventType =
   | "index.started"
   | "index.progressed"
   | "index.completed"
+  | "index.failed"
   | "runtime.degraded"
   | "runtime.recovered";
 

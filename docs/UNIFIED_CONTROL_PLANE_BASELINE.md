@@ -45,7 +45,7 @@ flowchart LR
 | Retrieval/index state | Workbench SQLite/Qdrant and Python RAG | Ask, agents, web, MCP | Two indexes and stale-state semantics | Workbench with FTS baseline and optional Qdrant | Dimension/schema mismatch | Retrieval/index/eval tests |
 | Model routing | Workbench model tables/config; llama-swap env/scripts | Workbench, OpenCode, scratchpads, Wayle | Status probes only a port/model list | `RuntimeHealth` + central runtime config | Model loading vs readiness ambiguity | Model runtime/health tests |
 | Runtime health | Workbench `/health/deep`; shell port probes | Web, launcher, Wayle | No normalized desktop payload | `RuntimeHealth` contract and status cache | Partial outages | Health hardening tests |
-| Events | Workbench events/SSE; shell notifications | Web live drawer, CLI logs | Existing envelope lacks schema/correlation/causation | Versioned `WorkbenchEvent` adapter | Event compatibility during rollout | SSE cursor/events/timeline tests |
+| Events | Workbench SQLite normalized events/SSE; desktop notification adapter | Web live drawer, CLI, notification bridge | Compatibility aliases remain during rollout | Versioned `WorkbenchEvent` with durable correlation/causation | Retiring legacy aliases too early | Event validation, persistence, SSE cursor and notification policy tests |
 | Todos/decisions/command/error memory | Python RAG SQLite | Python RAG CLI/agents | Missing or partial in Workbench | Import into typed Workbench memory/work records | Semantic loss | Python state tests; migration tests absent |
 
 ## Verified implementation boundaries

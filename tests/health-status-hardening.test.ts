@@ -84,6 +84,14 @@ test("api: core readiness remains available when optional local runtimes are off
     const deep = JSON.parse(deepRes.body).data;
     assert.equal(deep.ready, true);
     assert.equal(deep.healthStatus, "degraded");
+
+    const diagnosticsRes = await handle.inject({ method: "GET", url: "/diagnostics" });
+    assert.equal(diagnosticsRes.statusCode, 200);
+    const diagnostics = JSON.parse(diagnosticsRes.body).data;
+    assert.equal(diagnostics.runtime.schemaVersion, 1);
+    assert.equal(diagnostics.eventStream.id, "event-stream");
+    assert.match(diagnostics.eventStream.detail, /live clients connected/);
+    assert.ok(Array.isArray(diagnostics.recentFailures));
   } finally {
     await handle.close();
     if (previousModelUrl === undefined) delete process.env.AI_LOCAL_BASE_URL;

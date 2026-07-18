@@ -103,6 +103,7 @@ function printUsage(): void {
   ai tools call <name> --project <project> [--args <json>] [--allow-high-risk]
   ai status
   ai runtime status
+  ai diagnose
   ai health [--deep]
   ai health --deep --json`);
 }
@@ -932,6 +933,11 @@ async function run(): Promise<void> {
       throw new Error(`Unknown runtime command: ${subcommand}`);
     }
     printJson(await client.runtimeHealth());
+    return;
+  }
+
+  if (command === "diagnose") {
+    printJson(await client.diagnostics());
     return;
   }
 

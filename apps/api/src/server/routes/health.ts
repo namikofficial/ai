@@ -1,6 +1,6 @@
 import type { Router } from "express";
 import type { RuntimeHealth } from "../../../../../packages/contracts/src/index.ts";
-import type { ConfigSnapshot } from "../../../../../packages/shared/src/index.ts";
+import type { ConfigSnapshot, EventEnvelope } from "../../../../../packages/shared/src/index.ts";
 import { json, sendJson } from "../response.ts";
 
 export function registerHealthRoutes(
@@ -19,6 +19,7 @@ export function registerHealthRoutes(
       recentChecks: unknown[];
     };
     getSettings: () => unknown;
+    listRecentEvents: () => EventEnvelope[];
   }
 ) {
   router.get("/health", (_req, res) => sendJson(res, json("ok", deps.buildHealthSnapshot())));
@@ -30,6 +31,41 @@ export function registerHealthRoutes(
   router.get("/runtime/health", async (_req, res) => {
     const runtime = await deps.buildRuntimeHealth();
     sendJson(res, json(runtime.ready ? "ok" : "error", runtime), runtime.ready ? 200 : 503);
+  });
+  router.get("/diagnostics", async (_req, res) => {
+    const runtime = await deps.buildRuntimeHealth();
+    const recentFailures = deps
+      .listRecentEvents()
+      .filter(
+        (event) =>
+          event.severity === "error" ||
+          event.severity === "critical" ||
+          event.type.endsWith(".failed") ||
+          event.type === "runtime.degraded"
+      )
+      .slice(-20)
+      .map((event) => ({
+        id: event.id,
+        type: event.type,
+        occurredAt: event.occurredAt,
+        severity: event.severity,
+        summary: event.summary,
+        projectId: event.projectId,
+        sessionId: event.sessionId,
+        taskId: event.taskId,
+        runId: event.runId,
+        correlationId: event.correlationId,
+      }));
+    sendJson(
+      res,
+      json("ok", {
+        generatedAt: new Date().toISOString(),
+        core: deps.buildHealthSnapshot(),
+        runtime,
+        eventStream: runtime.components.find((component) => component.id === "event-stream") ?? null,
+        recentFailures,
+      })
+    );
   });
   router.get("/health/deep", async (_req, res) => {
     const snapshot = await deps.buildDeepHealthSnapshot();

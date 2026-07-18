@@ -114,6 +114,18 @@ export function createApiClient(options: ApiClientOptions) {
     runtimeHealth(): Promise<{ status: "ok" | "error"; data: RuntimeHealth }> {
       return requestJson(options.baseUrl, "/runtime/health");
     },
+    diagnostics(): Promise<{
+      status: "ok";
+      data: {
+        generatedAt: string;
+        core: Record<string, unknown>;
+        runtime: RuntimeHealth;
+        eventStream: RuntimeHealth["components"][number] | null;
+        recentFailures: Array<Record<string, string | null>>;
+      };
+    }> {
+      return requestJson(options.baseUrl, "/diagnostics");
+    },
     config(): Promise<{ status: "ok"; data: ConfigSnapshot }> {
       return requestJson(options.baseUrl, "/config");
     },

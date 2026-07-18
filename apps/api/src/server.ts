@@ -183,7 +183,8 @@ function runtimeComponent(
 
 async function buildRuntimeHealth(
   store: ReturnType<typeof createStore>,
-  config: ConfigSnapshot
+  config: ConfigSnapshot,
+  eventStreamConnections = 0
 ): Promise<RuntimeHealth> {
   const checkedAt = new Date().toISOString();
   const base = buildHealthSnapshot(store, config);
@@ -295,6 +296,17 @@ async function buildRuntimeHealth(
       detail: "Available on demand over stdio",
       endpoint: null,
       capabilities: ["mcp-stdio"],
+    }),
+    runtimeComponent(checkedAt, {
+      id: "event-stream",
+      name: "Workbench event stream",
+      state: eventStreamConnections > 0 ? "running" : "ready",
+      processAlive: true,
+      ready: true,
+      latencyMs: null,
+      detail: `${eventStreamConnections} live client${eventStreamConnections === 1 ? "" : "s"} connected`,
+      endpoint: `${config.apiUrl.replace(/\/$/, "")}/events/stream`,
+      capabilities: ["sse", "cursor-recovery"],
     }),
     runtimeComponent(checkedAt, {
       id: "desktop-bridge",
@@ -431,8 +443,15 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   }
 
   const listeners = new Set<{ write(chunk: string): void }>();
+  const publishedEventIds = new Set<string>();
   const publish = (event: EventEnvelope) => {
-    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    if (publishedEventIds.has(event.id)) return;
+    publishedEventIds.add(event.id);
+    if (publishedEventIds.size > 2_000) {
+      const oldest = publishedEventIds.values().next().value;
+      if (typeof oldest === "string") publishedEventIds.delete(oldest);
+    }
+    const payload = `id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`;
     for (const res of listeners) {
       try {
         res.write(payload);
@@ -441,6 +460,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
       }
     }
   };
+  const unsubscribeEvents = store.subscribeEvents(publish);
 
   const app = express();
   app.disable("x-powered-by");
@@ -468,11 +488,12 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   registerHealthRoutes(healthRouter, {
     buildHealthSnapshot: () => buildHealthSnapshot(store, config),
     buildDeepHealthSnapshot: () => buildDeepHealthSnapshot(store, config),
-    buildRuntimeHealth: () => buildRuntimeHealth(store, config),
+    buildRuntimeHealth: () => buildRuntimeHealth(store, config, listeners.size),
     config,
     listProjects: () => store.listProjects(),
     dashboardSnapshot: () => store.dashboardSnapshot(),
     getSettings: () => store.getSettings(config),
+    listRecentEvents: () => store.listEvents(undefined, 500),
   });
   app.use(healthRouter);
 
@@ -620,7 +641,13 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   };
 
   if (options.inProcess) {
-    return { url: config.apiUrl, inject, async close() {} };
+    return {
+      url: config.apiUrl,
+      inject,
+      async close() {
+        unsubscribeEvents();
+      },
+    };
   }
 
   const server = app.listen(config.apiPort);
@@ -633,6 +660,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     url: config.apiUrl,
     inject,
     close: async () => {
+      unsubscribeEvents();
       await new Promise<void>((resolve, reject) => {
         server.close((error) => (error ? reject(error) : resolve()));
       });

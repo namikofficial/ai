@@ -16,17 +16,27 @@ export function registerSseRoutes(
       "x-accel-buffering": "no",
       connection: "keep-alive",
     });
-    res.write(": connected\n\n");
+    res.write("retry: 2000\n: connected\n\n");
 
-    const since = req.query.since;
+    const since = req.query.since ?? req.headers["last-event-id"];
     const events: EventEnvelope[] =
       since && typeof since === "string" ? deps.listEventsSince(since) : deps.listEvents();
 
     for (const event of events) {
-      res.write(`data: ${JSON.stringify(event)}\n\n`);
+      res.write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
     }
     deps.listeners.add(res);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`: heartbeat ${new Date().toISOString()}\n\n`);
+      } catch {
+        clearInterval(heartbeat);
+        deps.listeners.delete(res);
+      }
+    }, 15_000);
+    heartbeat.unref();
     req.on("close", () => {
+      clearInterval(heartbeat);
       deps.listeners.delete(res);
     });
   });

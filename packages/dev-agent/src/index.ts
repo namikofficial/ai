@@ -1086,7 +1086,19 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       filesEdited: diff.filesChanged,
       filesCreated: diff.filesAdded,
     });
-    emit({ kind: "approval.required", message: "ready for approval" });
+    const approval = input.runtime.execution.requestApproval({
+      runId: run.id,
+      projectId: input.project.id,
+      policy: parsedRequest.approvalPolicy ?? "manual",
+      risk: riskLevel,
+      requiresExplicit: true,
+      reason: "Manual approval required before applying workspace changes",
+    });
+    emit({
+      kind: "approval.required",
+      message: approval.reason ?? "ready for approval",
+      data: { approvalId: approval.id },
+    });
     return { run: updated, result: buildResult(updated, diff, false) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

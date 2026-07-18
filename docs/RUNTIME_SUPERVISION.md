@@ -13,6 +13,7 @@ flowchart LR
   W -. optional .-> E[Embeddings]
   W -. optional .-> Q[Qdrant]
   D[Desktop observer] --> W
+  N[Notification bridge] --> W
   D -. cached fallback .-> C[XDG status cache]
 ```
 
@@ -25,6 +26,7 @@ The endpoints have different meanings:
 - `GET /health` is the inexpensive legacy process/database snapshot.
 - `GET /ready` is the core systemd readiness probe. It requires the API and canonical SQLite database only.
 - `GET /runtime/health` returns the versioned `RuntimeHealth` contract for the API, database, worker, model manager, embeddings, Qdrant, MCP and desktop bridge.
+- `GET /diagnostics` adds event-stream connection state and redacted recent failure summaries.
 - `GET /health/deep` retains dependency diagnostics, but optional services no longer make its `ready` field false.
 
 An offline model, embeddings server, desktop bridge or Qdrant degrades capability health without disabling registry, project context, sessions, CLI access, SQLite FTS, or cached desktop status.
@@ -66,9 +68,12 @@ systemctl --user status ai-workbench.target ai-workbench.service ai-workbench-wo
 journalctl --user -u ai-workbench.service -u ai-workbench-worker.service -f
 curl -fsS http://127.0.0.1:4417/ready | jq
 curl -fsS http://127.0.0.1:4417/runtime/health | jq
+pnpm cli diagnose
 ```
 
 The desktop launcher first asks systemd to start the target. If the target is not installed or cannot start, it stops the failed target and starts the established `ai-workbench` tmux scene instead.
+
+Dotfiles separately provides graphical-session units for the Hyprland observation and notification bridges. They reconnect independently and do not make the Workbench control plane depend on a running desktop session.
 
 ## Rollback and uninstall
 

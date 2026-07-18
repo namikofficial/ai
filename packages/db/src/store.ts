@@ -325,6 +325,7 @@ export function initializeStore(dbPath: string): DatabaseSync {
 }
 
 export function createStore(db: DatabaseSync) {
+  const eventSubscribers = new Set<(event: EventEnvelope) => void>();
   const qdrantBaseSettings = readQdrantRuntimeSettings();
   let qdrantAvailable = qdrantBaseSettings.enabled && Boolean(qdrantBaseSettings.url);
 
@@ -695,14 +696,31 @@ export function createStore(db: DatabaseSync) {
         event.correlationId,
         event.causationId
       );
+      for (const subscriber of eventSubscribers) {
+        try {
+          subscriber(event);
+        } catch {
+          // Event persistence must not fail because a live client disconnected.
+        }
+      }
       return event;
+    },
+    subscribeEvents(subscriber: (event: EventEnvelope) => void): () => void {
+      eventSubscribers.add(subscriber);
+      return () => eventSubscribers.delete(subscriber);
     },
     listEvents(sessionId?: string, limit = 500): EventEnvelope[] {
       const rows = sessionId
         ? (db
-            .prepare("SELECT * FROM agent_events WHERE session_id = ? ORDER BY ts ASC LIMIT ?")
+            .prepare(
+              "SELECT * FROM (SELECT rowid AS event_rowid, * FROM agent_events WHERE session_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?) ORDER BY ts ASC, event_rowid ASC"
+            )
             .all(sessionId, limit) as Row[])
-        : (db.prepare("SELECT * FROM agent_events ORDER BY ts ASC LIMIT ?").all(limit) as Row[]);
+        : (db
+            .prepare(
+              "SELECT * FROM (SELECT rowid AS event_rowid, * FROM agent_events ORDER BY ts DESC, rowid DESC LIMIT ?) ORDER BY ts ASC, event_rowid ASC"
+            )
+            .all(limit) as Row[]);
       return rows.map(rowToEvent);
     },
     listEventsSince(since: string, sessionId?: string, limit = 500): EventEnvelope[] {
@@ -710,23 +728,44 @@ export function createStore(db: DatabaseSync) {
       // If it looks like an event ID (contains underscore, starts with alpha), look up its ts.
       // Otherwise treat it as a raw timestamp.
       let tsCursor: string;
+      let rowCursor: number | null = null;
       if (/^[a-zA-Z][a-zA-Z0-9]*_/.test(since)) {
         // Likely an event ID — look up the event's timestamp
-        const row = db.prepare("SELECT ts FROM agent_events WHERE id = ?").get(since) as { ts: string } | undefined;
+        const row = db.prepare("SELECT ts, rowid AS event_rowid FROM agent_events WHERE id = ?").get(since) as
+          | { ts: string; event_rowid: number }
+          | undefined;
         if (!row) {
           // Cursor event not found; treat as timestamp directly
           tsCursor = since;
         } else {
           tsCursor = row.ts;
+          rowCursor = row.event_rowid;
         }
       } else {
         tsCursor = since;
       }
-      const rows = sessionId
-        ? (db
-            .prepare("SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC LIMIT ?")
-            .all(sessionId, tsCursor, limit) as Row[])
-        : (db.prepare("SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC LIMIT ?").all(tsCursor, limit) as Row[]);
+      const rows =
+        rowCursor === null
+          ? sessionId
+            ? (db
+                .prepare(
+                  "SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC, rowid ASC LIMIT ?"
+                )
+                .all(sessionId, tsCursor, limit) as Row[])
+            : (db
+                .prepare("SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC, rowid ASC LIMIT ?")
+                .all(tsCursor, limit) as Row[])
+          : sessionId
+            ? (db
+                .prepare(
+                  "SELECT * FROM agent_events WHERE session_id = ? AND (ts > ? OR (ts = ? AND rowid > ?)) ORDER BY ts ASC, rowid ASC LIMIT ?"
+                )
+                .all(sessionId, tsCursor, tsCursor, rowCursor, limit) as Row[])
+            : (db
+                .prepare(
+                  "SELECT * FROM agent_events WHERE ts > ? OR (ts = ? AND rowid > ?) ORDER BY ts ASC, rowid ASC LIMIT ?"
+                )
+                .all(tsCursor, tsCursor, rowCursor, limit) as Row[]);
       return rows.map(rowToEvent);
     },
     listRecentLessons(limit = 20): Array<{
