@@ -469,6 +469,8 @@ export type EventType =
   | "workflow.definition_saved"
   | "workflow.started"
   | "workflow.attempt_completed"
+  | "workflow.step_started"
+  | "workflow.step_completed"
   | "workflow.completed"
   | "workflow.failed"
   | "workflow.blocked"

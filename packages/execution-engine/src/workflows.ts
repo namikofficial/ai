@@ -251,6 +251,7 @@ export async function runPreparedManifestWorkflow(
 export interface ExpectedArtifactValidation {
   valid: boolean;
   artifacts: string[];
+  satisfied: string[];
   missing: string[];
   invalid: Array<{ id: string; reason: string }>;
 }
@@ -260,6 +261,7 @@ export async function validateExpectedArtifacts(
 ): Promise<ExpectedArtifactValidation> {
   const canonicalRoot = await realpath(workflow.cwd);
   const artifacts: string[] = [];
+  const satisfied: string[] = [];
   const missing: string[] = [];
   const invalid: Array<{ id: string; reason: string }> = [];
   for (const artifact of workflow.command.expectedArtifacts) {
@@ -297,8 +299,9 @@ export async function validateExpectedArtifacts(
       continue;
     }
     artifacts.push(canonical);
+    satisfied.push(artifact.id);
   }
-  return { valid: missing.length === 0 && invalid.length === 0, artifacts, missing, invalid };
+  return { valid: missing.length === 0 && invalid.length === 0, artifacts, satisfied, missing, invalid };
 }
 
 export interface ManifestWorkflowRunResult {
