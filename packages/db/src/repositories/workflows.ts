@@ -1,5 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { ProjectManifest, WorkflowDefinition, WorkflowExecution, WorkflowLaunch } from "../../../contracts/src/index.ts";
+import type {
+  ProjectManifest,
+  WorkflowDefinition,
+  WorkflowExecution,
+  WorkflowLaunch,
+} from "../../../contracts/src/index.ts";
 import {
   workflowDefinitionSchema,
   workflowExecutionSchema,
@@ -224,12 +229,27 @@ function rowToRecord(row: WorkflowExecutionRow): WorkflowExecutionRecord {
   };
 }
 
+function definitionContent(definition: WorkflowDefinition): string {
+  return JSON.stringify({
+    projectId: definition.projectId,
+    name: definition.name,
+    description: definition.description,
+    category: definition.category,
+    command: definition.command,
+    steps: definition.steps,
+    preconditions: definition.preconditions,
+    expectedArtifacts: definition.expectedArtifacts,
+    isolationRequired: definition.isolationRequired,
+    approvalRequired: definition.approvalRequired,
+    enabled: definition.enabled,
+    capabilities: definition.capabilities,
+    origin: definition.origin,
+  });
+}
+
 export function createWorkflowsRepo(db: DatabaseSync) {
   return {
-    saveDefinition(
-      definition: unknown,
-      source: "manifest" | "manual" | "import" = "manual"
-    ): WorkflowDefinition {
+    saveDefinition(definition: unknown, source: "manifest" | "manual" | "import" = "manual"): WorkflowDefinition {
       const parsed = workflowDefinitionSchema.parse(definition);
       if (!parsed.projectId) throw new Error("workflow definition requires a projectId");
       const timestamp = now();
@@ -264,25 +284,27 @@ export function createWorkflowsRepo(db: DatabaseSync) {
 
     syncManifestDefinitions(manifest: ProjectManifest): WorkflowDefinition[] {
       const timestamp = now();
-      const definitions = Object.values(manifest.commands).map((command): WorkflowDefinition => ({
-        schemaVersion: 1,
-        id: command.id,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        origin: { source: "workbench", instanceId: "manifest-sync", legacyRef: `manifest-command:${command.id}` },
-        capabilities: [...command.requiresCapabilities],
-        projectId: manifest.id,
-        name: command.name,
-        description: command.description,
-        category: command.category,
-        command,
-        steps: [],
-        preconditions: [],
-        expectedArtifacts: command.expectedArtifacts.map((artifact) => artifact.id),
-        isolationRequired: command.executionMode === "isolated",
-        approvalRequired: command.mutation !== "read_only",
-        enabled: true,
-      }));
+      const definitions = Object.values(manifest.commands).map(
+        (command): WorkflowDefinition => ({
+          schemaVersion: 1,
+          id: command.id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          origin: { source: "workbench", instanceId: "manifest-sync", legacyRef: `manifest-command:${command.id}` },
+          capabilities: [...command.requiresCapabilities],
+          projectId: manifest.id,
+          name: command.name,
+          description: command.description,
+          category: command.category,
+          command,
+          steps: [],
+          preconditions: [],
+          expectedArtifacts: command.expectedArtifacts.map((artifact) => artifact.id),
+          isolationRequired: command.executionMode === "isolated",
+          approvalRequired: command.mutation !== "read_only",
+          enabled: true,
+        })
+      );
       const manifestIds = new Set(definitions.map((definition) => definition.id));
       const existingManifestRows = db
         .prepare("SELECT id FROM workflow_definitions WHERE project_id = ? AND source = 'manifest'")
@@ -291,9 +313,16 @@ export function createWorkflowsRepo(db: DatabaseSync) {
       try {
         for (const definition of definitions) {
           const existing = db
-            .prepare("SELECT source FROM workflow_definitions WHERE project_id = ? AND id = ? LIMIT 1")
-            .get(manifest.id, definition.id) as { source: string } | undefined;
-          if (existing?.source === "manual") continue;
+            .prepare("SELECT source, definition_json FROM workflow_definitions WHERE project_id = ? AND id = ? LIMIT 1")
+            .get(manifest.id, definition.id) as { source: string; definition_json: string } | undefined;
+          if (existing && existing.source !== "manifest") continue;
+          if (
+            existing?.source === "manifest" &&
+            definitionContent(workflowDefinitionSchema.parse(JSON.parse(existing.definition_json))) ===
+              definitionContent(definition)
+          ) {
+            continue;
+          }
           this.saveDefinition(definition, "manifest");
         }
         for (const row of existingManifestRows) {

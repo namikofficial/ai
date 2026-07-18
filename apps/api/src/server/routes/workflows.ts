@@ -62,7 +62,9 @@ export function registerWorkflowRoutes(
 ) {
   const activeWorkflowControllers = new Map<string, AbortController>();
 
-  function withCanonicalWorkflowDefinitions(manifest: NonNullable<ReturnType<Store["projectRegistry"]["getManifest"]>>) {
+  function withCanonicalWorkflowDefinitions(
+    manifest: NonNullable<ReturnType<Store["projectRegistry"]["getManifest"]>>
+  ) {
     const definitions = deps.store.workflows.listDefinitions(manifest.id);
     if (definitions.length === 0) return manifest;
     return {
@@ -570,6 +572,78 @@ export function registerWorkflowRoutes(
     sendJson(res, json("ok", recommendedActionsFromManifest(withCanonicalWorkflowDefinitions(manifest))));
   });
 
+  router.get("/projects/:projectId/workflows", (req, res) => {
+    const projectId = decodeURIComponent(String(req.params.projectId ?? ""));
+    if (!deps.store.getProject(projectId)) {
+      sendJson(res, json("error", undefined, { message: `project ${projectId} not found` }), 404);
+      return;
+    }
+    sendJson(res, json("ok", deps.store.workflows.listDefinitions(projectId)));
+  });
+
+  router.get("/projects/:projectId/workflows/:workflowId", (req, res) => {
+    const projectId = decodeURIComponent(String(req.params.projectId ?? ""));
+    const workflowId = decodeURIComponent(String(req.params.workflowId ?? ""));
+    const definition = deps.store.workflows.getDefinition(projectId, workflowId);
+    if (!definition) {
+      sendJson(res, json("error", undefined, { message: `workflow definition ${workflowId} not found` }), 404);
+      return;
+    }
+    sendJson(res, json("ok", definition));
+  });
+
+  router.put(
+    "/projects/:projectId/workflows/:workflowId",
+    asyncRoute(async (req, res) => {
+      const projectId = decodeURIComponent(String(req.params.projectId ?? ""));
+      const workflowId = decodeURIComponent(String(req.params.workflowId ?? ""));
+      if (!deps.store.getProject(projectId)) {
+        sendJson(res, json("error", undefined, { message: `project ${projectId} not found` }), 404);
+        return;
+      }
+      const body = await readJsonBody(req);
+      if (
+        typeof body !== "object" ||
+        body === null ||
+        Array.isArray(body) ||
+        (body as { id?: unknown }).id !== workflowId ||
+        (body as { projectId?: unknown }).projectId !== projectId
+      ) {
+        sendJson(
+          res,
+          json("error", undefined, { message: "workflow body must match route project and workflow IDs" }),
+          409
+        );
+        return;
+      }
+      let saved: ReturnType<Store["workflows"]["saveDefinition"]>;
+      try {
+        saved = deps.store.workflows.saveDefinition(body, "manual");
+      } catch (error) {
+        sendJson(
+          res,
+          json("error", undefined, { message: error instanceof Error ? error.message : String(error) }),
+          400
+        );
+        return;
+      }
+      const event = createEvent(
+        "workflow.definition_saved",
+        { workflowId, source: "manual" },
+        {
+          projectId,
+          agent: "workflow-registry",
+          sourceService: "workbench-api",
+          summary: `Workflow definition ${saved.name} saved`,
+          correlationId: createId("workflow_definition"),
+        }
+      );
+      deps.store.appendEvent(event);
+      deps.publish(event);
+      sendJson(res, json("ok", saved));
+    })
+  );
+
   router.get("/actions/executions/:executionId", (req, res) => {
     const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
     const execution = deps.store.workflows.get(executionId);
@@ -619,8 +693,8 @@ export function registerWorkflowRoutes(
         withCanonicalWorkflowDefinitions(manifest),
         record.execution.workflowId,
         {
-        allowMutating: true,
-        allowInteractive: true,
+          allowMutating: true,
+          allowInteractive: true,
         }
       );
       if (!prepared.ok) {

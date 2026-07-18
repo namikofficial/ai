@@ -629,10 +629,7 @@ export async function processNextJob(
                   .filter(
                     (definition) => definition.enabled && definition.command !== null && definition.steps.length === 0
                   )
-                  .map((definition) => [
-                    definition.id,
-                    definition.command as NonNullable<typeof definition.command>,
-                  ])
+                  .map((definition) => [definition.id, definition.command as NonNullable<typeof definition.command>])
               ),
             };
       const prepared = await prepareManifestWorkflow(canonicalManifest, record.execution.workflowId, {

@@ -226,7 +226,7 @@
       {
         "id": "run",
         "name": "Run verification",
-        "workflowId": null,
+        "workflowId": "verify-command",
         "dependsOn": [],
         "executionMode": "terminal",
         "mutation": "read_only",

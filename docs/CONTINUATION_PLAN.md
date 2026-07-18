@@ -27,6 +27,8 @@ lists concrete remaining gates rather than treating compatibility slices as fini
   provider and redact resolved values before any result is persisted; desktop secret delivery remains blocked.
 - Read-only workflow retries are bounded, abort-aware, and attempt-audited; mutating retries are rejected. Required
   artifacts are type- and containment-validated and become canonical execution artifacts.
+- Approved manifest commands synchronize into canonical SQLite workflow definitions. Manual definitions take
+  precedence, action execution consumes them, and structural validation rejects ambiguous or cyclic DAGs.
 
 ## Priority 1 — Complete workflow modes
 

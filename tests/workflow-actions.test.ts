@@ -138,6 +138,38 @@ test("workflow actions list approved commands, execute read-only work, and persi
     assert.equal(store.workflows.get(record.execution.id)?.execution.state, "completed");
     assert.ok(store.listEvents().some((event) => event.type === "workflow.completed"));
 
+    const definitions = await handle.inject({
+      method: "GET",
+      url: `/projects/${project.id}/workflows`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(definitions.statusCode, 200);
+    assert.equal((JSON.parse(definitions.body).data as Array<{ id: string }>).length, 2);
+    const canonicalDefinition = store.workflows.getDefinition(project.id, "version");
+    assert.ok(canonicalDefinition?.command);
+    const manualDefinition = {
+      ...canonicalDefinition,
+      name: "Manual version policy",
+      command: { ...canonicalDefinition.command, executable: "false", arguments: [] },
+      updatedAt: new Date().toISOString(),
+    };
+    const savedDefinition = await handle.inject({
+      method: "PUT",
+      url: `/projects/${project.id}/workflows/version`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: manualDefinition,
+    });
+    assert.equal(savedDefinition.statusCode, 200, savedDefinition.body);
+    const manualRun = await handle.inject({
+      method: "POST",
+      url: "/actions/version/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id },
+    });
+    assert.equal(manualRun.statusCode, 422, manualRun.body);
+    assert.equal(JSON.parse(manualRun.body).data.execution.state, "failed");
+    assert.ok(store.listEvents().some((event) => event.type === "workflow.definition_saved"));
+
     const rejected = await handle.inject({
       method: "POST",
       url: "/actions/unsafe-reset/run",

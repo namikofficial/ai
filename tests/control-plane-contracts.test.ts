@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import type { ProjectManifest } from "../packages/contracts/src/index.ts";
 import {
   activeContextSchema,
   activeWorkSchema,
@@ -107,6 +108,23 @@ test("validates bounded retry and typed expected-artifact policy", () => {
   verify.retryLimit = 1;
   verify.expectedArtifacts = [{ id: "report", path: "report.json", kind: "socket", required: true }];
   assert.throws(() => projectManifestSchema.parse(manifest), /kind must be one of/);
+});
+
+test("workflow definitions reject ambiguous and cyclic task graphs", () => {
+  const ambiguous = structuredClone(fixtures.WorkflowDefinition) as Record<string, unknown>;
+  ambiguous.command = (fixtures.ProjectManifest as ProjectManifest).commands.verify;
+  assert.throws(() => workflowDefinitionSchema.parse(ambiguous), /either command or steps/);
+
+  const cyclic = structuredClone(fixtures.WorkflowDefinition) as Record<string, unknown>;
+  const first = ((cyclic.steps as Array<Record<string, unknown>>)[0] ?? {}) as Record<string, unknown>;
+  first.dependsOn = ["second"];
+  (cyclic.steps as Array<Record<string, unknown>>).push({
+    ...first,
+    id: "second",
+    name: "Second",
+    dependsOn: [first.id],
+  });
+  assert.throws(() => workflowDefinitionSchema.parse(cyclic), /dependency cycle/);
 });
 
 test("represents an untracked-only repository as dirty", () => {

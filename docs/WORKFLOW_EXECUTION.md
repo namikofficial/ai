@@ -1,19 +1,26 @@
 # Canonical workflow execution
 
-Approved project manifests are the only desktop-visible source of project actions. The Workbench API owns policy,
-execution state, logs, check projection, and events; Rofi and CLI are clients and never evaluate manifest commands.
+SQLite workflow definitions are the canonical source of project actions. Approved manifest commands synchronize into
+that registry transactionally, preserving manifests as import/export configuration rather than a competing runtime
+database. Manual definitions take precedence and are not overwritten or deleted by later manifest synchronization;
+existing databases are backfilled idempotently at startup. Definitions are available through
+`GET /projects/:projectId/workflows` and matching-ID versioned definitions can be saved through `PUT`. Action listing
+and execution consume this canonical layer. The Workbench API owns policy, execution state, logs, check projection,
+and events; Rofi and CLI are clients and never evaluate manifest commands.
 
 ## Current execution modes
 
 Non-interactive read-only commands run directly under supervision. Project-write, destructive, and external commands
 create a durable, expiring approval first. The approval is bound to the canonical project, complete structured command,
 working directory, mutation class, branch, and base commit; changed review context invalidates it. Interactive commands
-use a durable terminal/tmux launch handoff. Unresolved environment references and unavailable platform capabilities
-still fail closed until their adapters exist.
+use a durable terminal/tmux launch handoff. Secret references are resolved only for non-desktop modes; unavailable
+platform capabilities and secret-bearing desktop launches fail closed until their adapters exist.
 
 ```mermaid
 flowchart LR
-  Manifest[Approved ProjectManifest] --> Actions[GET /actions]
+  Manifest[Approved ProjectManifest] --> Definitions[(workflow_definitions)]
+  Manual[Manual Workbench definition] --> Definitions
+  Definitions --> Actions[GET /actions]
   Actions --> Rofi[Rofi cockpit]
   Actions --> CLI[ai action list]
   Actions --> MCP[MCP action tools]

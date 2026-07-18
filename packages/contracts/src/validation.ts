@@ -435,6 +435,46 @@ const workflowDefinitionRaw = objectSchema({
   approvalRequired: booleanSchema,
   enabled: booleanSchema,
 });
+const workflowDefinitionValidated: ContractSchema<WorkflowDefinition> = {
+  jsonSchema: workflowDefinitionRaw.jsonSchema,
+  parse: (value, path = "value") => {
+    const parsed = workflowDefinitionRaw.parse(value, path) as WorkflowDefinition;
+    if (parsed.command !== null && parsed.steps.length > 0) {
+      fail(path, "must use either command or steps, not both");
+    }
+    if (parsed.command === null && parsed.steps.length === 0) {
+      fail(path, "must define a command or at least one step");
+    }
+    const stepIds = new Set<string>();
+    for (const step of parsed.steps) {
+      if (stepIds.has(step.id)) fail(`${path}.steps`, `contains duplicate step id: ${step.id}`);
+      stepIds.add(step.id);
+      if (step.workflowId === null && !step.approvalRequired) {
+        fail(`${path}.steps.${step.id}`, "must reference a workflow or be an approval step");
+      }
+    }
+    for (const step of parsed.steps) {
+      for (const dependency of step.dependsOn) {
+        if (!stepIds.has(dependency))
+          fail(`${path}.steps.${step.id}.dependsOn`, `references unknown step: ${dependency}`);
+        if (dependency === step.id) fail(`${path}.steps.${step.id}.dependsOn`, "cannot depend on itself");
+      }
+    }
+    const visiting = new Set<string>();
+    const visited = new Set<string>();
+    const stepsById = new Map(parsed.steps.map((step) => [step.id, step]));
+    const visit = (stepId: string): void => {
+      if (visited.has(stepId)) return;
+      if (visiting.has(stepId)) fail(`${path}.steps`, `contains a dependency cycle at: ${stepId}`);
+      visiting.add(stepId);
+      for (const dependency of stepsById.get(stepId)?.dependsOn ?? []) visit(dependency);
+      visiting.delete(stepId);
+      visited.add(stepId);
+    };
+    for (const step of parsed.steps) visit(step.id);
+    return parsed;
+  },
+};
 const workflowExecutionRaw = objectSchema({
   ...baseShape,
   workflowId: nonEmptyString,
@@ -546,7 +586,7 @@ export const runtimeHealthSchema = publicSchema(runtimeHealthRaw) as ContractSch
 export const projectStatusSchema = publicSchema(projectStatusRaw) as ContractSchema<ProjectStatus>;
 export const recommendedActionSchema = publicSchema(recommendedActionRaw) as ContractSchema<RecommendedAction>;
 export const workbenchEventSchema = publicSchema(workbenchEventRaw) as ContractSchema<WorkbenchEvent>;
-export const workflowDefinitionSchema = publicSchema(workflowDefinitionRaw) as ContractSchema<WorkflowDefinition>;
+export const workflowDefinitionSchema = publicSchema(workflowDefinitionValidated);
 export const workflowExecutionSchema = publicSchema(workflowExecutionRaw) as ContractSchema<WorkflowExecution>;
 export const workflowLaunchSchema = publicSchema(workflowLaunchRaw) as ContractSchema<WorkflowLaunch>;
 export const desktopObservationSchema = publicSchema(desktopObservationRaw) as ContractSchema<DesktopObservation>;
