@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
+import { processNextJob, recoverAbandonedBackgroundWorkflows } from "../apps/worker/src/worker.ts";
 import type { ProjectManifest } from "../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import { runAllowedCommand } from "../packages/execution-engine/src/index.ts";
@@ -165,6 +166,91 @@ test("workflow actions list approved commands, execute read-only work, and persi
     });
     assert.equal(confusedTask.statusCode, 409);
     assert.match(confusedTask.body, /requested session/);
+  } finally {
+    await handle.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("background workflows use the durable queue and recover abandoned supervision", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-background-"));
+  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const project = store.createProject({ path: workspace, name: "Background Project" });
+  const background = command("background-version", "git", ["--version"]);
+  background.executionMode = "background";
+  const manifest: ProjectManifest = {
+    ...fixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+    commands: { background },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const handle = await startWorkbenchServer({
+    store,
+    inProcess: true,
+    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  const request = () =>
+    handle.inject({
+      method: "POST",
+      url: "/actions/background-version/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id },
+    });
+  try {
+    const queued = await request();
+    assert.equal(queued.statusCode, 202, queued.body);
+    const queuedData = JSON.parse(queued.body).data as {
+      execution: { id: string; state: string };
+      backgroundJob: { state: string };
+    };
+    assert.equal(queuedData.execution.state, "starting");
+    assert.equal(queuedData.backgroundJob.state, "queued");
+    assert.equal(await processNextJob(store, { workerInstanceId: "test-worker" }), true);
+    assert.equal(store.workflows.get(queuedData.execution.id)?.execution.state, "completed");
+    assert.equal(store.workflows.getBackgroundJob(queuedData.execution.id)?.state, "completed");
+
+    const cancelled = JSON.parse((await request()).body).data as { execution: { id: string } };
+    const cancel = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${cancelled.execution.id}/cancel`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(cancel.statusCode, 200, cancel.body);
+    assert.equal(store.workflows.get(cancelled.execution.id)?.execution.state, "cancelled");
+    assert.equal(store.workflows.getBackgroundJob(cancelled.execution.id)?.state, "cancelled");
+
+    const abandoned = JSON.parse((await request()).body).data as { execution: { id: string } };
+    const claimed = store.claimNextJob();
+    assert.ok(claimed);
+    const abandonedRecord = store.workflows.get(abandoned.execution.id);
+    assert.ok(abandonedRecord);
+    const startedAt = new Date().toISOString();
+    store.workflows.save({
+      ...abandonedRecord,
+      execution: {
+        ...abandonedRecord.execution,
+        state: "running",
+        startedAt,
+        updatedAt: startedAt,
+        stepStates: { command: "running" },
+      },
+    });
+    store.workflows.transitionBackgroundJob({
+      executionId: abandoned.execution.id,
+      expectedState: "queued",
+      state: "running",
+      workerInstanceId: "dead-worker",
+      startedAt,
+    });
+    assert.equal(recoverAbandonedBackgroundWorkflows(store), 1);
+    const recovered = store.workflows.get(abandoned.execution.id)?.execution;
+    assert.equal(recovered?.state, "failed");
+    assert.equal(recovered?.errorCode, "worker_restarted");
+    assert.equal(store.workflows.getBackgroundJob(abandoned.execution.id)?.state, "failed");
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });

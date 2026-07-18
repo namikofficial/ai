@@ -67,6 +67,32 @@ export interface WorkflowLaunchRecord {
   tokenHash: string | null;
 }
 
+export interface WorkflowBackgroundJobRecord {
+  executionId: string;
+  jobId: string;
+  state: "queued" | "running" | "completed" | "failed" | "cancelled";
+  workerInstanceId: string | null;
+  processPid: number | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function rowToBackgroundJob(row: Record<string, unknown>): WorkflowBackgroundJobRecord {
+  return {
+    executionId: asString(row.execution_id),
+    jobId: asString(row.job_id),
+    state: asString(row.state) as WorkflowBackgroundJobRecord["state"],
+    workerInstanceId: asStringOrNull(row.worker_instance_id),
+    processPid: row.process_pid == null ? null : asNumber(row.process_pid),
+    startedAt: asStringOrNull(row.started_at),
+    finishedAt: asStringOrNull(row.finished_at),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  };
+}
+
 function rowToLaunch(row: WorkflowLaunchRow): WorkflowLaunchRecord {
   return {
     launch: workflowLaunchSchema.parse({
@@ -196,6 +222,68 @@ function rowToRecord(row: WorkflowExecutionRow): WorkflowExecutionRecord {
 
 export function createWorkflowsRepo(db: DatabaseSync) {
   return {
+    createBackgroundJob(input: { executionId: string; jobId: string }): WorkflowBackgroundJobRecord {
+      const timestamp = now();
+      db.prepare(
+        `INSERT INTO workflow_background_jobs
+           (execution_id, job_id, state, created_at, updated_at)
+         VALUES (?, ?, 'queued', ?, ?)`
+      ).run(input.executionId, input.jobId, timestamp, timestamp);
+      const record = this.getBackgroundJob(input.executionId);
+      if (!record) throw new Error(`background workflow ${input.executionId} was not persisted`);
+      return record;
+    },
+
+    getBackgroundJob(executionId: string): WorkflowBackgroundJobRecord | null {
+      const row = db
+        .prepare("SELECT * FROM workflow_background_jobs WHERE execution_id = ? LIMIT 1")
+        .get(executionId) as Record<string, unknown> | undefined;
+      return row ? rowToBackgroundJob(row) : null;
+    },
+
+    transitionBackgroundJob(input: {
+      executionId: string;
+      expectedState: WorkflowBackgroundJobRecord["state"];
+      state: WorkflowBackgroundJobRecord["state"];
+      workerInstanceId?: string | null;
+      processPid?: number | null;
+      startedAt?: string | null;
+      finishedAt?: string | null;
+    }): WorkflowBackgroundJobRecord {
+      const timestamp = now();
+      const result = db
+        .prepare(
+          `UPDATE workflow_background_jobs
+           SET state = ?, worker_instance_id = COALESCE(?, worker_instance_id),
+               process_pid = ?, started_at = COALESCE(?, started_at), finished_at = ?, updated_at = ?
+           WHERE execution_id = ? AND state = ?`
+        )
+        .run(
+          input.state,
+          input.workerInstanceId ?? null,
+          input.processPid ?? null,
+          input.startedAt ?? null,
+          input.finishedAt ?? null,
+          timestamp,
+          input.executionId,
+          input.expectedState
+        );
+      if (Number(result.changes) !== 1) {
+        throw new Error(`background workflow ${input.executionId} is not ${input.expectedState}`);
+      }
+      const record = this.getBackgroundJob(input.executionId);
+      if (!record) throw new Error(`background workflow ${input.executionId} disappeared after transition`);
+      return record;
+    },
+
+    listRunningBackgroundJobs(): WorkflowBackgroundJobRecord[] {
+      return (
+        db
+          .prepare("SELECT * FROM workflow_background_jobs WHERE state = 'running' ORDER BY updated_at")
+          .all() as Record<string, unknown>[]
+      ).map(rowToBackgroundJob);
+    },
+
     save(record: WorkflowExecutionRecord): WorkflowExecutionRecord {
       const execution = workflowExecutionSchema.parse(record.execution);
       db.prepare(

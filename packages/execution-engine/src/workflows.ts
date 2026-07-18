@@ -202,12 +202,13 @@ export function workflowApprovalContextHash(context: WorkflowApprovalContext): s
 
 export async function runPreparedManifestWorkflow(
   workflow: PreparedManifestWorkflow,
-  options: { signal?: AbortSignal } = {}
+  options: { signal?: AbortSignal; onSpawn?: (pid: number) => void } = {}
 ): Promise<RunAllowedCommandResult> {
   return runAllowedCommand({
     cwd: workflow.cwd,
     command: workflow.spec,
     timeoutMs: (workflow.command.timeoutSeconds ?? 300) * 1_000,
     signal: options.signal,
+    onSpawn: options.onSpawn,
   });
 }

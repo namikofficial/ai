@@ -76,7 +76,7 @@ export function registerWorkflowRoutes(
     projectId: string;
     sessionId: string | null;
     taskId: string | null;
-    state: "running" | "waiting" | "ready";
+    state: "starting" | "running" | "waiting" | "ready";
   }): WorkflowExecution {
     const timestamp = new Date().toISOString();
     return {
@@ -96,9 +96,11 @@ export function registerWorkflowRoutes(
       stepStates:
         input.state === "running"
           ? { command: "running" }
-          : input.state === "ready"
-            ? { command: "ready" }
-            : { approval: "waiting", command: "waiting" },
+          : input.state === "starting"
+            ? { command: "starting" }
+            : input.state === "ready"
+              ? { command: "ready" }
+              : { approval: "waiting", command: "waiting" },
       startedAt: input.state === "running" ? timestamp : null,
       finishedAt: null,
       approvalId: null,
@@ -107,6 +109,47 @@ export function registerWorkflowRoutes(
       errorCode: null,
       errorSummary: null,
     };
+  }
+
+  function enqueueBackgroundWorkflow(
+    record: NonNullable<ReturnType<Store["workflows"]["get"]>>,
+    causationId: string | null = null
+  ) {
+    const timestamp = new Date().toISOString();
+    const execution: WorkflowExecution = {
+      ...record.execution,
+      state: "starting",
+      updatedAt: timestamp,
+      currentStepId: "command",
+      stepStates: { ...(record.execution.approvalId ? { approval: "completed" } : {}), command: "starting" },
+      startedAt: null,
+      finishedAt: null,
+      errorCode: null,
+      errorSummary: null,
+    };
+    const saved = deps.store.workflows.save({ ...record, execution });
+    const job = deps.store.enqueueJob({
+      type: "workflow.execute",
+      payload: { executionId: execution.id },
+    });
+    deps.store.workflows.createBackgroundJob({ executionId: execution.id, jobId: job.id });
+    const event = createEvent(
+      "workflow.queued",
+      { workflowId: execution.workflowId, executionId: execution.id, jobId: job.id },
+      {
+        projectId: execution.projectId,
+        sessionId: execution.sessionId,
+        taskId: execution.taskId,
+        agent: "workflow-executor",
+        sourceService: "workbench-api",
+        summary: `${execution.workflowId} queued for background execution`,
+        correlationId: execution.id,
+        causationId,
+      }
+    );
+    deps.store.appendEvent(event);
+    deps.publish(event);
+    return { ...saved, backgroundJob: deps.store.workflows.getBackgroundJob(execution.id) };
   }
 
   function createWorkflowLaunch(input: {
@@ -544,6 +587,11 @@ export function registerWorkflowRoutes(
         sendJson(res, json("ok", { ...saved, approval: decided }), 202);
         return;
       }
+      if (prepared.workflow.command.executionMode === "background") {
+        const saved = enqueueBackgroundWorkflow(record, granted.id);
+        sendJson(res, json("ok", { ...saved, approval: decided }), 202);
+        return;
+      }
       const saved = await executePreparedWorkflow(prepared, record.execution, granted.id);
       sendJson(res, json("ok", { ...saved, approval: decided }), saved.execution.state === "completed" ? 200 : 422);
     })
@@ -788,6 +836,25 @@ export function registerWorkflowRoutes(
       sendJson(res, json("error", undefined, { message: "workflow execution not found" }), 404);
       return;
     }
+    if (record.execution.state === "starting") {
+      const background = deps.store.workflows.getBackgroundJob(executionId);
+      if (background?.state === "queued") {
+        deps.store.cancelJob(background.jobId);
+        deps.store.workflows.transitionBackgroundJob({
+          executionId,
+          expectedState: "queued",
+          state: "cancelled",
+          finishedAt: new Date().toISOString(),
+        });
+        const saved = cancelWaitingWorkflow(
+          record,
+          "command_cancelled",
+          "Background workflow was cancelled before start"
+        );
+        sendJson(res, json("ok", { ...saved, backgroundJob: deps.store.workflows.getBackgroundJob(executionId) }));
+        return;
+      }
+    }
     if (record.execution.state === "running") {
       const controller = activeWorkflowControllers.get(executionId);
       if (controller) {
@@ -812,6 +879,27 @@ export function registerWorkflowRoutes(
           return;
         } catch {
           sendJson(res, json("error", undefined, { message: "desktop workflow process is no longer available" }), 409);
+          return;
+        }
+      }
+      const background = deps.store.workflows.getBackgroundJob(executionId);
+      if (background?.state === "running" && background.processPid) {
+        try {
+          deps.store.workflows.transitionBackgroundJob({
+            executionId,
+            expectedState: "running",
+            state: "cancelled",
+            finishedAt: new Date().toISOString(),
+          });
+          process.kill(-background.processPid, "SIGTERM");
+          sendJson(res, json("ok", { executionId, state: "cancelling" }), 202);
+          return;
+        } catch {
+          sendJson(
+            res,
+            json("error", undefined, { message: "background workflow process is no longer available" }),
+            409
+          );
           return;
         }
       }
@@ -1028,6 +1116,19 @@ export function registerWorkflowRoutes(
         const record = deps.store.workflows.get(initial.id);
         if (!record) throw new Error("interactive workflow execution was not persisted");
         sendJson(res, json("ok", makeInteractiveWorkflowReady(record, prepared.workflow.command.name)), 202);
+        return;
+      }
+      if (prepared.workflow.command.executionMode === "background") {
+        deps.store.workflows.save({
+          execution: initial,
+          command: commandRecord(prepared.workflow),
+          stdout: "",
+          stderr: "",
+          durationMs: 0,
+        });
+        const record = deps.store.workflows.get(initial.id);
+        if (!record) throw new Error("background workflow execution was not persisted");
+        sendJson(res, json("ok", enqueueBackgroundWorkflow(record)), 202);
         return;
       }
       const saved = await executePreparedWorkflow(prepared, initial);

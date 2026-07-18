@@ -147,9 +147,19 @@ is never used as the process working directory. The retained workspace path is s
 for review; applying anything back remains a separate approval-controlled operation. Workspace setup failures become
 durable failed executions instead of leaving a run stuck in `running`.
 
+## Background workflows
+
+A `background` command is never launched inside the API request. The API persists the execution in `starting`,
+creates a durable `workflow.execute` queue job, and records the one-to-one association in
+`workflow_background_jobs`. The worker reloads the canonical project and approved manifest, re-runs path and command
+policy, then records the supervising worker and process-group PID before execution. Queued work can be cancelled
+without launching it; running work is cancelled by process group. On worker startup, an execution left in `running`
+is terminated when possible and finalized with `worker_restarted` rather than being replayed and risking duplicate
+side effects. Retry is intentionally not implicit.
+
 ## Remaining adapters
 
-- background supervision, retry/dependency steps, restart recovery, and recovery workflows;
+- retry/dependency steps, expected-artifact validation, and explicit recovery workflows;
 - safe secret-reference resolution without logging values;
 - isolated artifact diff presentation and explicit cleanup controls;
 - platform capability discovery and `visibleWhen` evaluation.

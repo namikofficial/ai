@@ -1,6 +1,12 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
+import type { WorkflowExecution } from "../../../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
+import {
+  prepareManifestWorkflow,
+  runPreparedManifestWorkflow,
+} from "../../../packages/execution-engine/src/workflows.ts";
 import { compilePrompt } from "../../../packages/prompt-compiler/src/index.ts";
 import type { ReflectInput } from "../../../packages/reflection-engine/src/index.ts";
 import { type ReflectionOutput, reflect as reflectEngine } from "../../../packages/reflection-engine/src/index.ts";
@@ -581,7 +587,10 @@ function applyReflectionOutput(
   };
 }
 
-export async function processNextJob(store: ReturnType<typeof createStore>): Promise<boolean> {
+export async function processNextJob(
+  store: ReturnType<typeof createStore>,
+  options: { workerInstanceId?: string; signal?: AbortSignal } = {}
+): Promise<boolean> {
   const job = store.claimNextJob();
   if (!job) {
     return false;
@@ -591,7 +600,130 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
     const payload = parsePayload(job.payloadJson);
     let output: unknown;
 
-    if (job.type === "plan.review") {
+    if (job.type === "workflow.execute") {
+      const executionId = typeof payload.executionId === "string" ? payload.executionId : null;
+      if (!executionId) throw new Error("workflow.execute requires executionId");
+      const record = store.workflows.get(executionId);
+      const background = store.workflows.getBackgroundJob(executionId);
+      if (!record || !background || background.jobId !== job.id) {
+        throw new Error(`background workflow ${executionId} is unavailable or belongs to another job`);
+      }
+      if (record.execution.state !== "starting" || background.state !== "queued") {
+        throw new Error(`background workflow ${executionId} is not queued`);
+      }
+      const project = store.getProject(record.execution.projectId);
+      const manifest = store.projectRegistry.getManifest(record.execution.projectId);
+      if (!project || !manifest || manifest.path !== project.path) {
+        throw new Error("canonical project or approved manifest changed before background execution");
+      }
+      const prepared = await prepareManifestWorkflow(manifest, record.execution.workflowId, {
+        allowMutating: true,
+        allowInteractive: true,
+      });
+      if (!prepared.ok) throw new Error(prepared.rejection.summary);
+      if (prepared.workflow.command.executionMode !== "background") {
+        throw new Error("queued workflow no longer has background execution mode");
+      }
+      const startedAt = new Date().toISOString();
+      const running: WorkflowExecution = {
+        ...record.execution,
+        state: "running",
+        updatedAt: startedAt,
+        startedAt,
+        currentStepId: "command",
+        stepStates: { ...(record.execution.approvalId ? { approval: "completed" } : {}), command: "running" },
+      };
+      store.workflows.save({ ...record, execution: running });
+      store.workflows.transitionBackgroundJob({
+        executionId,
+        expectedState: "queued",
+        state: "running",
+        workerInstanceId: options.workerInstanceId ?? "workbench-worker",
+        startedAt,
+      });
+      store.appendEvent(
+        createEvent(
+          "workflow.started",
+          { workflowId: running.workflowId, executionId, jobId: job.id, mode: "background" },
+          {
+            projectId: running.projectId,
+            sessionId: running.sessionId,
+            taskId: running.taskId,
+            agent: "workflow-worker",
+            sourceService: "workbench-worker",
+            summary: `${prepared.workflow.command.name} started in the background`,
+            correlationId: executionId,
+          }
+        )
+      );
+      const result = await runPreparedManifestWorkflow(prepared.workflow, {
+        signal: options.signal,
+        onSpawn(pid) {
+          store.workflows.transitionBackgroundJob({
+            executionId,
+            expectedState: "running",
+            state: "running",
+            workerInstanceId: options.workerInstanceId ?? "workbench-worker",
+            processPid: pid,
+            startedAt,
+          });
+        },
+      });
+      const currentBackground = store.workflows.getBackgroundJob(executionId);
+      const cancelled = currentBackground?.state === "cancelled" || result.status === "cancelled";
+      const state = cancelled ? "cancelled" : result.status === "completed" ? "completed" : result.status;
+      const execution: WorkflowExecution = {
+        ...running,
+        state,
+        updatedAt: result.finishedAt,
+        finishedAt: result.finishedAt,
+        currentStepId: null,
+        stepStates: { ...(running.approvalId ? { approval: "completed" } : {}), command: state },
+        exitCode: result.exitCode,
+        errorCode: state === "completed" ? null : state === "cancelled" ? "command_cancelled" : "command_failed",
+        errorSummary: state === "completed" ? null : (result.blockedReason ?? (result.stderr.slice(0, 1_000) || null)),
+      };
+      store.workflows.save({
+        execution,
+        command: {
+          executable: prepared.workflow.spec.binary,
+          arguments: prepared.workflow.spec.args,
+          workingDirectory: prepared.workflow.cwd,
+        },
+        stdout: result.stdout,
+        stderr: result.stderr,
+        durationMs: result.durationMs,
+      });
+      if (currentBackground?.state === "running") {
+        store.workflows.transitionBackgroundJob({
+          executionId,
+          expectedState: "running",
+          state: state === "completed" ? "completed" : state === "cancelled" ? "cancelled" : "failed",
+          finishedAt: result.finishedAt,
+        });
+      }
+      store.appendEvent(
+        createEvent(
+          state === "completed"
+            ? "workflow.completed"
+            : state === "cancelled"
+              ? "workflow.cancelled"
+              : "workflow.failed",
+          { workflowId: execution.workflowId, executionId, jobId: job.id, exitCode: result.exitCode },
+          {
+            projectId: execution.projectId,
+            sessionId: execution.sessionId,
+            taskId: execution.taskId,
+            agent: "workflow-worker",
+            sourceService: "workbench-worker",
+            level: state === "completed" ? "info" : state === "cancelled" ? "warn" : "error",
+            summary: `${prepared.workflow.command.name} ${state}`,
+            correlationId: executionId,
+          }
+        )
+      );
+      output = { executionId, state, exitCode: result.exitCode };
+    } else if (job.type === "plan.review") {
       const projectId = typeof payload.projectId === "string" ? payload.projectId : null;
       const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : null;
       const goal = typeof payload.goal === "string" ? payload.goal : "unknown goal";
@@ -814,25 +946,89 @@ export async function processNextJob(store: ReturnType<typeof createStore>): Pro
   }
 }
 
+export function recoverAbandonedBackgroundWorkflows(store: ReturnType<typeof createStore>): number {
+  let recovered = 0;
+  for (const background of store.workflows.listRunningBackgroundJobs()) {
+    if (background.processPid) {
+      try {
+        process.kill(-background.processPid, "SIGTERM");
+      } catch {
+        // The previous worker's process group is already gone.
+      }
+    }
+    const record = store.workflows.get(background.executionId);
+    const timestamp = new Date().toISOString();
+    if (record && record.execution.state === "running") {
+      const execution: WorkflowExecution = {
+        ...record.execution,
+        state: "failed",
+        updatedAt: timestamp,
+        finishedAt: timestamp,
+        currentStepId: null,
+        stepStates: { ...(record.execution.approvalId ? { approval: "completed" } : {}), command: "failed" },
+        errorCode: "worker_restarted",
+        errorSummary: "Background workflow stopped because its supervising worker restarted",
+      };
+      store.workflows.save({ ...record, execution });
+      store.appendEvent(
+        createEvent(
+          "workflow.failed",
+          { workflowId: execution.workflowId, executionId: execution.id, jobId: background.jobId },
+          {
+            projectId: execution.projectId,
+            sessionId: execution.sessionId,
+            taskId: execution.taskId,
+            agent: "workflow-worker",
+            sourceService: "workbench-worker",
+            level: "error",
+            summary: execution.errorSummary ?? "Background workflow supervisor restarted",
+            correlationId: execution.id,
+          }
+        )
+      );
+    }
+    store.workflows.transitionBackgroundJob({
+      executionId: background.executionId,
+      expectedState: "running",
+      state: "failed",
+      finishedAt: timestamp,
+    });
+    try {
+      store.failJob(background.jobId, "background workflow supervisor restarted");
+    } catch {
+      // Keep recovery idempotent when the queue record was already finalized.
+    }
+    recovered += 1;
+  }
+  return recovered;
+}
+
 export async function startWorkbenchWorker(options: WorkerOptions = {}): Promise<void> {
   const config = resolveConfig(options.config ?? {});
   await mkdir(config.runtimeDir, { recursive: true });
   const store = createStore(initializeStore(config.databasePath));
   await store.ensureRuntimeDirs(config.runtimeDir);
+  recoverAbandonedBackgroundWorkflows(store);
 
   const pollIntervalMs = options.pollIntervalMs ?? 1000;
+  const workerInstanceId = `worker-${randomUUID()}`;
   let stopped = false;
+  let activeController: AbortController | null = null;
 
   process.on("SIGINT", () => {
     stopped = true;
+    activeController?.abort();
   });
   process.on("SIGTERM", () => {
     stopped = true;
+    activeController?.abort();
   });
 
   while (!stopped) {
     await writeFile(`${config.runtimeDir}/worker-heartbeat`, new Date().toISOString(), "utf8");
-    const processed = await processNextJob(store);
+    activeController = new AbortController();
+    const processed = await processNextJob(store, { workerInstanceId, signal: activeController.signal });
+    activeController = null;
     if (!processed) {
       await sleep(pollIntervalMs);
     }

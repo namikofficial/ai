@@ -133,6 +133,7 @@ declare module "node:child_process" {
     kill(signal?: NodeJS.Signals | number | string): boolean;
     on(event: "error", listener: (error: Error) => void): void;
     once(event: "exit", listener: (...args: any[]) => void): void;
+    once(event: "close", listener: (code: number | null) => void): void;
   }
 
   export function execFile(

@@ -56,7 +56,10 @@ export const processCommandRunner: CommandRunner = {
         stderr = stderr || error.message;
         finish(127);
       });
-      child.once("exit", (code) => finish(typeof code === "number" ? code : 1));
+      // `exit` may fire before the stdio streams have been fully drained. Waiting
+      // for `close` keeps short-lived commands such as Git status/log from
+      // intermittently returning an empty or truncated payload.
+      child.once("close", (code) => finish(typeof code === "number" ? code : 1));
       const timer = setTimeout(() => {
         timedOut = true;
         child.kill("SIGTERM");

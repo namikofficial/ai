@@ -400,6 +400,7 @@ export interface RunAllowedCommandInput {
   timeoutMs?: number;
   env?: Record<string, string>;
   signal?: AbortSignal;
+  onSpawn?: (pid: number) => void;
 }
 
 export interface RunAllowedCommandResult {
@@ -515,6 +516,7 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
     });
+    if (child.pid) input.onSpawn?.(child.pid);
     let stdout = "";
     let stderr = "";
     let settled = false;

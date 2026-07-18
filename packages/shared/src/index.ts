@@ -192,7 +192,7 @@ export interface CheckRunSummary {
   updatedAt: string;
 }
 
-export type JobStatus = "queued" | "running" | "completed" | "failed";
+export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 export interface JobRecord {
   id: string;
@@ -465,6 +465,7 @@ export type EventType =
   | "validation.started"
   | "validation.passed"
   | "validation.failed"
+  | "workflow.queued"
   | "workflow.started"
   | "workflow.completed"
   | "workflow.failed"

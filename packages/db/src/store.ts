@@ -1266,6 +1266,24 @@ export function createStore(db: DatabaseSync) {
         updatedAt: now(),
       };
     },
+    cancelJob(jobId: string): JobRecord {
+      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as Row | undefined;
+      if (!current) throw new Error(`unknown job: ${jobId}`);
+      const ts = now();
+      const result = db
+        .prepare("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'queued'")
+        .run(ts, jobId);
+      if (Number(result.changes) !== 1) throw new Error(`job ${jobId} is not queued`);
+      return {
+        id: asString(current.id),
+        type: asString(current.type),
+        status: "cancelled",
+        payloadJson: asString(current.payload_json),
+        availableAt: asString(current.available_at),
+        createdAt: asString(current.created_at),
+        updatedAt: ts,
+      };
+    },
     completeJob(jobId: string, output: unknown): JobRecord {
       const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as Row | undefined;
       if (!current) {
