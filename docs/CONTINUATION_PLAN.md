@@ -85,6 +85,10 @@ Exercise the importer against a real Python RAG database when one exists. Decide
 `execution_runs` mapping, expose equivalent TypeScript MCP capability, compare retrieval evaluations, and retain the
 Python store until row-count/content-hash parity and rollback rehearsal pass. Do not delete Python or Qdrant data.
 
+The documented and legacy source locations were rechecked on 2026-07-18; no Python RAG SQLite database exists, so a
+real-data dry run remains unavailable and is not claimed. Dedicated handoff and retrieval-explanation routes are now
+implemented independently, including project synchronization and a readable why-selected/ranked/dropped view.
+
 ## Priority 5 — Retire duplicate desktop ownership
 
 Only after priorities 1–4 pass, disable legacy Kage status probes and hard-coded action cases by default. Preserve a

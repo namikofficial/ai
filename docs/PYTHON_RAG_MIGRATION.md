@@ -50,7 +50,10 @@ pnpm cli -- migration python-rag "$HOME/ai-rag/rag.sqlite3" \
 
 The report includes source integrity, applied Python migrations, table columns and counts, invalid documented JSON, canonical project matches, Markdown handoffs, import/reference/regenerate totals, and conflicts. An unmatched or ambiguous repository must be registered or explicitly resolved before its rows can be imported.
 
-The live default location is `$HOME/ai-rag/rag.sqlite3`. At the time this migration was implemented, the local `$HOME/ai-rag` contained Qdrant storage but no SQLite database, so generated fixtures cover the importer until a real database is available for an operator-reviewed dry run.
+The live default location is `$HOME/ai-rag/rag.sqlite3`. It was checked again on 2026-07-18 along with the legacy
+`$HOME/.local/share/rag/rag.db` and `$HOME/.local/share/rag/rag.sqlite3` locations. No SQLite source existed; the
+local `$HOME/ai-rag` occupied approximately 8 KiB. Generated fixtures therefore cover the importer until a real
+database is available for an operator-reviewed dry run. This absence is not migration-parity evidence.
 
 ## Apply
 
