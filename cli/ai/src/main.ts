@@ -769,7 +769,7 @@ async function run(): Promise<void> {
     if (subcommand === "recover") {
       const workflowId = positionals.shift();
       if (!workflowId) throw new Error("action recover requires a workflow id");
-      printJson(await client.recoverActionExecution(executionId as string, workflowId));
+      printJson(await client.recoverActionExecution(executionId as string, workflowId, "cli"));
       return;
     }
     throw new Error("action requires list, run, show, artifacts, approve, reject, cancel, or recover");

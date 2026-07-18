@@ -3500,6 +3500,218 @@ function RunReviewPage(): ReactNode {
   );
 }
 
+function WorkflowExecutionReviewPage(): ReactNode {
+  const { executionId = "" } = useParams();
+  const navigate = useNavigate();
+  const resource = useResource(
+    () => Promise.all([api.getActionExecution(executionId), api.getActionExecutionArtifacts(executionId)]),
+    [executionId]
+  );
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const detail = resource.data?.[0].data ?? null;
+  const artifactDetail = resource.data?.[1].data ?? null;
+  const execution = (detail?.execution as Record<string, unknown> | undefined) ?? null;
+  const command = (detail?.command as Record<string, unknown> | undefined) ?? null;
+  const approval = (detail?.approval as Record<string, unknown> | undefined) ?? null;
+  const steps = (detail?.steps as Array<Record<string, unknown>> | undefined) ?? [];
+  const recoveryOptions = (detail?.recoveryOptions as string[] | undefined) ?? [];
+  const recoveries = (detail?.recoveries as Array<Record<string, unknown>> | undefined) ?? [];
+  const artifacts = (artifactDetail?.artifacts as Array<Record<string, unknown>> | undefined) ?? [];
+  const state = String(execution?.state ?? "loading");
+
+  const mutate = async (action: "approve" | "reject" | "cancel", workflowId?: string) => {
+    setBusy(workflowId ? `recover:${workflowId}` : action);
+    setError(null);
+    try {
+      if (workflowId) {
+        const response = await api.recoverActionExecution(executionId, workflowId, "workbench-web");
+        const recovery = response.data.execution as Record<string, unknown> | undefined;
+        const deepLink = typeof response.data.deepLink === "string" ? response.data.deepLink : null;
+        if (deepLink) navigate(deepLink);
+        else if (recovery?.id) navigate(`/workflow-executions/${String(recovery.id)}`);
+      } else if (action === "approve") await api.approveActionExecution(executionId);
+      else if (action === "reject") await api.rejectActionExecution(executionId);
+      else await api.cancelActionExecution(executionId);
+      resource.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  if (resource.error) {
+    return (
+      <PageShell title="Workflow review" subtitle={executionId}>
+        <Panel title="Execution unavailable" span={12}>
+          <EmptyState title="Unable to load workflow execution" body={resource.error} />
+        </Panel>
+      </PageShell>
+    );
+  }
+
+  return (
+    <PageShell title="Workflow review" subtitle={executionId}>
+      <Panel title="Execution and policy" span={12}>
+        <div className="row">
+          <div>
+            <strong>{String(execution?.workflowId ?? "Loading workflow")}</strong>
+            <div className="tiny">{String(execution?.errorSummary ?? "Canonical workflow execution evidence")}</div>
+          </div>
+          <Badge
+            tone={
+              state === "failed" || state === "blocked" || state === "cancelled"
+                ? "bad"
+                : state === "completed"
+                  ? "good"
+                  : "warn"
+            }
+          >
+            {state}
+          </Badge>
+        </div>
+        <KeyValueList
+          items={[
+            ["Project", String(execution?.projectId ?? "unknown")],
+            ["Session", String(execution?.sessionId ?? "not linked")],
+            ["Task", String(execution?.taskId ?? "not linked")],
+            ["Started", String(execution?.startedAt ?? "not started")],
+            ["Finished", String(execution?.finishedAt ?? "not finished")],
+            ["Duration", `${Number(detail?.durationMs ?? 0)} ms`],
+            ["Recovery of", String(execution?.recoveryOfExecutionId ?? "not a recovery")],
+          ]}
+        />
+        {error ? <div className="error">{error}</div> : null}
+        <div className="row">
+          {approval?.status === "pending" ? (
+            <>
+              <button type="button" disabled={busy !== null} onClick={() => void mutate("approve")}>
+                {busy === "approve" ? "Approving..." : "Approve scoped execution"}
+              </button>
+              <button
+                className="secondary"
+                type="button"
+                disabled={busy !== null}
+                onClick={() => void mutate("reject")}
+              >
+                {busy === "reject" ? "Rejecting..." : "Reject"}
+              </button>
+            </>
+          ) : null}
+          {["starting", "loading", "ready", "running", "waiting"].includes(state) ? (
+            <button className="secondary" type="button" disabled={busy !== null} onClick={() => void mutate("cancel")}>
+              {busy === "cancel" ? "Cancelling..." : "Cancel"}
+            </button>
+          ) : null}
+        </div>
+      </Panel>
+
+      <Panel title="Command evidence" span={6}>
+        {command ? (
+          <KeyValueList
+            items={[
+              ["Executable", String(command.executable ?? "")],
+              ["Arguments", Array.isArray(command.arguments) ? command.arguments.map(String).join(" ") : ""],
+              ["Working directory", String(command.workingDirectory ?? "")],
+              ["Exit code", String(execution?.exitCode ?? "not available")],
+            ]}
+          />
+        ) : (
+          <EmptyState title="No command evidence" body="A multi-step execution records commands on individual steps." />
+        )}
+      </Panel>
+      <Panel title="Safe artifacts" span={6}>
+        <div className="list">
+          {artifacts.length > 0 ? (
+            artifacts.map((artifact) => (
+              <div className="list-item" key={String(artifact.id)}>
+                <div className="row">
+                  <strong>{artifact.safe ? String(artifact.path ?? "Artifact") : "Protected artifact"}</strong>
+                  <Badge tone={artifact.safe ? "good" : "bad"}>
+                    {artifact.safe ? String(artifact.kind) : "hidden"}
+                  </Badge>
+                </div>
+                <div className="tiny">
+                  {artifact.safe
+                    ? `${Number(artifact.size ?? 0)} bytes · ${String(artifact.modifiedAt ?? "timestamp unavailable")}`
+                    : String(artifact.reason ?? "Artifact path is outside approved roots")}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="No artifacts" body="This workflow did not retain review artifacts." />
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Step evidence" span={12}>
+        <div className="list">
+          {steps.length > 0 ? (
+            steps.map((step) => (
+              <div className="list-item" key={String(step.stepId ?? step.id)}>
+                <div className="row">
+                  <strong>{String(step.stepId ?? "workflow step")}</strong>
+                  <Badge
+                    tone={
+                      step.state === "completed"
+                        ? "good"
+                        : step.state === "failed" || step.state === "blocked"
+                          ? "bad"
+                          : "warn"
+                    }
+                  >
+                    {String(step.state ?? "unknown")}
+                  </Badge>
+                </div>
+                <div className="tiny">{String(step.errorSummary ?? step.commandSummary ?? "No additional detail")}</div>
+              </div>
+            ))
+          ) : (
+            <EmptyState title="Single-step workflow" body="Command evidence is shown above." />
+          )}
+        </div>
+      </Panel>
+
+      <Panel title="Redacted output" span={8}>
+        {detail?.stdout || detail?.stderr ? (
+          <pre className="diff-view">{[detail.stdout, detail.stderr].filter(Boolean).map(String).join("\n")}</pre>
+        ) : (
+          <EmptyState title="No output" body="The execution did not persist command output." />
+        )}
+      </Panel>
+      <Panel title="Recovery" span={4}>
+        <div className="list">
+          {recoveryOptions.length > 0 ? (
+            recoveryOptions.map((workflowId) => (
+              <button
+                className="secondary"
+                type="button"
+                key={workflowId}
+                disabled={busy !== null || !["failed", "blocked", "cancelled"].includes(state)}
+                onClick={() => void mutate("approve", workflowId)}
+              >
+                {busy === `recover:${workflowId}` ? "Starting..." : `Run ${workflowId}`}
+              </button>
+            ))
+          ) : (
+            <EmptyState title="No recovery workflow" body="No approved recovery was snapshotted for this execution." />
+          )}
+          {recoveries.map((recovery) => (
+            <a
+              className="list-item"
+              href={`/workflow-executions/${String(recovery.recoveryExecutionId ?? "")}`}
+              key={String(recovery.recoveryExecutionId ?? recovery.id)}
+            >
+              Recovery {String(recovery.recoveryExecutionId ?? "")}
+            </a>
+          ))}
+        </div>
+      </Panel>
+    </PageShell>
+  );
+}
+
 function ApprovalPage(): ReactNode {
   const { approvalId = "" } = useParams();
   const resource = useResource(() => api.getApproval(approvalId), [approvalId]);
@@ -3578,6 +3790,9 @@ function ApprovalPage(): ReactNode {
                 ],
               ]}
             />
+            <a className="button-link" href={`/workflow-executions/${executionId}`}>
+              Review execution evidence
+            </a>
           </div>
         ) : run ? (
           <div className="stack">
@@ -3948,4 +4163,5 @@ export {
   SkillsPage,
   TaskDetailPage,
   TasksPage,
+  WorkflowExecutionReviewPage,
 };

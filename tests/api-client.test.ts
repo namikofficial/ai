@@ -123,3 +123,33 @@ test("api client applyDevRun targets /dev/runs/:runId/apply and returns applied 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("api client exposes workflow artifact inspection and recovery origin", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      url: typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+      init,
+    });
+    return new Response(JSON.stringify({ status: "ok", data: { artifacts: [], execution: { id: "recovery-1" } } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const api = createApiClient({ baseUrl: "http://127.0.0.1:4242" });
+    await api.getActionExecutionArtifacts("execution one");
+    await api.recoverActionExecution("execution one", "safe recovery", "workbench-web");
+    assert.equal(calls[0]?.url, "http://127.0.0.1:4242/actions/executions/execution%20one/artifacts");
+    assert.equal(calls[1]?.url, "http://127.0.0.1:4242/actions/executions/execution%20one/recover");
+    assert.equal(calls[1]?.init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
+      workflowId: "safe recovery",
+      requestedBy: "workbench-web",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

@@ -277,11 +277,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     recoverActionExecution(
       executionId: string,
-      workflowId: string
+      workflowId: string,
+      requestedBy = "api-client"
     ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/recover`, {
         method: "POST",
-        body: JSON.stringify({ workflowId, requestedBy: "cli" }),
+        body: JSON.stringify({ workflowId, requestedBy }),
         headers: { "content-type": "application/json" },
       });
     },

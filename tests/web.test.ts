@@ -128,6 +128,7 @@ test("project deep links synchronize canonical selection and flow into work surf
   assert.match(appSource, /api\.getRegistry\(\)/);
   assert.match(appSource, /className="context-strip"/);
   assert.match(appSource, /path="\/runs\/:runId" element=\{<RunReviewPage \/>\}/);
+  assert.match(appSource, /path="\/workflow-executions\/:executionId" element=\{<WorkflowExecutionReviewPage \/>\}/);
   assert.ok((pagesSource.match(/projectId: routeProjectId/g) ?? []).length >= 4);
   assert.match(pagesSource, /routeProjectId \?\? selectedProjectId/);
   assert.match(pagesSource, /function ProjectWorkPage/);
@@ -140,6 +141,10 @@ test("project deep links synchronize canonical selection and flow into work surf
   assert.ok(runReview.indexOf('title="Diff"') < runReview.indexOf('title="Checks and warnings"'));
   assert.match(runReview, /api\.approveDevRun\(runId\)/);
   assert.match(runReview, /api\.applyDevRun\(runId\)/);
+  assert.match(pagesSource, /function WorkflowExecutionReviewPage/);
+  assert.match(pagesSource, /api\.getActionExecutionArtifacts\(executionId\)/);
+  assert.match(pagesSource, /api\.recoverActionExecution\(executionId, workflowId, "workbench-web"\)/);
+  assert.match(pagesSource, /Review execution evidence/);
   assert.match(pagesSource, /api\s*\.getSessionContext\(\s*result\.sessionId/);
   assert.match(pagesSource, /api\s*\.saveSessionMemory\(\s*result\.sessionId/);
   assert.match(pagesSource, /api\.plan\(\{ project, goal, risk, sessionId: inheritedSessionId \}\)/);

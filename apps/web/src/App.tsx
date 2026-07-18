@@ -36,6 +36,7 @@ import {
   SkillsPage,
   TaskDetailPage,
   TasksPage,
+  WorkflowExecutionReviewPage,
 } from "./pages.tsx";
 import { useWorkbenchStore } from "./store.ts";
 
@@ -378,6 +379,7 @@ export function App() {
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/reviews/:reviewId" element={<ReviewDetailPage />} />
           <Route path="/runs/:runId" element={<RunReviewPage />} />
+          <Route path="/workflow-executions/:executionId" element={<WorkflowExecutionReviewPage />} />
           <Route path="/approvals/:approvalId" element={<ApprovalPage />} />
           <Route path="/dev" element={<DevPage />} />
           <Route path="/projects/:projectId/dev" element={<DevPage />} />
