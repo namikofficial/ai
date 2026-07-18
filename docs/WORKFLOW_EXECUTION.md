@@ -184,6 +184,22 @@ exclusion. A missing or escaping artifact changes the execution to `failed` with
 canonical paths are appended to `WorkflowExecution.artifacts`. In isolated mode this validation runs inside the
 retained workspace.
 
+## Dependency DAGs
+
+A canonical `WorkflowDefinition` can contain either one command or a validated step DAG. Step IDs must be unique,
+dependencies must exist, and cycles are rejected before persistence. Each executable step references another
+canonical command and must exactly match its mutation and execution-mode policy; definitions cannot weaken the
+referenced command. Steps execute in deterministic topological order. Direct and isolated plans run in the API,
+while a plan containing a background step is durably queued and supervised by the worker. An isolated plan uses one
+shared retained workspace so dependent steps observe prior outputs.
+
+The aggregate approval hash binds the complete definition, ordered steps, structured commands, working directories,
+branches, and base commits. Per-step state, command evidence, redacted output, attempts, artifacts, timings, and errors
+are stored in `workflow_step_executions`; the compact aggregate remains in `WorkflowExecution.stepStates`. A failed
+step blocks unstarted dependants, check steps project into canonical check status, and cancellation stops the active
+process group and prevents further attempts. Interactive terminal/tmux steps fail closed until a resumable multi-step
+desktop handoff is implemented.
+
 ## Secret environment references
 
 Direct, isolated, and background commands may request names from `environmentRefs` only when the approved manifest
@@ -196,7 +212,7 @@ a protected secret-delivery channel is required before enabling them.
 
 ## Remaining adapters
 
-- dependency steps and explicit recovery workflow execution;
+- explicit recovery workflow execution;
 - protected secret delivery for terminal/tmux workflows;
 - isolated artifact diff presentation and explicit cleanup controls;
 - platform capability discovery and `visibleWhen` evaluation.

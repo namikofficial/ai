@@ -29,12 +29,14 @@ lists concrete remaining gates rather than treating compatibility slices as fini
   artifacts are type- and containment-validated and become canonical execution artifacts.
 - Approved manifest commands synchronize into canonical SQLite workflow definitions. Manual definitions take
   precedence, action execution consumes them, and structural validation rejects ambiguous or cyclic DAGs.
+- Workflow DAGs execute in topological order with aggregate approval binding, durable per-step evidence, shared
+  isolation, background supervision, check projection, downstream blocking, and cancellation without retry.
 
 ## Priority 1 — Complete workflow modes
 
 Build on `workflow_executions` rather than adding another runner:
 
-1. Implement workflow dependency DAGs and explicit recovery workflow execution.
+1. Implement explicit recovery workflow execution and expose recovery choices in run review.
 2. Add a protected desktop secret-delivery channel without returning values to APIs, logs, or caches.
 3. Add recovery workflows and artifact inspection to workflow reviews.
 
