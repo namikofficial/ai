@@ -239,6 +239,34 @@ test("recommended actions separate approval requirements from unavailable execut
   assert.match(action?.disabledReason ?? "", /environment references/i);
 });
 
+test("recommended actions allow manifest-approved secret references", () => {
+  const manifest = {
+    id: "project",
+    secretRefs: ["DEPLOY_TOKEN"],
+    commands: {
+      deploy: {
+        id: "deploy",
+        name: "Deploy",
+        description: "Deploy the project",
+        category: "development",
+        executable: "just",
+        arguments: ["deploy"],
+        workingDirectory: null,
+        environmentRefs: ["DEPLOY_TOKEN"],
+        interactive: true,
+        mutation: "external",
+        timeoutSeconds: 60,
+        requiresCapabilities: [],
+        visibleWhen: [],
+      },
+    },
+  } as unknown as ProjectManifest;
+  const [action] = recommendedActionsFromManifest(manifest, "2026-07-18T00:00:00.000Z");
+  assert.equal(action?.state, "ready");
+  assert.equal(action?.approvalRequired, true);
+  assert.equal(action?.disabledReason, null);
+});
+
 test("compact status is human-readable and the offline cache is atomic and versioned", async () => {
   const fixtures = JSON.parse(
     await readFile(new URL("./fixtures/contracts/v1-control-plane.json", import.meta.url), "utf8")

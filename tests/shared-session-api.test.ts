@@ -123,7 +123,7 @@ test("shared sessions: create, append, preview, close, and resume through canoni
         schemaVersion: number;
         tokenBudget: number;
         estimatedTokens: number;
-        included: Array<{ kind: string; reason: string }>;
+        included: Array<{ kind: string; reason: string; trust: string; canGrantApproval: boolean }>;
         index: { stale: boolean };
         warnings: string[];
       };
@@ -133,9 +133,12 @@ test("shared sessions: create, append, preview, close, and resume through canoni
     assert.ok(context.data.estimatedTokens <= context.data.tokenBudget);
     assert.ok(context.data.included.some((item) => item.kind === "session"));
     assert.ok(context.data.included.some((item) => item.kind === "message"));
+    assert.ok(context.data.included.some((item) => item.trust === "untrusted"));
+    assert.ok(context.data.included.every((item) => item.canGrantApproval === false));
     assert.equal(context.data.index.stale, true);
     assert.ok(context.data.warnings.includes("Project index is stale"));
     assert.ok(context.data.warnings.some((warning) => warning.startsWith("Redacted ")));
+    assert.ok(context.data.warnings.some((warning) => warning.includes("cannot grant approval")));
     assert.doesNotMatch(preview.body, /ghp_12345678901234567890/);
     assert.match(preview.body, /\[REDACTED:github_token\]/);
 
@@ -169,12 +172,17 @@ test("shared sessions: create, append, preview, close, and resume through canoni
     });
     const scopedContext = JSON.parse(scopedPreview.body).data as {
       tokenBudget: number;
-      included: Array<{ kind: string; source: string }>;
+      included: Array<{ kind: string; source: string; trust: string; canGrantApproval: boolean }>;
       scope: { includeConversation: boolean };
     };
     assert.equal(scopedContext.tokenBudget, 2_000, "request cannot exceed the durable session budget");
     assert.equal(scopedContext.scope.includeConversation, false);
     assert.ok(scopedContext.included.some((item) => item.kind === "explicit_file" && item.source === "README.md"));
+    assert.ok(
+      scopedContext.included.some(
+        (item) => item.kind === "explicit_file" && item.trust === "untrusted" && item.canGrantApproval === false
+      )
+    );
     assert.ok(!scopedContext.included.some((item) => item.kind === "message"));
 
     const secretScope = await handle.inject({

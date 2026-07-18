@@ -72,7 +72,9 @@ function workflowStep(id: string, workflowId: string, dependsOn: string[] = []):
 
 test("workflow actions list approved commands, execute read-only work, and persist audit state", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-actions-"));
-  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const databasePath = join(workspace, "workbench.db");
+  const runtimeDir = join(workspace, "runtime");
+  const store = createStore(initializeStore(databasePath));
   const project = store.createProject({
     path: workspace,
     name: "Workflow Project",
@@ -135,8 +137,8 @@ test("workflow actions list approved commands, execute read-only work, and persi
     store,
     inProcess: true,
     config: {
-      databasePath: join(workspace, "workbench.db"),
-      runtimeDir: join(workspace, "runtime"),
+      databasePath,
+      runtimeDir,
       apiPort: 0,
     },
   });
@@ -573,6 +575,8 @@ test("approved secret references reach commands without entering responses or au
   approved.environmentRefs = ["WORKBENCH_TEST_TOKEN"];
   const unapproved = command("unapproved-secret", "printenv", ["OTHER_TOKEN"]);
   unapproved.environmentRefs = ["OTHER_TOKEN"];
+  const protectedEnvironment = command("protected-environment", "printenv", ["PATH"]);
+  protectedEnvironment.environmentRefs = ["PATH"];
   const desktop = {
     ...approved,
     id: "desktop-secret",
@@ -592,8 +596,8 @@ test("approved secret references reach commands without entering responses or au
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    secretRefs: ["WORKBENCH_TEST_TOKEN"],
-    commands: { approved, unapproved, desktop, background },
+    secretRefs: ["WORKBENCH_TEST_TOKEN", "PATH"],
+    commands: { approved, unapproved, protectedEnvironment, desktop, background },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
   const handle = await startWorkbenchServer({
@@ -635,9 +639,24 @@ test("approved secret references reach commands without entering responses or au
     const rejected = await request("unapproved-secret");
     assert.equal(rejected.statusCode, 409);
     assert.match(rejected.body, /not approved by the manifest/);
-    const desktopRejected = await request("desktop-secret");
-    assert.equal(desktopRejected.statusCode, 409);
-    assert.match(desktopRejected.body, /cannot deliver secret references/);
+    const protectedRejected = await request("protected-environment");
+    assert.equal(protectedRejected.statusCode, 409);
+    assert.match(protectedRejected.body, /cannot override protected workflow environment/);
+    const desktopReady = await request("desktop-secret");
+    assert.equal(desktopReady.statusCode, 202, desktopReady.body);
+    const desktopData = JSON.parse(desktopReady.body).data as {
+      execution: { id: string; state: string };
+      launch: { environmentRefs: string[]; environment: Record<string, string>; capabilities: string[] };
+    };
+    assert.equal(desktopData.execution.state, "ready");
+    assert.deepEqual(desktopData.launch.environmentRefs, ["WORKBENCH_TEST_TOKEN"]);
+    assert.ok(desktopData.launch.capabilities.includes("secret-environment"));
+    assert.equal(desktopData.launch.environment.WORKBENCH_TEST_TOKEN, undefined);
+    assert.doesNotMatch(desktopReady.body, new RegExp(secretValue));
+    assert.doesNotMatch(
+      JSON.stringify(store.workflows.getLaunchForExecution(desktopData.execution.id)),
+      new RegExp(secretValue)
+    );
 
     await chmod(secretFile, 0o644);
     const insecure = await request("approved-secret");
@@ -1400,7 +1419,9 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     ].join("\n")
   );
   await writeFile(outsideArtifact, "must not expose this path\n");
-  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const databasePath = join(outside, "workbench.db");
+  const runtimeDir = join(outside, "runtime");
+  const store = createStore(initializeStore(databasePath));
   const project = store.createProject({
     path: workspace,
     name: "Isolated Project",
@@ -1422,8 +1443,8 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     store,
     inProcess: true,
     config: {
-      databasePath: join(workspace, "workbench.db"),
-      runtimeDir: join(workspace, "runtime"),
+      databasePath,
+      runtimeDir,
       apiPort: 0,
     },
   });
@@ -1492,7 +1513,7 @@ test("isolated workflows retain review artifacts without mutating the canonical 
       artifacts.map((artifact) => artifact.kind),
       ["directory", "file"]
     );
-    assert.ok(artifacts.every((artifact) => artifact.path?.startsWith(join(workspace, "runtime"))));
+    assert.ok(artifacts.every((artifact) => artifact.path?.startsWith(runtimeDir)));
 
     const persisted = store.workflows.get(executionId);
     assert.ok(persisted);
@@ -1562,8 +1583,8 @@ test("isolated workflows retain review artifacts without mutating the canonical 
       headers: { accept: "application/json" },
     });
     assert.equal(secondRequest.statusCode, 202, secondRequest.body);
-    const cleanupId = JSON.parse(secondRequest.body).data.cleanup.id as string;
-    assert.notEqual(cleanupId, firstCleanupId);
+    const interruptedCleanupId = JSON.parse(secondRequest.body).data.cleanup.id as string;
+    assert.notEqual(interruptedCleanupId, firstCleanupId);
     const confusedApproval = await handle.inject({
       method: "POST",
       url: `/actions/executions/${executionId}/artifacts/cleanup/approve`,
@@ -1571,6 +1592,23 @@ test("isolated workflows retain review artifacts without mutating the canonical 
       body: { cleanupId: "cleanup_from_another_execution", decidedBy: "test" },
     });
     assert.equal(confusedApproval.statusCode, 409);
+
+    store.workflows.transitionArtifactCleanup({
+      id: interruptedCleanupId,
+      expectedStatus: "pending",
+      status: "running",
+      decidedBy: "test",
+    });
+    const interrupted = store.workflows.failRunningArtifactCleanups();
+    assert.equal(interrupted[0]?.status, "failed");
+    await access(retainedWorkspace);
+    const thirdRequest = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/artifacts/cleanup/request`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(thirdRequest.statusCode, 202, thirdRequest.body);
+    const cleanupId = JSON.parse(thirdRequest.body).data.cleanup.id as string;
 
     const cleanupApproval = await handle.inject({
       method: "POST",

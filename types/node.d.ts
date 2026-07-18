@@ -69,10 +69,8 @@ declare module "node:fs/promises" {
   ): Promise<void>;
   export function mkdir(path: string, options?: { recursive?: boolean }): Promise<string | undefined>;
   export function mkdtemp(prefix: string): Promise<string>;
-  export function readFile(
-    path: string | URL,
-    options?: { encoding?: BufferEncoding } | BufferEncoding
-  ): Promise<string>;
+  export function readFile(path: string | URL): Promise<Uint8Array>;
+  export function readFile(path: string | URL, options: { encoding: BufferEncoding } | BufferEncoding): Promise<string>;
   export function readdir(path: string, options?: { withFileTypes?: boolean }): Promise<string[] | Dirent[]>;
   export function rename(oldPath: string, newPath: string): Promise<void>;
   export function stat(path: string): Promise<{

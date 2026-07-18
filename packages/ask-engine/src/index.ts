@@ -1463,40 +1463,40 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
           : item
       )
     : persistedContextItems;
-  const compiledAnswer = compilePrompt(
-    buildAskAnswerPrompt({
-      question: input.input.question,
-      projectName: project.name,
-      contextPackId: contextPack.id,
-      confidence,
-      insufficientReason,
-      projectRules: rules,
-      memoryEntries,
-      facts,
-      retrievalChunks: chunks,
-      contextPackItems: modelContextItems,
-      previousMessages,
-      sessionId: session.id,
-      retrievalQueryId: retrievalQuery.id,
-      tokenBudget: contextScope.tokenBudget,
-    })
-  );
+  const compileAnswerWithContext = (contextPackItems: ContextPackItemForPrompt[]) =>
+    compilePrompt(
+      buildAskAnswerPrompt({
+        question: input.input.question,
+        projectName: project.name,
+        contextPackId: contextPack.id,
+        confidence,
+        insufficientReason,
+        projectRules: rules,
+        memoryEntries,
+        facts,
+        retrievalChunks: chunks,
+        contextPackItems,
+        previousMessages,
+        sessionId: session.id,
+        retrievalQueryId: retrievalQuery.id,
+        tokenBudget: contextScope.tokenBudget,
+      })
+    );
+  const compiledAnswer = compileAnswerWithContext(modelContextItems);
   const compiledAnswerForRecord =
     clipboardForModel && clipboardPersistentMarker
-      ? {
-          ...compiledAnswer,
-          messages: compiledAnswer.messages.map((message) => ({
-            ...message,
-            content: message.content.replaceAll(clipboardForModel, clipboardPersistentMarker),
-          })),
-          includedContext: compiledAnswer.includedContext.map((item) =>
-            item.kind === "clipboard" ? { ...item, excerpt: clipboardPersistentMarker } : item
-          ),
-          safetyNotes: [
-            ...compiledAnswer.safetyNotes,
-            "Ephemeral clipboard content omitted from durable prompt records.",
-          ],
-        }
+      ? (() => {
+          const durable = compileAnswerWithContext(
+            modelContextItems.map((item) =>
+              item.kind === "clipboard" ? { ...item, excerpt: clipboardPersistentMarker } : item
+            )
+          );
+          return {
+            ...durable,
+            id: compiledAnswer.id,
+            safetyNotes: [...durable.safetyNotes, "Ephemeral clipboard content omitted from durable prompt records."],
+          };
+        })()
       : compiledAnswer;
   input.store.recordCompiledPrompt({
     compiledPrompt: compiledAnswerForRecord,

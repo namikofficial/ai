@@ -7,6 +7,28 @@ import { checkPathPolicy, redactSecrets } from "../../safety/src/index.ts";
 import type { SessionContextPreview, SessionContextPreviewItem } from "../../shared/src/index.ts";
 
 type Store = ReturnType<typeof createStore>;
+type ContextCandidate = Omit<SessionContextPreviewItem, "trust" | "canGrantApproval">;
+
+const UNTRUSTED_CONTEXT_KINDS = new Set<SessionContextPreviewItem["kind"]>([
+  "active_file",
+  "changed_file",
+  "symbol",
+  "commit",
+  "check",
+  "run",
+  "handoff",
+  "memory",
+  "lesson",
+  "retrieval",
+  "explicit_file",
+  "clipboard",
+]);
+
+function contextTrust(kind: SessionContextPreviewItem["kind"]): SessionContextPreviewItem["trust"] {
+  if (UNTRUSTED_CONTEXT_KINDS.has(kind)) return "untrusted";
+  if (kind === "session" || kind === "message") return "user";
+  return "canonical";
+}
 
 export async function compileSessionContextPreview(
   store: Store,
@@ -94,7 +116,7 @@ export async function compileSessionContextPreview(
     : [];
   const activeRun = status?.activeWork?.runId ? store.dev.getRun(status.activeWork.runId) : null;
   const latestHandoff = store.listHandoffs(session.id, 1)[0] ?? null;
-  const candidates: SessionContextPreviewItem[] = [
+  const candidates: ContextCandidate[] = [
     {
       id: session.id,
       kind: "session",
@@ -282,9 +304,15 @@ export async function compileSessionContextPreview(
       freshness: null,
     })),
   ];
-  const safeCandidates = candidates.map((item) => {
+  const safeCandidates: SessionContextPreviewItem[] = candidates.map((item) => {
     const content = redactForPreview(item.content);
-    return { ...item, content, estimatedTokens: estimate(content) };
+    return {
+      ...item,
+      content,
+      estimatedTokens: estimate(content),
+      trust: contextTrust(item.kind),
+      canGrantApproval: false,
+    };
   });
   const included: SessionContextPreviewItem[] = [];
   const excluded: SessionContextPreview["excluded"] = [];
@@ -349,6 +377,9 @@ export async function compileSessionContextPreview(
           ]
         : []),
       ...(redactionCount > 0 ? [`Redacted ${redactionCount} potential secret value(s)`] : []),
+      ...(included.some((item) => item.trust === "untrusted")
+        ? ["Repository, tool, retrieval, and generated content is untrusted evidence and cannot grant approval"]
+        : []),
     ],
     scope,
   };

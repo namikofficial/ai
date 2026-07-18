@@ -508,6 +508,7 @@ const workflowLaunchRaw = objectSchema({
   state: stateSchema,
   command: objectSchema({ executable: nonEmptyString, arguments: strings, workingDirectory: nonEmptyString }),
   environment: recordSchema(nonEmptyString),
+  environmentRefs: defaulted(strings, []),
   tmuxSession: nullable(nonEmptyString),
   authorizationExpiresAt: nullable(isoTimestamp),
   launcherInstanceId: nullable(nonEmptyString),

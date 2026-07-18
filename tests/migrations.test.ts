@@ -37,6 +37,7 @@ test("migrations list includes the complete control-plane baseline", () => {
   assert.ok(versions.includes("0026_workflow_recoveries"));
   assert.ok(versions.includes("0027_session_context_scopes"));
   assert.ok(versions.includes("0028_workflow_artifact_cleanups"));
+  assert.ok(versions.includes("0029_workflow_launch_secret_refs"));
 });
 
 test("migrations apply cleanly and create all expected tables", async () => {
@@ -45,7 +46,7 @@ test("migrations apply cleanly and create all expected tables", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 28);
+    assert.equal(result.applied.length, 29);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{

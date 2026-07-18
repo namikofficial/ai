@@ -97,7 +97,14 @@ writes the capability to a mode-0600 file under the user runtime directory, laun
 session with structured arguments, deletes the capability file when consumed, and executes the command without a
 shell. It reports the child process group and final exit code through token-bound lifecycle callbacks. Replayed,
 expired, wrong-state, and wrong-token callbacks are rejected. Canonical project/session/task identifiers are supplied
-as environment variables; secret references and values are never part of the launch contract.
+as environment variables. Approved secret *names* are part of the launch contract, but their values are not.
+
+When a desktop command requests `environmentRefs`, the launcher resolves only those names from the local file named
+by `AI_WORKBENCH_SECRET_FILE`. The provider must be an absolute, canonical regular file owned by the current user with
+mode 0600 or stricter; symlinks and files larger than 1 MiB are rejected. Values remain in launcher memory and the
+structured child environment. They are absent from HTTP responses, SQLite, the capability file, lifecycle callbacks,
+logs, and caches. The child receives a reduced ambient environment, and protected control-plane names such as `PATH`,
+`HOME`, `AI_WORKBENCH_PROJECT_ID`, and `AI_WORKBENCH_SECRET_FILE` cannot be requested or overridden.
 
 Rofi launches read-only interactive actions immediately. For an approved mutating interactive action, the event bridge
 offers a `Launch` notification action after approval. Cancelling a ready launch closes it durably; cancelling a running
@@ -189,6 +196,19 @@ Artifact inspection is metadata-only through
 canonically on every read. Paths outside the approved project or Workbench runtime roots, and secret-like files, are
 reported as unsafe without returning their path or contents.
 
+An isolated execution also exposes a bounded diff through
+`GET /actions/executions/:executionId/artifacts/diff` or `ai action diff <execution-id>`. The workspace must resolve
+to the exact execution-derived `<runtime>/dev-runs/<execution>/workspace` path, its command directory must remain
+inside it, and it must not contain the canonical project. Git worktrees include tracked and untracked changes;
+safe-copy workspaces use a bounded file comparison. Secret-like paths are excluded and diff output is capped.
+
+Cleanup is a separate destructive approval, not a side effect of execution approval. Request it with
+`POST .../artifacts/cleanup/request` or `ai action cleanup-request`. The durable request binds the execution, project,
+canonical workspace, artifact set, and reviewed diff hash. Approval re-resolves all paths and recomputes that hash;
+changed, expired, mismatched, or replayed requests fail closed. Only the execution-derived run directory can be
+removed. Git worktree cleanup also removes only its generated `ai/dev/...` branch. Browser controls expose request,
+approve, and “keep workspace” actions alongside the reviewed diff.
+
 ## Recovery workflows
 
 Failed, blocked, and cancelled executions may start only the recovery workflow IDs snapshotted on the original
@@ -215,19 +235,16 @@ desktop handoff is implemented.
 
 ## Secret environment references
 
-Direct, isolated, and background commands may request names from `environmentRefs` only when the approved manifest
+Direct, isolated, background, terminal, and tmux commands may request names from `environmentRefs` only when the approved manifest
 also lists those names in `secretRefs`. Values come from the file named by `AI_WORKBENCH_SECRET_FILE`; that file must
 be a regular file owned by the Workbench user with mode 0600 or stricter. Values are passed only to the structured
 child process, are redacted from stdout/stderr before persistence, and are never placed in registry/status caches or
-workflow audit records. Missing, unapproved, or insecure providers fail the workflow explicitly. Terminal/tmux
-workflows with secret references remain blocked because their current desktop handoff is an inspectable API payload;
-a protected secret-delivery channel is required before enabling them.
+workflow audit records. Missing, unapproved, protected-name, symlinked, or insecure providers fail explicitly.
+Desktop launch records persist only the requested names; the desktop launcher resolves their values locally after
+consuming its one-use private capability.
 
 ## Remaining adapters
 
-- approval-gated artifact cleanup and isolated artifact diff presentation;
-- protected secret delivery for terminal/tmux workflows;
-- isolated artifact diff presentation and explicit cleanup controls;
 - platform capability discovery and `visibleWhen` evaluation.
 
 Until each adapter has persistence and policy tests, the API returns an explicit blocked reason instead of silently

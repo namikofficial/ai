@@ -1,6 +1,24 @@
 import { readFile, stat } from "node:fs/promises";
 
 const SECRET_NAME = /^[A-Z_][A-Z0-9_]*$/;
+const PROTECTED_ENVIRONMENT_NAMES = new Set([
+  "HOME",
+  "LOGNAME",
+  "PATH",
+  "SHELL",
+  "USER",
+  "XDG_RUNTIME_DIR",
+  "AI_WORKBENCH_API_URL",
+  "AI_WORKBENCH_EXECUTION_ID",
+  "AI_WORKBENCH_PROJECT_ID",
+  "AI_WORKBENCH_SECRET_FILE",
+  "AI_WORKBENCH_SESSION_ID",
+  "AI_WORKBENCH_TASK_ID",
+]);
+
+export function isProtectedWorkflowEnvironmentReference(name: string): boolean {
+  return PROTECTED_ENVIRONMENT_NAMES.has(name);
+}
 
 export interface SecretProvider {
   resolve(names: string[]): Promise<Record<string, string>>;
@@ -105,6 +123,13 @@ export async function resolveManifestWorkflowEnvironment(input: {
 }): Promise<Record<string, string>> {
   const approved = new Set(input.approvedRefs);
   const requested = [...new Set(input.requestedRefs)];
+  const protectedName = requested.find(isProtectedWorkflowEnvironmentReference);
+  if (protectedName) {
+    throw new SecretResolutionError(
+      "invalid_reference",
+      `secret reference cannot override protected workflow environment: ${protectedName}`
+    );
+  }
   const unapproved = requested.find((name) => !approved.has(name));
   if (unapproved) {
     throw new SecretResolutionError(

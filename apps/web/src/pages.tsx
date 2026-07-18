@@ -1246,6 +1246,9 @@ function SessionDetailPage(): ReactNode {
                   <div className="row">
                     <strong>{item.title}</strong>
                     <Badge>{item.kind}</Badge>
+                    <Badge tone={item.trust === "untrusted" ? "warn" : item.trust === "canonical" ? "good" : "neutral"}>
+                      {item.trust === "untrusted" ? "untrusted evidence" : item.trust}
+                    </Badge>
                   </div>
                   <div className="tiny">
                     {item.reason} · {item.source}
@@ -1839,6 +1842,7 @@ function AskPage(): ReactNode {
               <div className="list-item" key={`${citation.chunkId}-${citation.startLine}`}>
                 <div className="row">
                   <strong>{citation.path}</strong>
+                  <Badge tone="warn">untrusted evidence</Badge>
                   <Badge>score {citation.score.toFixed(1)}</Badge>
                 </div>
                 <div className="tiny">
@@ -1870,6 +1874,9 @@ function AskPage(): ReactNode {
                   <div className="row">
                     <strong>{item.title}</strong>
                     <Badge>{item.kind}</Badge>
+                    <Badge tone={item.trust === "untrusted" ? "warn" : item.trust === "canonical" ? "good" : "neutral"}>
+                      {item.trust === "untrusted" ? "untrusted evidence" : item.trust}
+                    </Badge>
                   </div>
                   <div className="tiny">
                     {item.reason} · {item.source} · ~{item.estimatedTokens} tokens

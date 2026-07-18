@@ -315,6 +315,8 @@ export interface WorkflowLaunch extends VersionedContract {
   state: UnifiedState;
   command: { executable: string; arguments: string[]; workingDirectory: string };
   environment: Record<string, string>;
+  /** Approved secret names for the desktop launcher to resolve locally. Values never enter this contract. */
+  environmentRefs: string[];
   tmuxSession: string | null;
   authorizationExpiresAt: string | null;
   launcherInstanceId: string | null;

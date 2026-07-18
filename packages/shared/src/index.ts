@@ -870,6 +870,9 @@ export interface SessionContextPreviewItem {
   content: string;
   estimatedTokens: number;
   freshness: string | null;
+  /** Trust describes provenance, never permission. No context item can approve a mutation. */
+  trust: "canonical" | "user" | "untrusted";
+  canGrantApproval: false;
 }
 
 export interface SessionContextPreview {

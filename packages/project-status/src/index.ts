@@ -340,12 +340,14 @@ export function recommendedActionsFromManifest(
 ): RecommendedAction[] {
   return Object.entries(manifest.commands)
     .map(([key, command], index): RecommendedAction => {
-      const disabledReason =
-        command.environmentRefs.length > 0
-          ? "Requires approved environment references"
-          : command.requiresCapabilities.length > 0
-            ? `Requires capabilities: ${command.requiresCapabilities.join(", ")}`
-            : null;
+      const rejectedEnvironmentRef = command.environmentRefs.find(
+        (reference) => !(manifest.secretRefs ?? []).includes(reference)
+      );
+      const disabledReason = rejectedEnvironmentRef
+        ? `Environment references are not approved: ${rejectedEnvironmentRef}`
+        : command.requiresCapabilities.length > 0
+          ? `Requires capabilities: ${command.requiresCapabilities.join(", ")}`
+          : null;
       return {
         schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
         id: `action:${manifest.id}:${key}`,

@@ -23,8 +23,9 @@ lists concrete remaining gates rather than treating compatibility slices as fini
   Git-worktree/safe-copy workspace and expose that workspace as a review artifact without touching the original tree.
 - Background workflows use a durable queue association, worker-side canonical revalidation, tracked process groups,
   queued/running cancellation, and fail-safe restart recovery that never silently replays possible side effects.
-- Direct, isolated, and background workflows resolve manifest-approved names through a user-owned mode-0600 secret
-  provider and redact resolved values before any result is persisted; desktop secret delivery remains blocked.
+- All workflow modes resolve only manifest-approved secret names through a user-owned mode-0600 provider. Desktop
+  launches persist names only; their helper resolves values locally into a reduced child environment, while API
+  responses, capability files, lifecycle calls, logs, SQLite and caches remain value-free.
 - Read-only workflow retries are bounded, abort-aware, and attempt-audited; mutating retries are rejected. Required
   artifacts are type- and containment-validated and become canonical execution artifacts.
 - Approved manifest commands synchronize into canonical SQLite workflow definitions. Manual definitions take
@@ -41,23 +42,30 @@ lists concrete remaining gates rather than treating compatibility slices as fini
   explicit files pass root/secret/exclusion checks, and retrieval/memory/rules/conversation flags and token ceilings
   are enforced during packing. Clipboard context requires a redacted preview and exact-hash one-use consent; raw
   clipboard and clipboard-derived answers are omitted from durable prompts, calls, events, messages, and caches.
+- Isolated workflow review now includes tracked and untracked workspace diffs with secret-path exclusion and bounded
+  output. Cleanup has a dedicated SQLite approval lifecycle bound to the exact execution workspace, artifact set and
+  reviewed diff hash; stale, mismatched and replayed approvals fail closed. API, CLI and Workbench expose explicit
+  request/approve/keep controls, and cleanup never accepts a caller-supplied deletion path.
 
 ## Priority 1 — Complete workflow modes
 
 Build on `workflow_executions` rather than adding another runner:
 
-1. Add a protected desktop secret-delivery channel without returning values to APIs, logs, or caches.
-2. Add approval-gated artifact cleanup without allowing arbitrary path deletion.
-3. Add isolated artifact diff presentation without weakening the separate apply approval.
+1. Completed: protected desktop secret delivery without returning values to APIs, logs, SQLite or caches.
+2. Completed: approval-gated artifact cleanup without caller-supplied deletion paths.
+3. Completed: isolated artifact diff presentation without weakening the separate apply approval.
 
 Acceptance evidence: API/CLI/Rofi integration tests for success, denial, approval replay, cancellation, timeout,
 wrong-project invocation, secret redaction, process-tree cleanup, and restart recovery.
 
 ## Priority 2 — Explicit context consent and retrieval scope
 
-Add broader adversarial repository prompt-injection fixtures and expose clearer untrusted-source labels throughout
-context rendering. The durable scope, active/changed/explicit-file enforcement, one-use clipboard preview/consent,
-browser controls, CLI controls, and read-only MCP scope inspection are implemented and covered by integration tests.
+Completed: the durable scope, active/changed/explicit-file enforcement, one-use clipboard preview/consent, browser
+controls, CLI controls, and read-only MCP scope inspection are implemented. Preview items expose explicit provenance
+trust and cannot grant approval; browser context/citation surfaces label untrusted evidence. Model-bound repository
+content is JSON-encoded under an evidence-only warning, and adversarial TypeScript, Python, Markdown, generated-output,
+retrieval, project-confusion, secret-exfiltration and stale-approval fixtures are covered. Clipboard durable-record
+sanitization is compiled independently from ephemeral model context rather than relying on string replacement.
 
 ## Priority 3 — Live desktop end-to-end proof
 

@@ -68,6 +68,21 @@ test("ChecksPage wires the project selector and Execute/Record actions to the ap
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("WorkflowExecutionReviewPage renders isolated diff and explicit cleanup approval controls", async () => {
+  const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
+  for (const method of [
+    "getActionExecutionArtifactDiff",
+    "requestActionArtifactCleanup",
+    "approveActionArtifactCleanup",
+    "rejectActionArtifactCleanup",
+  ]) {
+    assert.ok(pagesSource.includes(`.${method}(`), `Workflow review must call api.${method}`);
+  }
+  assert.match(pagesSource, /Isolated workspace diff/);
+  assert.match(pagesSource, /Approve reviewed cleanup/);
+  assert.match(pagesSource, /Keep workspace/);
+});
+
 test("defines the Vite React shell and router surface", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-web-"));
   const indexHtml = await readFile("/home/namik/Documents/code/ai/apps/web/index.html", "utf8");

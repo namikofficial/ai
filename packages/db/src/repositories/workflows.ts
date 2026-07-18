@@ -76,6 +76,7 @@ interface WorkflowLaunchRow {
   state: string;
   command_json: string;
   environment_json: string;
+  environment_refs_json: string;
   tmux_session: string | null;
   token_hash: string | null;
   authorization_expires_at: string | null;
@@ -186,6 +187,7 @@ function rowToLaunch(row: WorkflowLaunchRow): WorkflowLaunchRecord {
       state: asString(row.state),
       command: safeParseJson(row.command_json),
       environment: safeParseJson(row.environment_json),
+      environmentRefs: safeParseJsonArray<string>(row.environment_refs_json),
       tmuxSession: asStringOrNull(row.tmux_session),
       authorizationExpiresAt: asStringOrNull(row.authorization_expires_at),
       launcherInstanceId: asStringOrNull(row.launcher_instance_id),
@@ -374,6 +376,26 @@ export function createWorkflowsRepo(db: DatabaseSync) {
         .prepare("SELECT * FROM workflow_artifact_cleanups WHERE execution_id = ? ORDER BY requested_at DESC LIMIT 1")
         .get(executionId) as Record<string, unknown> | undefined;
       return row ? rowToArtifactCleanup(row) : null;
+    },
+
+    failRunningArtifactCleanups(
+      reason = "Workbench restarted during artifact cleanup"
+    ): WorkflowArtifactCleanupRecord[] {
+      const rows = db
+        .prepare("SELECT id FROM workflow_artifact_cleanups WHERE status = 'running' ORDER BY requested_at")
+        .all() as Array<{ id: string }>;
+      const failed: WorkflowArtifactCleanupRecord[] = [];
+      for (const row of rows) {
+        failed.push(
+          this.transitionArtifactCleanup({
+            id: row.id,
+            expectedStatus: "running",
+            status: "failed",
+            errorSummary: reason,
+          })
+        );
+      }
+      return failed;
     },
 
     transitionArtifactCleanup(input: {
@@ -741,10 +763,10 @@ export function createWorkflowsRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO workflow_launches (
            id, execution_id, project_id, session_id, task_id, mode, state, command_json,
-           environment_json, tmux_session, token_hash, authorization_expires_at,
+           environment_json, environment_refs_json, tmux_session, token_hash, authorization_expires_at,
            launcher_instance_id, launcher_pid, started_at, finished_at, exit_code,
            origin_json, capabilities_json, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            state = excluded.state,
            token_hash = excluded.token_hash,
@@ -765,6 +787,7 @@ export function createWorkflowsRepo(db: DatabaseSync) {
         launch.state,
         JSON.stringify(launch.command),
         JSON.stringify(launch.environment),
+        JSON.stringify(launch.environmentRefs),
         launch.tmuxSession,
         record.tokenHash,
         launch.authorizationExpiresAt,

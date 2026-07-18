@@ -72,6 +72,22 @@ export function registerWorkflowRoutes(
   }
 ) {
   const activeWorkflowControllers = new Map<string, AbortController>();
+  for (const cleanup of deps.store.workflows.failRunningArtifactCleanups()) {
+    const event = createEvent(
+      "workflow.failed",
+      { executionId: cleanup.executionId, cleanupId: cleanup.id, code: "artifact_cleanup_interrupted" },
+      {
+        projectId: cleanup.projectId,
+        agent: "workflow-artifact-cleanup",
+        sourceService: "workbench-api",
+        level: "error",
+        summary: "Artifact cleanup was interrupted and was not replayed",
+        correlationId: cleanup.executionId,
+      }
+    );
+    deps.store.appendEvent(event);
+    deps.publish(event);
+  }
 
   function withCanonicalWorkflowDefinitions(
     manifest: NonNullable<ReturnType<Store["projectRegistry"]["getManifest"]>>
@@ -598,6 +614,7 @@ export function registerWorkflowRoutes(
       arguments: string[];
       workingDirectory: string;
     };
+    environmentRefs: string[];
     mode: "terminal" | "tmux";
     tmuxSession: string | null;
     state: "waiting" | "ready";
@@ -621,7 +638,7 @@ export function registerWorkflowRoutes(
         instanceId: "workbench-api",
         legacyRef: null,
       },
-      capabilities: [input.mode],
+      capabilities: input.environmentRefs.length > 0 ? [input.mode, "secret-environment"] : [input.mode],
       executionId: input.execution.id,
       projectId: input.execution.projectId,
       sessionId: input.execution.sessionId,
@@ -630,6 +647,7 @@ export function registerWorkflowRoutes(
       state: input.state,
       command: input.command,
       environment,
+      environmentRefs: [...input.environmentRefs],
       tmuxSession: input.mode === "tmux" ? input.tmuxSession : null,
       authorizationExpiresAt: null,
       launcherInstanceId: null,
@@ -1301,13 +1319,14 @@ export function registerWorkflowRoutes(
         );
         return;
       }
+      const previousCleanup = deps.store.workflows.getLatestArtifactCleanup(executionId);
       const cleanup = deps.store.workflows.requestArtifactCleanup({
         executionId,
         projectId: record.execution.projectId,
         targetPath: review.inspection.workspace.path,
         targetHash: review.targetHash,
       });
-      if (cleanup.status === "pending") {
+      if (cleanup.status === "pending" && cleanup.id !== previousCleanup?.id) {
         const event = createEvent(
           "approval.required",
           { approvalId: cleanup.id, executionId, kind: "workflow_artifact_cleanup" },
@@ -1395,13 +1414,28 @@ export function registerWorkflowRoutes(
         sendJson(res, json("error", undefined, { message: "artifact cleanup approval is stale" }), 409);
         return;
       }
-      deps.store.workflows.transitionArtifactCleanup({
+      const runningCleanup = deps.store.workflows.transitionArtifactCleanup({
         id: cleanup.id,
         expectedStatus: "pending",
         status: "running",
         decidedBy,
         notes: typeof body.notes === "string" ? body.notes : null,
       });
+      const granted = createEvent(
+        "approval.granted",
+        { approvalId: runningCleanup.id, executionId, kind: "workflow_artifact_cleanup" },
+        {
+          projectId: record.execution.projectId,
+          sessionId: record.execution.sessionId,
+          taskId: record.execution.taskId,
+          agent: "workflow-artifact-cleanup",
+          sourceService: "workbench-api",
+          summary: `Artifact cleanup approved for ${record.execution.workflowId}`,
+          correlationId: executionId,
+        }
+      );
+      deps.store.appendEvent(granted);
+      deps.publish(granted);
       try {
         await cleanupRetainedWorkspace(review.inspection);
         const completedAt = new Date().toISOString();
@@ -1456,6 +1490,25 @@ export function registerWorkflowRoutes(
         decidedBy: typeof body.decidedBy === "string" && body.decidedBy.trim() ? body.decidedBy.trim() : "api",
         notes: typeof body.notes === "string" ? body.notes : null,
       });
+      const record = deps.store.workflows.get(executionId);
+      if (record) {
+        const event = createEvent(
+          "approval.rejected",
+          { approvalId: rejected.id, executionId, kind: "workflow_artifact_cleanup" },
+          {
+            projectId: record.execution.projectId,
+            sessionId: record.execution.sessionId,
+            taskId: record.execution.taskId,
+            agent: "workflow-artifact-cleanup",
+            sourceService: "workbench-api",
+            level: "warn",
+            summary: `Artifact cleanup rejected for ${record.execution.workflowId}`,
+            correlationId: executionId,
+          }
+        );
+        deps.store.appendEvent(event);
+        deps.publish(event);
+      }
       sendJson(res, json("ok", { cleanup: rejected }));
     })
   );
@@ -2484,6 +2537,7 @@ export function registerWorkflowRoutes(
         createWorkflowLaunch({
           execution: initial,
           command: commandRecord(prepared.workflow),
+          environmentRefs: prepared.workflow.command.environmentRefs,
           mode: launchMode,
           tmuxSession: manifest.desktop.tmuxSession,
           state: initial.state === "waiting" ? "waiting" : "ready",

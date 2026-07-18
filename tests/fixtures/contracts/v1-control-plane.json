@@ -294,6 +294,7 @@
       "AI_WORKBENCH_SESSION_ID": "session_1",
       "AI_WORKBENCH_TASK_ID": "task_2"
     },
+    "environmentRefs": [],
     "tmuxSession": null,
     "authorizationExpiresAt": null,
     "launcherInstanceId": null,

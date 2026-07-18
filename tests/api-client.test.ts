@@ -141,11 +141,25 @@ test("api client exposes workflow artifact inspection and recovery origin", asyn
   try {
     const api = createApiClient({ baseUrl: "http://127.0.0.1:4242" });
     await api.getActionExecutionArtifacts("execution one");
+    await api.getActionExecutionArtifactDiff("execution one");
+    await api.requestActionArtifactCleanup("execution one");
+    await api.approveActionArtifactCleanup("execution one", "cleanup one", "reviewed");
+    await api.rejectActionArtifactCleanup("execution one", "cleanup two");
     await api.recoverActionExecution("execution one", "safe recovery", "workbench-web");
     assert.equal(calls[0]?.url, "http://127.0.0.1:4242/actions/executions/execution%20one/artifacts");
-    assert.equal(calls[1]?.url, "http://127.0.0.1:4242/actions/executions/execution%20one/recover");
-    assert.equal(calls[1]?.init?.method, "POST");
-    assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
+    assert.equal(calls[1]?.url, "http://127.0.0.1:4242/actions/executions/execution%20one/artifacts/diff");
+    assert.match(calls[2]?.url ?? "", /artifacts\/cleanup\/request$/);
+    assert.equal(calls[2]?.init?.method, "POST");
+    assert.match(calls[3]?.url ?? "", /artifacts\/cleanup\/approve$/);
+    assert.deepEqual(JSON.parse(String(calls[3]?.init?.body)), {
+      cleanupId: "cleanup one",
+      decidedBy: "api-client",
+      notes: "reviewed",
+    });
+    assert.match(calls[4]?.url ?? "", /artifacts\/cleanup\/reject$/);
+    assert.equal(calls[5]?.url, "http://127.0.0.1:4242/actions/executions/execution%20one/recover");
+    assert.equal(calls[5]?.init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(calls[5]?.init?.body)), {
       workflowId: "safe recovery",
       requestedBy: "workbench-web",
     });

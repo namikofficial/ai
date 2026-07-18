@@ -559,11 +559,12 @@ function parseGitDiffOutput(raw: string, requestedPaths: string[]): CollectDiffR
 async function safeReadText(filePath: string, maxBytes: number): Promise<{ value: string; truncated: boolean }> {
   try {
     const info = await stat(filePath);
-    if (info.size > maxBytes) {
-      const buffer = await readFile(filePath, { encoding: "utf8" });
-      return { value: buffer.slice(0, maxBytes), truncated: true };
+    const buffer = await readFile(filePath);
+    const bounded = buffer.slice(0, maxBytes);
+    if (bounded.includes(0)) {
+      return { value: `[binary content omitted: ${info.size} bytes]`, truncated: info.size > maxBytes };
     }
-    return { value: await readFile(filePath, { encoding: "utf8" }), truncated: false };
+    return { value: new TextDecoder().decode(bounded), truncated: info.size > maxBytes };
   } catch (error) {
     console.warn("[worktree] safeReadText failed:", error instanceof Error ? error.message : String(error));
     return { value: "", truncated: false };

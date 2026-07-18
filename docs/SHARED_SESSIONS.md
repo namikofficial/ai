@@ -32,6 +32,13 @@ Duplicate content is excluded explicitly. Potential secrets are redacted from th
 including derived query and session summary fields. It does not claim that a local or Qdrant index is fresh when it
 is unavailable.
 
+Every preview item exposes `trust` (`canonical`, `user`, or `untrusted`) and `canGrantApproval: false`. Repository
+files, symbols, retrieval chunks, check/run output, generated lessons/memory, and handoffs are visibly labelled
+untrusted evidence in session and Ask views; citations carry the same warning. Before model invocation, untrusted
+context is JSON-encoded under an evidence-only warning so Markdown fences or forged system/tool messages remain data.
+The adversarial fixture corpus covers TypeScript comments, Python docstrings, Markdown fence escapes, generated check
+output, retrieval-memory impersonation, project confusion, secret exfiltration, and stale approval replay.
+
 The same durable scope is enforced at the Ask model boundary. Disabling retrieval, memory, rules, or conversation
 removes that source from the packed prompt; excluded paths are filtered; approved explicit files are root-scoped,
 secret-file checked, size limited, and redacted. The caller cannot raise an Ask above the session token ceiling.
@@ -90,5 +97,5 @@ flowchart LR
 ```
 
 The compiler uses canonical SQLite retrieval with local FTS fallback and the existing project status/index metadata.
-Remaining Phase 8 work includes dedicated handoff/retrieval deep-link presentations, clearer untrusted labels for
-all repository-derived context, and broader adversarial repository prompt-injection evaluations.
+Remaining Phase 8 work includes dedicated handoff/retrieval deep-link presentations and full live OpenCode/Codex
+continuity verification.

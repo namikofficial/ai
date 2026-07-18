@@ -3,6 +3,7 @@ import { realpath, stat } from "node:fs/promises";
 import * as path from "node:path";
 import type { CommandDefinition, ProjectManifest } from "../../contracts/src/index.ts";
 import { guardPathCanonical, isSecretFile } from "./files.ts";
+import { isProtectedWorkflowEnvironmentReference } from "./secrets.ts";
 import { type CommandSpec, type RunAllowedCommandResult, runAllowedCommand } from "./shell.ts";
 import { getCurrentBranch, getCurrentCommit } from "./worktree.ts";
 
@@ -20,7 +21,6 @@ export interface ManifestWorkflowRejection {
     | "approval_required"
     | "interactive_terminal_required"
     | "environment_reference_rejected"
-    | "environment_delivery_unavailable"
     | "capability_unavailable"
     | "read_only_policy_violation"
     | "unsafe_retry_policy"
@@ -71,12 +71,13 @@ export async function prepareManifestWorkflow(
       },
     };
   }
-  if (desktopLaunch && command.environmentRefs.length > 0) {
+  const protectedEnvironmentRef = command.environmentRefs.find(isProtectedWorkflowEnvironmentReference);
+  if (protectedEnvironmentRef) {
     return {
       ok: false,
       rejection: {
-        code: "environment_delivery_unavailable",
-        summary: `workflow ${command.id} cannot deliver secret references through a desktop launch`,
+        code: "environment_reference_rejected",
+        summary: `workflow ${command.id} cannot override protected workflow environment: ${protectedEnvironmentRef}`,
       },
     };
   }

@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   applyStructuredPatch,
   applyWorkspaceToOriginal,
+  cleanupRetainedWorkspace,
+  collectRetainedWorkspaceDiff,
   createTaskWorkspace,
   guardPath,
+  inspectRetainedWorkspace,
   listProjectFiles,
   readProjectChecksConfig,
   readProjectFile,
@@ -146,6 +149,65 @@ test("execution-engine: workspaces use runtime/dev-runs/<runId>/workspace", asyn
     });
     assert.match(created.workspace.path, /dev-runs\/run_run_123\/workspace$/);
     await created.cleanup();
+  } finally {
+    await rm(runtime, { recursive: true, force: true });
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: retained Git workspace diff includes untracked files and cleanup removes only its run", async () => {
+  const project = await makeProject();
+  const runtime = await mkdtemp(join(tmpdir(), "ai-runtime-retained-"));
+  const executionId = "workflow_execution_retained_git";
+  try {
+    execFileSync("git", ["init", "--quiet"], { cwd: project.root });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: project.root });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: project.root });
+    execFileSync("git", ["add", "src/index.ts", "src/auth.ts"], { cwd: project.root });
+    execFileSync("git", ["commit", "--quiet", "-m", "fixture"], { cwd: project.root });
+    const created = await createTaskWorkspace({
+      projectPath: project.root,
+      runtimeDir: runtime,
+      runId: executionId,
+      sessionId: "session_retained",
+      strategy: "git_worktree",
+    });
+    await writeFile(join(created.workspace.path, "src", "index.ts"), "export const answer = 42;\n");
+    await writeFile(join(created.workspace.path, "new.ts"), "export const added = true;\n");
+    await writeFile(join(created.workspace.path, ".env"), "TOKEN=must-not-appear-in-diff\n");
+
+    const inspection = await inspectRetainedWorkspace({
+      executionId,
+      runtimeDir: runtime,
+      projectRoot: project.root,
+      workspacePath: created.workspace.path,
+      workingDirectory: created.workspace.path,
+    });
+    const diff = await collectRetainedWorkspaceDiff(inspection);
+    assert.ok(diff.filesChanged.includes("src/index.ts"));
+    assert.ok(diff.filesAdded.includes("new.ts"));
+    assert.match(diff.diff, /answer = 42/);
+    assert.match(diff.diff, /added = true/);
+    assert.doesNotMatch(diff.diff, /must-not-appear-in-diff/);
+
+    await assert.rejects(
+      inspectRetainedWorkspace({
+        executionId,
+        runtimeDir: runtime,
+        projectRoot: project.root,
+        workspacePath: project.root,
+        workingDirectory: project.root,
+      }),
+      /canonical execution path/
+    );
+    await cleanupRetainedWorkspace(inspection);
+    await assert.rejects(access(created.workspace.path));
+    assert.equal(await readFile(join(project.root, "src", "index.ts"), "utf8"), "export const answer = 41;\n");
+    const branches = execFileSync("git", ["branch", "--format=%(refname:short)"], {
+      cwd: project.root,
+      encoding: "utf8",
+    });
+    assert.doesNotMatch(branches, /ai\/dev\//);
   } finally {
     await rm(runtime, { recursive: true, force: true });
     await project.cleanup();
