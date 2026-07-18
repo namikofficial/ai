@@ -1,4 +1,4 @@
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { Router } from "express";
 import { parseDevRequest } from "../../../../../packages/agent-protocol/src/dev.ts";
 import { resolveProjectConfig } from "../../../../../packages/config/src/index.ts";
@@ -148,7 +148,7 @@ export function registerWorkflowRoutes(
 
   function markLaunchReady(executionId: string) {
     const record = deps.store.workflows.getLaunchForExecution(executionId);
-    if (!record || record.launch.state !== "waiting") return null;
+    if (record?.launch.state !== "waiting") return null;
     const updatedAt = new Date().toISOString();
     return deps.store.workflows.transitionLaunch({
       expectedState: "waiting",
@@ -158,6 +158,13 @@ export function registerWorkflowRoutes(
 
   function launchTokenHash(token: string): string {
     return createHash("sha256").update(token).digest("hex");
+  }
+
+  function launchTokenMatches(expectedHash: string | null, token: string): boolean {
+    if (!expectedHash || !token) return false;
+    const actual = new TextEncoder().encode(launchTokenHash(token));
+    const expected = new TextEncoder().encode(expectedHash);
+    return actual.length === expected.length && timingSafeEqual(actual, expected);
   }
 
   function publicLaunch(record: ReturnType<Store["workflows"]["getLaunch"]>) {
@@ -202,7 +209,7 @@ export function registerWorkflowRoutes(
     };
     const saved = deps.store.workflows.save({ ...record, execution });
     const launch = markLaunchReady(execution.id) ?? deps.store.workflows.getLaunchForExecution(execution.id);
-    if (!launch || launch.launch.state !== "ready") throw new Error("interactive workflow launch is unavailable");
+    if (launch?.launch.state !== "ready") throw new Error("interactive workflow launch is unavailable");
     const event = createEvent(
       "workflow.launch_ready",
       { workflowId: execution.workflowId, executionId: execution.id, launchId: launch.launch.id },
@@ -463,6 +470,195 @@ export function registerWorkflowRoutes(
   );
 
   router.post(
+    "/actions/executions/:executionId/launch/authorize",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const execution = deps.store.workflows.get(executionId);
+      const launchRecord = deps.store.workflows.getLaunchForExecution(executionId);
+      if (!execution || !launchRecord) {
+        sendJson(res, json("error", undefined, { message: "interactive workflow execution not found" }), 404);
+        return;
+      }
+      if (execution.execution.state !== "ready" || launchRecord.launch.state !== "ready") {
+        sendJson(res, json("error", undefined, { message: "interactive workflow is not ready to launch" }), 409);
+        return;
+      }
+      const token = `${randomUUID()}${randomUUID()}`;
+      const timestamp = new Date().toISOString();
+      const authorizationExpiresAt = new Date(Date.now() + 2 * 60_000).toISOString();
+      const authorized = deps.store.workflows.transitionLaunch({
+        expectedState: "ready",
+        record: {
+          launch: { ...launchRecord.launch, updatedAt: timestamp, authorizationExpiresAt },
+          tokenHash: launchTokenHash(token),
+        },
+      });
+      sendJson(res, json("ok", { launch: authorized.launch, token }));
+    })
+  );
+
+  router.post(
+    "/actions/executions/:executionId/launch/start",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const executionRecord = deps.store.workflows.get(executionId);
+      const launchRecord = deps.store.workflows.getLaunchForExecution(executionId);
+      if (!executionRecord || !launchRecord) {
+        sendJson(res, json("error", undefined, { message: "interactive workflow execution not found" }), 404);
+        return;
+      }
+      const body = (await readJsonBody(req)) as { token?: unknown; launcherInstanceId?: unknown; pid?: unknown };
+      const token = typeof body.token === "string" ? body.token : "";
+      const launcherInstanceId =
+        typeof body.launcherInstanceId === "string" && body.launcherInstanceId.trim()
+          ? body.launcherInstanceId.trim()
+          : null;
+      const pid = typeof body.pid === "number" && Number.isInteger(body.pid) && body.pid > 0 ? body.pid : null;
+      if (!launcherInstanceId || !pid) {
+        sendJson(res, json("error", undefined, { message: "launcherInstanceId and positive pid are required" }), 400);
+        return;
+      }
+      if (
+        executionRecord.execution.state !== "ready" ||
+        launchRecord.launch.state !== "ready" ||
+        !launchRecord.launch.authorizationExpiresAt ||
+        Date.parse(launchRecord.launch.authorizationExpiresAt) <= Date.now() ||
+        !launchTokenMatches(launchRecord.tokenHash, token)
+      ) {
+        sendJson(
+          res,
+          json("error", undefined, { message: "launch authorization is invalid, expired, or replayed" }),
+          409
+        );
+        return;
+      }
+      const timestamp = new Date().toISOString();
+      const launch = deps.store.workflows.transitionLaunch({
+        expectedState: "ready",
+        expectedTokenHash: launchRecord.tokenHash,
+        record: {
+          ...launchRecord,
+          launch: {
+            ...launchRecord.launch,
+            updatedAt: timestamp,
+            state: "running",
+            launcherInstanceId,
+            launcherPid: pid,
+            startedAt: timestamp,
+          },
+        },
+      });
+      const execution: WorkflowExecution = {
+        ...executionRecord.execution,
+        updatedAt: timestamp,
+        state: "running",
+        currentStepId: "command",
+        stepStates: {
+          ...(executionRecord.execution.approvalId ? { approval: "completed" } : {}),
+          command: "running",
+        },
+        startedAt: timestamp,
+      };
+      const saved = deps.store.workflows.save({ ...executionRecord, execution });
+      const event = createEvent(
+        "workflow.started",
+        { workflowId: execution.workflowId, executionId, launchId: launch.launch.id, mode: launch.launch.mode },
+        {
+          projectId: execution.projectId,
+          sessionId: execution.sessionId,
+          taskId: execution.taskId,
+          agent: "desktop-workflow-launcher",
+          sourceService: "workbench-api",
+          summary: `Workflow ${execution.workflowId} launched in ${launch.launch.mode}`,
+          correlationId: executionId,
+        }
+      );
+      deps.store.appendEvent(event);
+      deps.publish(event);
+      sendJson(res, json("ok", { ...saved, launch: launch.launch }));
+    })
+  );
+
+  router.post(
+    "/actions/executions/:executionId/launch/complete",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const executionRecord = deps.store.workflows.get(executionId);
+      const launchRecord = deps.store.workflows.getLaunchForExecution(executionId);
+      if (!executionRecord || !launchRecord) {
+        sendJson(res, json("error", undefined, { message: "interactive workflow execution not found" }), 404);
+        return;
+      }
+      const body = (await readJsonBody(req)) as { token?: unknown; exitCode?: unknown; cancelled?: unknown };
+      const token = typeof body.token === "string" ? body.token : "";
+      const exitCode = typeof body.exitCode === "number" && Number.isInteger(body.exitCode) ? body.exitCode : null;
+      if (launchRecord.launch.state !== "running" || !launchTokenMatches(launchRecord.tokenHash, token)) {
+        sendJson(
+          res,
+          json("error", undefined, { message: "launch completion authorization is invalid or replayed" }),
+          409
+        );
+        return;
+      }
+      const state = body.cancelled === true ? "cancelled" : exitCode === 0 ? "completed" : "failed";
+      const timestamp = new Date().toISOString();
+      const launch = deps.store.workflows.transitionLaunch({
+        expectedState: "running",
+        expectedTokenHash: launchRecord.tokenHash,
+        record: {
+          tokenHash: null,
+          launch: {
+            ...launchRecord.launch,
+            updatedAt: timestamp,
+            state,
+            authorizationExpiresAt: null,
+            finishedAt: timestamp,
+            exitCode,
+          },
+        },
+      });
+      const execution: WorkflowExecution = {
+        ...executionRecord.execution,
+        updatedAt: timestamp,
+        state,
+        currentStepId: null,
+        stepStates: {
+          ...(executionRecord.execution.approvalId ? { approval: "completed" } : {}),
+          command: state,
+        },
+        finishedAt: timestamp,
+        exitCode,
+        errorCode:
+          state === "failed" ? "interactive_command_failed" : state === "cancelled" ? "command_cancelled" : null,
+        errorSummary:
+          state === "failed"
+            ? `Interactive command exited with ${exitCode ?? "unknown status"}`
+            : state === "cancelled"
+              ? "Interactive command was cancelled"
+              : null,
+      };
+      const saved = deps.store.workflows.save({ ...executionRecord, execution });
+      const event = createEvent(
+        state === "completed" ? "workflow.completed" : state === "cancelled" ? "workflow.cancelled" : "workflow.failed",
+        { workflowId: execution.workflowId, executionId, launchId: launch.launch.id, exitCode },
+        {
+          projectId: execution.projectId,
+          sessionId: execution.sessionId,
+          taskId: execution.taskId,
+          agent: "desktop-workflow-launcher",
+          sourceService: "workbench-api",
+          level: state === "completed" ? "info" : state === "cancelled" ? "warn" : "error",
+          summary: `Interactive workflow ${execution.workflowId} ${state}`,
+          correlationId: executionId,
+        }
+      );
+      deps.store.appendEvent(event);
+      deps.publish(event);
+      sendJson(res, json("ok", { ...saved, launch: launch.launch }));
+    })
+  );
+
+  router.post(
     "/actions/executions/:executionId/reject",
     asyncRoute(async (req, res) => {
       const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
@@ -611,11 +807,19 @@ export function registerWorkflowRoutes(
       const interactive = prepared.workflow.command.interactive;
       const launchMode = requestedMode ?? (manifest.desktop.tmuxSession ? "tmux" : "terminal");
       if (interactive && launchMode === "tmux" && !manifest.desktop.tmuxSession) {
-        sendJson(res, json("error", undefined, { message: "workflow requested tmux but the manifest has no tmux session" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, { message: "workflow requested tmux but the manifest has no tmux session" }),
+          409
+        );
         return;
       }
       if (!interactive && requestedMode) {
-        sendJson(res, json("error", undefined, { message: "executionMode is valid only for interactive workflows" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, { message: "executionMode is valid only for interactive workflows" }),
+          409
+        );
         return;
       }
       const initial = createWorkflowExecution({
@@ -623,8 +827,7 @@ export function registerWorkflowRoutes(
         projectId,
         sessionId,
         taskId,
-        state:
-          prepared.workflow.command.mutation !== "read_only" ? "waiting" : interactive ? "ready" : "running",
+        state: prepared.workflow.command.mutation !== "read_only" ? "waiting" : interactive ? "ready" : "running",
       });
       if (interactive) {
         deps.store.workflows.save({
