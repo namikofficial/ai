@@ -351,6 +351,12 @@ test("MCP dev tools start, inspect, diff, and cancel a dev run", async () => {
     const cancelPayload = JSON.parse(cancelResult.content[0].text) as { status: string; errorMessage: string };
     assert.equal(cancelPayload.status, "cancelled");
     assert.match(cancelPayload.errorMessage, /test cleanup/);
+    const runEvents = store.listEvents().filter((event) => event.runId === startPayload.runId);
+    assert.ok(runEvents.some((event) => event.type === "approval.required"));
+    assert.ok(runEvents.some((event) => event.type === "run.cancelled"));
+    assert.ok(runEvents.every((event) => event.schemaVersion === 1));
+    assert.ok(runEvents.every((event) => event.correlationId === startPayload.runId));
+    assert.equal(runEvents.at(1)?.causationId, runEvents.at(0)?.id ?? null);
   } finally {
     store.db.close();
     await rm(workspace, { recursive: true, force: true });

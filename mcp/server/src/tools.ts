@@ -1073,6 +1073,24 @@ async function handleTool(
       if (!outcome.ok) {
         throw new Error(outcome.error ?? "cancel failed");
       }
+      if (outcome.run) {
+        store.appendEvent(
+          createEvent(
+            "run.cancelled",
+            { reason: typeof args.reason === "string" ? args.reason : "cancelled from MCP" },
+            {
+              sessionId: outcome.run.sessionId,
+              projectId: outcome.run.projectId,
+              runId: outcome.run.id,
+              agent: "mcp",
+              sourceService: "mcp",
+              originSource: "mcp",
+              summary: outcome.run.summary,
+              correlationId: outcome.run.id,
+            }
+          )
+        );
+      }
       return outcome.run;
     }
     case "ai_get_context_pack": {

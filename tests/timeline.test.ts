@@ -26,18 +26,26 @@ test("timeline builder sorts items chronologically and links related context", (
   const timeline = buildSessionTimeline({
     session,
     events: [
-      createEvent("session.completed", { ok: true }, {
-        id: "event-2",
-        sessionId: session.id,
-        projectId: session.projectId,
-        ts: "2026-01-01T00:00:03.000Z",
-      }),
-      createEvent("session.started", { ok: true }, {
-        id: "event-1",
-        sessionId: session.id,
-        projectId: session.projectId,
-        ts: "2026-01-01T00:00:01.000Z",
-      }),
+      createEvent(
+        "session.completed",
+        { ok: true },
+        {
+          id: "event-2",
+          sessionId: session.id,
+          projectId: session.projectId,
+          ts: "2026-01-01T00:00:03.000Z",
+        }
+      ),
+      createEvent(
+        "session.started",
+        { ok: true },
+        {
+          id: "event-1",
+          sessionId: session.id,
+          projectId: session.projectId,
+          ts: "2026-01-01T00:00:01.000Z",
+        }
+      ),
     ],
     messages: [
       {

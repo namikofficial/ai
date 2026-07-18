@@ -149,9 +149,8 @@ function asString(value: unknown): string {
 function rowToEvent(row: Row): EventEnvelope {
   const ts = asString(row.ts);
   const sourceService = asString(row.source_service) || asString(row.agent) || "workbench";
-  const originSource = sourceService === "mcp" || sourceService === "desktop" || sourceService === "cli"
-    ? sourceService
-    : "workbench";
+  const originSource =
+    sourceService === "mcp" || sourceService === "desktop" || sourceService === "cli" ? sourceService : "workbench";
   const level = asString(row.level) as EventEnvelope["level"];
   const severityValue = asString(row.severity);
   const severity: EventEnvelope["severity"] =
@@ -2024,11 +2023,7 @@ export function createStore(db: DatabaseSync) {
         { taskId: task.id, agent: "orchestrator" }
       );
       push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
-      push(
-        "index.started",
-        { projectName: project.name, manualRequest: true },
-        { taskId: task.id, agent: "indexer" }
-      );
+      push("index.started", { projectName: project.name, manualRequest: true }, { taskId: task.id, agent: "indexer" });
 
       const embeddingProfileId = session.modelProfile ?? "embedding-local";
       const embeddingConfig = readEmbeddingConfig({

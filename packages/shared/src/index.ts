@@ -305,7 +305,11 @@ export interface EventEnvelope<TPayload = Record<string, unknown>> {
   id: string;
   createdAt: string;
   updatedAt: string;
-  origin: { source: "workbench" | "desktop" | "cli" | "mcp" | "import" | "legacy" | "detector"; instanceId: string | null; legacyRef: string | null };
+  origin: {
+    source: "workbench" | "desktop" | "cli" | "mcp" | "import" | "legacy" | "detector";
+    instanceId: string | null;
+    legacyRef: string | null;
+  };
   capabilities: string[];
   type: string;
   occurredAt: string;
@@ -616,8 +620,7 @@ export function createEvent<TPayload extends Record<string, unknown>>(
     sourceService,
     severity: details.severity ?? severityForLevel(level),
     summary: eventSummary(type, payload, details.summary),
-    correlationId:
-      details.correlationId ?? details.runId ?? details.sessionId ?? details.projectId ?? id,
+    correlationId: details.correlationId ?? details.runId ?? details.sessionId ?? details.projectId ?? id,
     causationId: details.causationId ?? null,
     agent: details.agent ?? null,
     level,
@@ -669,17 +672,24 @@ export function parseEventEnvelope(value: unknown): EventEnvelope {
     input.severity === "critical"
       ? input.severity
       : severityForLevel(level);
-  const rawOrigin = typeof input.origin === "object" && input.origin !== null ? input.origin as Record<string, unknown> : {};
+  const rawOrigin =
+    typeof input.origin === "object" && input.origin !== null ? (input.origin as Record<string, unknown>) : {};
   const source = rawOrigin.source;
   const originSource: EventEnvelope["origin"]["source"] =
-    source === "desktop" || source === "cli" || source === "mcp" || source === "import" || source === "legacy" || source === "detector"
+    source === "desktop" ||
+    source === "cli" ||
+    source === "mcp" ||
+    source === "import" ||
+    source === "legacy" ||
+    source === "detector"
       ? source
       : "workbench";
-  const sourceService = typeof input.sourceService === "string" && input.sourceService.trim()
-    ? input.sourceService.trim()
-    : typeof input.agent === "string" && input.agent.trim()
-      ? input.agent.trim()
-      : "workbench";
+  const sourceService =
+    typeof input.sourceService === "string" && input.sourceService.trim()
+      ? input.sourceService.trim()
+      : typeof input.agent === "string" && input.agent.trim()
+        ? input.agent.trim()
+        : "workbench";
   return {
     schemaVersion: 1,
     id,

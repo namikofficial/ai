@@ -334,7 +334,11 @@ export function registerWorkflowRoutes(
       });
 
       const checkEvent = createEvent(
-        result?.status === "blocked" ? "tool.blocked" : result?.status === "completed" ? "check.completed" : "check.failed",
+        result?.status === "blocked"
+          ? "tool.blocked"
+          : result?.status === "completed"
+            ? "check.completed"
+            : "check.failed",
         { name, status: result?.status ?? "blocked", checkId: check.id },
         {
           projectId,
@@ -597,7 +601,10 @@ export function registerWorkflowRoutes(
         const approvalRecord = deps.store.execution.listApprovals(approval.run.id).at(-1) ?? null;
         const event = createEvent(
           "approval.granted",
-          { approvalId: approvalRecord?.id ?? null, decidedBy: typeof body?.decidedBy === "string" ? body.decidedBy : "api" },
+          {
+            approvalId: approvalRecord?.id ?? null,
+            decidedBy: typeof body?.decidedBy === "string" ? body.decidedBy : "api",
+          },
           {
             sessionId: approval.run.sessionId,
             projectId: approval.run.projectId,
