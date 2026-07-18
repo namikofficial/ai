@@ -1,6 +1,8 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Navigate, NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import type { ProjectStatus } from "../../../packages/contracts/src/index.ts";
 import type { EventEnvelope } from "../../../packages/shared/src/index.ts";
+import { api } from "./api.ts";
 import {
   AgentRunDetailPage,
   AgentsPage,
@@ -206,6 +208,37 @@ function Shell({ children }: { children: ReactNode }) {
   const closeCommandPalette = useWorkbenchStore((state) => state.closeCommandPalette);
   const navigate = useNavigate();
   const title = useMemo(() => routeTitle(location.pathname), [location.pathname]);
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus | null>(null);
+  const [contextError, setContextError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const routeMatch = /^\/projects\/([^/]+)/.exec(location.pathname);
+    const routeProjectId = routeMatch?.[1] ? decodeURIComponent(routeMatch[1]) : null;
+    const synchronize = async () => {
+      try {
+        if (routeProjectId) {
+          await api.selectProject(routeProjectId, null, "workbench_route");
+          if (!cancelled) useWorkbenchStore.getState().setSelectedProjectId(routeProjectId);
+        } else if (!useWorkbenchStore.getState().selectedProjectId) {
+          const registry = await api.getRegistry();
+          if (!cancelled) useWorkbenchStore.getState().setSelectedProjectId(registry.data.selection?.projectId ?? null);
+        }
+        const response = await api.getProjectStatus(routeProjectId ?? undefined);
+        if (!cancelled) {
+          setProjectStatus(response.data);
+          setContextError(null);
+          useWorkbenchStore.getState().setSelectedProjectId(response.data.project?.id ?? null);
+        }
+      } catch (error) {
+        if (!cancelled) setContextError(error instanceof Error ? error.message : String(error));
+      }
+    };
+    void synchronize();
+    return () => {
+      cancelled = true;
+    };
+  }, [location.pathname]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -287,7 +320,18 @@ function Shell({ children }: { children: ReactNode }) {
           </div>
         </div>
       </aside>
-      <main className="content">{children}</main>
+      <main className="content">
+        <div className="context-strip" data-state={contextError ? "offline" : (projectStatus?.state ?? "loading")}>
+          <strong>{projectStatus?.project?.name ?? "No project"}</strong>
+          <span>{projectStatus?.activeWork?.taskTitle ?? "No active task"}</span>
+          <span>{projectStatus?.activeWork?.modelRole ?? "AI role not selected"}</span>
+          <span>Runtime {projectStatus?.runtime?.state ?? "loading"}</span>
+          <span>Index {projectStatus?.index.state ?? "loading"}</span>
+          {projectStatus?.activeWork?.approvalId ? <span>Approval pending</span> : null}
+          {contextError ? <span>Workbench status unavailable</span> : null}
+        </div>
+        {children}
+      </main>
       <LiveEventDrawer />
       <CommandPalette />
     </div>
@@ -303,6 +347,10 @@ export function App() {
           <Route path="/dashboard" element={<DashboardPage />} />
           <Route path="/projects" element={<ProjectsPage />} />
           <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+          <Route path="/projects/:projectId/work" element={<DevPage />} />
+          <Route path="/projects/:projectId/ask" element={<AskPage />} />
+          <Route path="/projects/:projectId/planner" element={<PlannerPage />} />
+          <Route path="/projects/:projectId/checks" element={<ChecksPage />} />
           <Route path="/sessions" element={<SessionsPage />} />
           <Route path="/sessions/:sessionId" element={<SessionDetailPage />} />
           <Route path="/tasks" element={<TasksPage />} />

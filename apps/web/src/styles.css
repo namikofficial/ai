@@ -79,6 +79,29 @@ textarea {
   padding: 1rem;
   min-width: 0;
 }
+
+.context-strip {
+  align-items: center;
+  background: color-mix(in srgb, var(--panel) 92%, var(--accent));
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem 1rem;
+  margin-bottom: 1rem;
+  padding: 0.7rem 0.9rem;
+}
+
+.context-strip span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.context-strip[data-state="blocked"],
+.context-strip[data-state="failed"],
+.context-strip[data-state="offline"] {
+  border-color: var(--bad);
+}
 .brand {
   display: flex;
   align-items: center;

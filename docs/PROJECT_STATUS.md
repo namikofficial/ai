@@ -82,4 +82,4 @@ The regression suite uses command-runner fakes for Docker isolation, parser fixt
 
 ## Compatibility boundary
 
-Kage still owns its legacy cache and independently probes Git/Compose until Phase 5 migrates it. This is intentional dual-running for rollback. Phase 5 should switch Kage, Rofi, project resume, scratchpads, and Wayle to the compact cache/API, verify parity, then retire their duplicated probes.
+The first Phase 5 compatibility slice is implemented in the dotfiles repository: Wayle’s grouped Work chips, Kage status output, the Rofi cockpit, project resume, AI helper context, and AI/log scratchpad launch prefer this compact cache. Kage’s legacy detector and cache remain available only as an explicit offline/rollback fallback. Canonical workflow execution and manual desktop parity checks must pass before those duplicated probes are retired.

@@ -118,6 +118,19 @@ test("defines the Vite React shell and router surface", async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("project deep links synchronize canonical selection and flow into work surfaces", async () => {
+  const appSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/App.tsx", "utf8");
+  const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
+  for (const suffix of ["work", "ask", "planner", "checks"]) {
+    assert.ok(appSource.includes(`/projects/:projectId/${suffix}`), `missing project deep link for ${suffix}`);
+  }
+  assert.match(appSource, /api\.selectProject\(routeProjectId, null, "workbench_route"\)/);
+  assert.match(appSource, /api\.getRegistry\(\)/);
+  assert.match(appSource, /className="context-strip"/);
+  assert.ok((pagesSource.match(/projectId: routeProjectId/g) ?? []).length >= 4);
+  assert.match(pagesSource, /routeProjectId \?\? selectedProjectId/);
+});
+
 test("logs MCP calls through the shared store", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-web-"));
   const repo = join(workspace, "sample-repo");

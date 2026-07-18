@@ -350,7 +350,8 @@ function buildActiveWork(store: Store, projectId: string, branch: string | null,
   const activeRun = runs.find(
     (run) => !["approved", "applied", "completed", "failed", "cancelled"].includes(run.status)
   );
-  const latestRun = activeRun ?? (activeSession ? runs.find((run) => run.sessionId === activeSession.id) : runs[0]) ?? null;
+  const latestRun =
+    activeRun ?? (activeSession ? runs.find((run) => run.sessionId === activeSession.id) : runs[0]) ?? null;
   const session = activeSession ?? (latestRun ? store.getSession(latestRun.sessionId) : null);
   const task = session?.activeTaskId
     ? store.getTask(session.activeTaskId)
@@ -552,6 +553,9 @@ export function compactProjectStatus(status: ProjectStatus): CompactProjectStatu
   const progress = status.activeWork?.taskProgress
     ? `${status.activeWork.taskProgress.completed}/${status.activeWork.taskProgress.total}`
     : null;
+  const modelRuntime = status.runtime?.components.find(
+    (component) => component.capabilities.includes("models") || component.id.includes("model")
+  );
   const projectName = status.project?.name ?? "No project";
   const branch = status.git?.branch ?? "no branch";
   const tooltip = [
@@ -588,7 +592,7 @@ export function compactProjectStatus(status: ProjectStatus): CompactProjectStatu
     },
     ai: {
       label: status.activeWork?.modelRole ?? "AI",
-      state: status.runtime?.state ?? "offline",
+      state: modelRuntime?.state ?? "unknown",
     },
     warnings,
     tooltip,

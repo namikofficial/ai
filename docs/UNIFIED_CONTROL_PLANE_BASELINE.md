@@ -245,4 +245,4 @@ Git now treats untracked-only repositories as dirty and reports detached/unborn 
 
 ## Next coherent slice
 
-Phase 5 should migrate Kage, project resume, scratchpads, AI helper context, Rofi and the Wayle Work cluster to the verified compact status path. Legacy desktop probes remain available until parity and rollback checks pass.
+The first Phase 5 desktop slice now migrates Kage status, project resume, scratchpads, AI helper context, Rofi and a grouped Wayle Work cluster to the verified compact status path. Legacy desktop probes remain available until parity and rollback checks pass. The first Phase 6 slice makes Workbench web selection canonical and adds project-aware overview, Work, Ask, Planner and Checks deep links; dedicated run/approval/session/handoff/retrieval pages and the combined Work view remain.

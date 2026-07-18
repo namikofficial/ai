@@ -1426,21 +1426,21 @@ function TaskDetailPage(): ReactNode {
 }
 
 function AskPage(): ReactNode {
+  const { projectId: routeProjectId } = useParams();
   const resource = useResource(() => api.listProjects());
   const projects = resource.data?.data ?? [];
   const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const [question, setQuestion] = useState("");
   const [depth, setDepth] = useState<"shallow" | "standard" | "deep">("standard");
-  const [project, setProject] = useState(selectedProjectId ?? projects[0]?.id ?? "");
+  const [project, setProject] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
   const [result, setResult] = useState<AskResponse | null>(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!project && projects[0]?.id) {
-      setProject(projects[0].id);
-    }
-  }, [project, projects]);
+    const inherited = routeProjectId ?? selectedProjectId ?? projects[0]?.id;
+    if (inherited && (routeProjectId || !project)) setProject(inherited);
+  }, [project, projects, routeProjectId, selectedProjectId]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1526,18 +1526,21 @@ function AskPage(): ReactNode {
 }
 
 function PlannerPage(): ReactNode {
+  const { projectId: routeProjectId } = useParams();
+  const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const resource = useResource(() => Promise.all([api.listProjects(), api.listTasks(), api.listSessions()]));
   const projects = resource.data?.[0].data ?? [];
   const tasks = resource.data?.[1].data ?? [];
   const sessions = resource.data?.[2].data ?? [];
-  const [project, setProject] = useState(projects[0]?.id ?? "");
+  const [project, setProject] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
   const [goal, setGoal] = useState("");
   const [risk, setRisk] = useState<"low" | "medium" | "high">("medium");
   const [result, setResult] = useState<PlanResponse | null>(null);
 
   useEffect(() => {
-    if (!project && projects[0]?.id) setProject(projects[0].id);
-  }, [project, projects]);
+    const inherited = routeProjectId ?? selectedProjectId ?? projects[0]?.id;
+    if (inherited && (routeProjectId || !project)) setProject(inherited);
+  }, [project, projects, routeProjectId, selectedProjectId]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1730,20 +1733,21 @@ function HandoffPage(): ReactNode {
 }
 
 function ChecksPage(): ReactNode {
+  const { projectId: routeProjectId } = useParams();
+  const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const checksResource = useResource(() => api.listChecks());
   const projectsResource = useResource(() => api.listProjects());
   const projects = (projectsResource.data?.data ?? []) as Array<{ id: string; name: string }>;
   const checks = checksResource.data?.data ?? [];
   const [name, setName] = useState("typecheck");
-  const [projectId, setProjectId] = useState("");
+  const [projectId, setProjectId] = useState(routeProjectId ?? selectedProjectId ?? "");
   const [busy, setBusy] = useState<"execute" | "record" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!projectId && projects[0]?.id) {
-      setProjectId(projects[0].id);
-    }
-  }, [projectId, projects]);
+    const inherited = routeProjectId ?? selectedProjectId ?? projects[0]?.id;
+    if (inherited && (routeProjectId || !projectId)) setProjectId(inherited);
+  }, [projectId, projects, routeProjectId, selectedProjectId]);
 
   const handleExecute = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2992,10 +2996,12 @@ function SettingsPage(): ReactNode {
 }
 
 function DevPage(): ReactNode {
+  const { projectId: routeProjectId } = useParams();
+  const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const resource = useResource(() => api.listProjects());
   const projects = (resource.data?.data ?? []) as Array<{ id: string; name: string }>;
 
-  const [projectId, setProjectId] = useState(projects[0]?.id ?? "");
+  const [projectId, setProjectId] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
   const [goal, setGoal] = useState("");
   const [mode, setMode] = useState<"local" | "hybrid" | "cloud">("local");
   const [approvalPolicy, setApprovalPolicy] = useState<"auto" | "manual" | "high_risk_only">("manual");
@@ -3011,7 +3017,7 @@ function DevPage(): ReactNode {
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const defaultProjectId = projects[0]?.id;
+  const defaultProjectId = routeProjectId ?? selectedProjectId ?? projects[0]?.id;
   useEffect(() => {
     if (defaultProjectId) setProjectId(defaultProjectId);
   }, [defaultProjectId]);

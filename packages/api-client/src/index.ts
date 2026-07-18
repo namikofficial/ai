@@ -135,11 +135,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     selectProject(
       projectId: string,
-      pinScope: ProjectPinScope | null = null
+      pinScope: ProjectPinScope | null = null,
+      source = "cli"
     ): Promise<{ status: "ok"; data: ActiveProjectSelection }> {
       return requestJson(options.baseUrl, "/context/selection", {
         method: "POST",
-        body: JSON.stringify({ projectId, source: "cli", pinScope }),
+        body: JSON.stringify({ projectId, source, pinScope }),
         headers: { "content-type": "application/json" },
       });
     },
