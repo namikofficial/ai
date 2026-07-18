@@ -845,10 +845,13 @@ export function createStore(db: DatabaseSync) {
         selectedContext: safeParseJson(asString(row.selected_context_json)) as HandoffResponse["selectedContext"],
       }));
     },
-    listCheckRuns(limit = 20): CheckRunSummary[] {
-      return (db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map((row) =>
-        rowToCheckRun(row)
-      );
+    listCheckRuns(limit = 20, projectId?: string | null): CheckRunSummary[] {
+      const rows = projectId
+        ? (db
+            .prepare("SELECT * FROM check_runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
+            .all(projectId, limit) as Row[])
+        : (db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]);
+      return rows.map((row) => rowToCheckRun(row));
     },
     listReviews(projectId?: string | null, limit = 20): ReviewRecord[] {
       const rows = projectId
@@ -2275,6 +2278,8 @@ function safeParseStringArray(value: unknown): string[] {
 function rowToCheckRun(row: Row): CheckRunSummary {
   return {
     id: asString(row.id),
+    sessionId: row.session_id == null ? null : asString(row.session_id),
+    projectId: row.project_id == null ? null : asString(row.project_id),
     name: asString(row.name),
     status: asString(row.status) as CheckRunSummary["status"],
     command: row.command == null ? null : asString(row.command),

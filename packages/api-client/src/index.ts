@@ -1,10 +1,11 @@
 import type { ProjectContextGraph } from "../../code-intelligence/src/index.ts";
-import type { ActiveContext, DesktopObservation, ProjectManifest } from "../../contracts/src/index.ts";
+import type { ActiveContext, DesktopObservation, ProjectManifest, ProjectStatus } from "../../contracts/src/index.ts";
 import type {
   ActiveProjectSelection,
   ManifestProposal,
   ProjectPinScope,
 } from "../../db/src/repositories/project-registry.ts";
+import type { CompactProjectStatus } from "../../project-status/src/index.ts";
 import type {
   AgentHandoffRecord,
   AgentRunRecord,
@@ -147,6 +148,14 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getActiveContext(): Promise<{ status: "ok"; data: ActiveContext | null }> {
       return requestJson(options.baseUrl, "/context/status");
+    },
+    getProjectStatus(projectId?: string): Promise<{ status: "ok"; data: ProjectStatus }> {
+      const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+      return requestJson(options.baseUrl, `/project-status${query}`);
+    },
+    getCompactProjectStatus(projectId?: string): Promise<{ status: "ok"; data: CompactProjectStatus }> {
+      const query = projectId ? `?projectId=${encodeURIComponent(projectId)}` : "";
+      return requestJson(options.baseUrl, `/project-status/compact${query}`);
     },
     explainActiveContext(): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, "/context/explain");

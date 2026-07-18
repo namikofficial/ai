@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -20,6 +20,7 @@ test("control-plane API approves manifests, persists selection, and resolves des
   const config = resolveConfig({ databasePath: join(workspace, "ai.db"), runtimeDir: join(workspace, "runtime") });
   const store = createStore(initializeStore(config.databasePath));
   const projectPath = join(workspace, "project");
+  await mkdir(projectPath);
   const project = store.createProject({ path: projectPath, name: "API Project" });
   const manifest: ProjectManifest = {
     ...fixtures.ProjectManifest,
@@ -74,6 +75,21 @@ test("control-plane API approves manifests, persists selection, and resolves des
     });
     assert.equal(explained.statusCode, 200);
     assert.match(explained.body, /not proven/);
+
+    const status = await handle.inject({
+      method: "GET",
+      url: "/project-status/compact",
+      headers: { accept: "application/json" },
+    });
+    assert.equal(status.statusCode, 200);
+    const statusBody = JSON.parse(status.body) as {
+      data: { project: { id: string }; tooltip: string; generatedAt: string };
+    };
+    assert.equal(statusBody.data.project.id, project.id);
+    assert.match(statusBody.data.tooltip, /API Project/);
+    assert.ok(statusBody.data.generatedAt);
+    const cached = await readFile(join(workspace, "cache", "ai-workbench", "project-status-v1.json"), "utf8");
+    assert.match(cached, /API Project/);
   } finally {
     await handle.close();
     process.env.XDG_CACHE_HOME = previousCacheHome;

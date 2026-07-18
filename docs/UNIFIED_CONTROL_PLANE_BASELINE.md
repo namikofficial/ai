@@ -237,6 +237,12 @@ Desktop observations and resolved active context are durable validated contracts
 
 See `docs/PROJECT_REGISTRY_AND_ACTIVE_CONTEXT.md` for operations and troubleshooting.
 
+## Phase 4 project status
+
+`packages/project-status` aggregates the canonical selected project, active context, Git porcelain-v2 state, Compose services, project-scoped checks, index freshness, sessions/tasks/dev runs, manifest-derived actions and API readiness into the versioned `ProjectStatus` contract. Full and compact API/client/CLI forms share the same builder and atomically refresh a versioned XDG cache for explicit offline reads.
+
+Git now treats untracked-only repositories as dirty and reports detached/unborn heads, renames, conflicts, stashes and divergence. Compose discovers identities only with `docker compose config --services`, so volumes cannot become services. Package-manager detection covers all manifest enum values and explicit configuration wins. See `docs/PROJECT_STATUS.md`.
+
 ## Next coherent slice
 
-Phase 4 should aggregate Git, checks, services, index freshness, active work and runtime readiness into one optimized status payload. Wayle and Kage remain unchanged until that path is working and tested.
+Phase 5 should migrate Kage, project resume, scratchpads, AI helper context, Rofi and the Wayle Work cluster to the verified compact status path. Legacy desktop probes remain available until parity and rollback checks pass.

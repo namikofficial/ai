@@ -21,6 +21,7 @@ import {
   readProjectLocalManifest,
   refreshRegistryCache,
 } from "../../../packages/project-registry/src/index.ts";
+import { readProjectStatusCache } from "../../../packages/project-status/src/index.ts";
 import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 
@@ -33,6 +34,7 @@ function printUsage(): void {
   ai worker
   ai project add <path> [--name <name>]
   ai project list
+  ai project status [project] [--compact]
   ai project pin <project> [--scope workspace|session|persistent]
   ai project unpin
   ai project import-legacy <project-profile.sh> [--apply]
@@ -47,7 +49,7 @@ function printUsage(): void {
   ai project symbol <symbol-id>
   ai ask "<question>" --project <project>
   ai context explain "<question>" --project <project>
-  ai context status
+  ai context status [--json] [--compact]
   ai context explain
   ai config show --project <project>
   ai config init --project <project>
@@ -354,6 +356,15 @@ async function run(): Promise<void> {
       printJson(await client.getRegistry());
       return;
     }
+    if (subcommand === "status") {
+      const projectId = positionals.shift();
+      printJson(
+        options.compact === "true"
+          ? await client.getCompactProjectStatus(projectId)
+          : await client.getProjectStatus(projectId)
+      );
+      return;
+    }
     if (subcommand === "pin") {
       const projectId = positionals.shift();
       if (!projectId) throw new Error("project pin requires a project id");
@@ -602,11 +613,28 @@ async function run(): Promise<void> {
     const subcommand = positionals.shift();
     if (subcommand === "status") {
       try {
-        printJson(await client.getActiveContext());
+        printJson(
+          options.compact === "true" ? await client.getCompactProjectStatus() : await client.getProjectStatus()
+        );
       } catch (error) {
-        const cache = await readActiveContextCache();
-        if (!cache) throw error;
-        printJson({ status: "offline", stale: true, data: cache.context, generatedAt: cache.generatedAt });
+        const statusCache = await readProjectStatusCache();
+        if (statusCache) {
+          printJson({
+            status: "offline",
+            stale: true,
+            data: options.compact === "true" ? statusCache.compact : statusCache.status,
+            generatedAt: statusCache.generatedAt,
+          });
+          return;
+        }
+        const contextCache = await readActiveContextCache();
+        if (!contextCache) throw error;
+        printJson({
+          status: "offline",
+          stale: true,
+          data: contextCache.context,
+          generatedAt: contextCache.generatedAt,
+        });
       }
       return;
     }

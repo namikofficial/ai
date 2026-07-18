@@ -173,6 +173,8 @@ export interface HandoffResponse {
 
 export interface CheckRunSummary {
   id: string;
+  sessionId?: string | null;
+  projectId?: string | null;
   name: string;
   status: "queued" | "running" | "completed" | "failed" | "blocked";
   command: string | null;

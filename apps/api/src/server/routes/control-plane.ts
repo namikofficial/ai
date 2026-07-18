@@ -2,6 +2,11 @@ import type { Router } from "express";
 import { resolveActiveContext, writeActiveContextCache } from "../../../../../packages/active-context/src/index.ts";
 import type { createStore } from "../../../../../packages/db/src/store.ts";
 import { diffProjectManifests, refreshRegistryCache } from "../../../../../packages/project-registry/src/index.ts";
+import {
+  buildProjectStatus,
+  compactProjectStatus,
+  writeProjectStatusCache,
+} from "../../../../../packages/project-status/src/index.ts";
 import type { EventEnvelope } from "../../../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../../../packages/shared/src/index.ts";
 import { asyncRoute, readJsonBody } from "../http.ts";
@@ -217,6 +222,26 @@ export function registerControlPlaneRoutes(
   router.get("/context/status", (_req, res) => {
     sendJson(res, json("ok", deps.store.activeContext.getContext()));
   });
+
+  router.get(
+    "/project-status",
+    asyncRoute(async (req, res) => {
+      const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
+      const status = await buildProjectStatus(deps.store, { projectId });
+      await writeProjectStatusCache(status);
+      sendJson(res, json("ok", status));
+    })
+  );
+
+  router.get(
+    "/project-status/compact",
+    asyncRoute(async (req, res) => {
+      const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
+      const status = await buildProjectStatus(deps.store, { projectId });
+      await writeProjectStatusCache(status);
+      sendJson(res, json("ok", compactProjectStatus(status)));
+    })
+  );
 
   router.get("/context/explain", (_req, res) => {
     const context = deps.store.activeContext.getContext();

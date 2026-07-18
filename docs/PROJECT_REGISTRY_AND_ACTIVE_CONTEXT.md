@@ -76,6 +76,8 @@ Imports and scans are dry-run operations unless `--apply` is supplied. Apply cre
 | POST | `/desktop/observations` | Ingest and resolve an observation |
 | GET | `/context/status` | Read canonical active context |
 | GET | `/context/explain` | Read winning and rejected evidence |
+| GET | `/project-status` | Aggregate canonical project, Git, checks, work, services and runtime state |
+| GET | `/project-status/compact` | Return and cache the compact desktop projection |
 
 ## Resolution order
 
@@ -142,4 +144,4 @@ Restore remains an explicit manual operation: stop Workbench writers, validate t
 
 ## Current compatibility boundary
 
-Kage, Wayle, Rofi, project resume and scratchpads have not been switched to these contracts yet. They remain operational legacy consumers until the Phase 4 status aggregation is complete. The observer is additive and may be disabled without affecting terminal fallback.
+Kage, Wayle, Rofi, project resume and scratchpads have not been switched to these contracts yet. The Phase 4 status aggregation is available and tested, but these desktop clients remain operational legacy consumers until Phase 5 parity and rollback checks pass. The observer is additive and may be disabled without affecting terminal fallback.
