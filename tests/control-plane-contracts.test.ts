@@ -57,6 +57,15 @@ test("accepts a legacy unversioned payload and normalizes it to v1", () => {
   delete legacy.schemaVersion;
   const parsed = activeContextSchema.parse(legacy);
   assert.equal(parsed.schemaVersion, 1);
+
+  const legacyWork = structuredClone(fixtures.ActiveWork) as Record<string, unknown>;
+  delete legacyWork.workflowExecutionId;
+  delete legacyWork.workflowId;
+  delete legacyWork.recoveryWorkflowIds;
+  const normalizedWork = activeWorkSchema.parse(legacyWork);
+  assert.equal(normalizedWork.workflowExecutionId, null);
+  assert.equal(normalizedWork.workflowId, null);
+  assert.deepEqual(normalizedWork.recoveryWorkflowIds, []);
 });
 
 test("rejects unsupported contract versions", () => {
