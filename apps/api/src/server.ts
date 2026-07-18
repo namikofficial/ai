@@ -655,9 +655,11 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     server.once("listening", () => resolve());
     server.once("error", reject);
   });
+  const address = server.address();
+  const serverUrl = typeof address === "object" && address ? `http://127.0.0.1:${address.port}` : config.apiUrl;
 
   return {
-    url: config.apiUrl,
+    url: serverUrl,
     inject,
     close: async () => {
       unsubscribeEvents();

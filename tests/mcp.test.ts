@@ -1,11 +1,22 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { startWorkbenchServer } from "../apps/api/src/server.ts";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
 import { resolveConfig } from "../packages/config/src/index.ts";
+import type { ProjectManifest } from "../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
+
+const contractFixture = JSON.parse(
+  await readFile(new URL("./fixtures/contracts/v1-control-plane.json", import.meta.url), "utf8")
+) as { ProjectManifest: ProjectManifest };
+
+function mcpText(response: Awaited<ReturnType<typeof handleMcpRequest>>): unknown {
+  const result = response?.result as { content?: Array<{ text?: string }> } | undefined;
+  return JSON.parse(result?.content?.[0]?.text ?? "null");
+}
 
 test("serves MCP tools and logs calls", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-mcp-"));
@@ -158,6 +169,151 @@ test("MCP clients share canonical sessions, messages, and context previews", asy
     store.db.close();
     await rm(workspace, { recursive: true, force: true });
   }
+});
+
+test("MCP workflow tools use the canonical API, preserve project scope, and cannot self-approve", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-mcp-workflows-"));
+  const repo = join(workspace, "repo");
+  const otherRepo = join(workspace, "other");
+  await mkdir(repo, { recursive: true });
+  await mkdir(otherRepo, { recursive: true });
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "MCP workflow project" });
+  const otherProject = store.createProject({ path: otherRepo, name: "Other MCP project" });
+  const session = store.createSession({
+    projectId: project.id,
+    title: "MCP workflow session",
+    userGoal: "run canonical workflow",
+    mode: "check",
+    source: "test",
+  });
+  const manifest: ProjectManifest = {
+    ...contractFixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: repo,
+    repositoryRoot: repo,
+    approvedRoots: [repo],
+    commands: {
+      version: {
+        id: "version",
+        name: "Git version",
+        description: "Read Git version",
+        category: "utility",
+        executable: "git",
+        arguments: ["--version"],
+        workingDirectory: null,
+        environmentRefs: [],
+        interactive: false,
+        mutation: "read_only",
+        timeoutSeconds: 10,
+        requiresCapabilities: [],
+        visibleWhen: [],
+      },
+      mutate: {
+        id: "mutate",
+        name: "Mutating request",
+        description: "Requires independent approval",
+        category: "git",
+        executable: "git",
+        arguments: ["tag", "never-executed-without-approval"],
+        workingDirectory: null,
+        environmentRefs: [],
+        interactive: false,
+        mutation: "project_write",
+        timeoutSeconds: 10,
+        requiresCapabilities: [],
+        visibleWhen: [],
+      },
+    },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const apiHandle = await startWorkbenchServer({
+    store,
+    config: { databasePath: join(workspace, "ai.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  const config = resolveConfig({
+    databasePath: join(workspace, "ai.db"),
+    runtimeDir: join(workspace, "runtime"),
+    apiUrl: apiHandle.url,
+    apiPort: 0,
+  });
+  try {
+    const descriptors = await handleMcpRequest(store, config, { jsonrpc: "2.0", id: 1, method: "tools/list" });
+    const descriptorText = JSON.stringify(descriptors?.result);
+    assert.match(descriptorText, /ai_list_actions/);
+    assert.match(descriptorText, /ai_run_action/);
+    assert.doesNotMatch(descriptorText, /ai_approve_action/);
+
+    const listed = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: { name: "ai_list_actions", arguments: { projectId: project.id } },
+    });
+    assert.deepEqual((mcpText(listed) as Array<{ workflowId: string }>).map((action) => action.workflowId).sort(), [
+      "mutate",
+      "version",
+    ]);
+
+    const run = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "ai_run_action",
+        arguments: { projectId: project.id, workflowId: "version", sessionId: session.id },
+      },
+    });
+    const completed = mcpText(run) as { execution: { id: string; state: string; projectId: string } };
+    assert.equal(completed.execution.state, "completed");
+    assert.equal(completed.execution.projectId, project.id);
+
+    const status = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "ai_get_action_execution",
+        arguments: { projectId: project.id, executionId: completed.execution.id },
+      },
+    });
+    assert.equal((mcpText(status) as { execution: { id: string } }).execution.id, completed.execution.id);
+
+    const pending = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: { name: "ai_run_action", arguments: { projectId: project.id, workflowId: "mutate" } },
+    });
+    const pendingPayload = mcpText(pending) as { execution: { state: string }; approval: { status: string } };
+    assert.equal(pendingPayload.execution.state, "waiting");
+    assert.equal(pendingPayload.approval.status, "pending");
+
+    const confused = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 6,
+      method: "tools/call",
+      params: {
+        name: "ai_get_action_execution",
+        arguments: { projectId: otherProject.id, executionId: completed.execution.id },
+      },
+    });
+    assert.match(confused?.error?.message ?? "", /different project/);
+    assert.ok(store.listMcpCalls(20).some((call) => call.toolName === "ai_run_action" && !call.blocked));
+  } finally {
+    await apiHandle.close();
+  }
+
+  const unavailable = await handleMcpRequest(store, config, {
+    jsonrpc: "2.0",
+    id: 7,
+    method: "tools/call",
+    params: { name: "ai_list_actions", arguments: { projectId: project.id } },
+  });
+  assert.match(unavailable?.error?.message ?? "", /Workbench API unavailable/);
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
 });
 
 test("ai_run_check executes allowlisted project checks and blocks unknown checks", async () => {

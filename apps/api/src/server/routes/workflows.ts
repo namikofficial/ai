@@ -408,12 +408,32 @@ export function registerWorkflowRoutes(
     asyncRoute(async (req, res) => {
       const workflowId = decodeURIComponent(String(req.params.workflowId ?? ""));
       const body = (await readJsonBody(req)) as { projectId?: unknown; sessionId?: unknown; taskId?: unknown };
+      const sessionId = typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : null;
+      const taskId = typeof body.taskId === "string" && body.taskId.trim() ? body.taskId.trim() : null;
       const projectId =
         typeof body.projectId === "string" && body.projectId.trim()
           ? body.projectId.trim()
           : deps.store.projectRegistry.getSelection()?.projectId;
       if (!projectId) {
         sendJson(res, json("error", undefined, { message: "no active project; select a project first" }), 409);
+        return;
+      }
+      const session = sessionId ? deps.store.getSession(sessionId) : null;
+      if (sessionId && !session) {
+        sendJson(res, json("error", undefined, { message: `session ${sessionId} not found` }), 404);
+        return;
+      }
+      if (session?.projectId !== undefined && session.projectId !== projectId) {
+        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        return;
+      }
+      const task = taskId ? deps.store.getTask(taskId) : null;
+      if (taskId && !task) {
+        sendJson(res, json("error", undefined, { message: `task ${taskId} not found` }), 404);
+        return;
+      }
+      if (task && (!session || task.sessionId !== session.id)) {
+        sendJson(res, json("error", undefined, { message: "task does not belong to the requested session" }), 409);
         return;
       }
       const project = deps.store.getProject(projectId);
@@ -453,8 +473,8 @@ export function registerWorkflowRoutes(
       const initial = createWorkflowExecution({
         workflowId: prepared.workflow.workflowId,
         projectId,
-        sessionId: typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : null,
-        taskId: typeof body.taskId === "string" && body.taskId.trim() ? body.taskId.trim() : null,
+        sessionId,
+        taskId,
         state: prepared.workflow.command.mutation === "read_only" ? "running" : "waiting",
       });
       if (prepared.workflow.command.mutation !== "read_only") {

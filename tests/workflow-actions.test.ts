@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -128,6 +128,40 @@ test("workflow actions list approved commands, execute read-only work, and persi
     assert.equal(rejected.statusCode, 409);
     assert.match(rejected.body, /declares read-only/);
     assert.ok(store.listEvents().some((event) => event.type === "workflow.blocked"));
+
+    const otherPath = join(workspace, "other-project");
+    await mkdir(otherPath);
+    const otherProject = store.createProject({ path: otherPath, name: "Other Project" });
+    const otherSession = store.createSession({
+      projectId: otherProject.id,
+      title: "Other project session",
+      userGoal: "must remain scoped",
+      mode: "check",
+      source: "test",
+    });
+    const confused = await handle.inject({
+      method: "POST",
+      url: "/actions/version/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id, sessionId: otherSession.id },
+    });
+    assert.equal(confused.statusCode, 409);
+    assert.match(confused.body, /different project/);
+
+    const otherTask = store.createTask({
+      sessionId: otherSession.id,
+      title: "Other task",
+      description: "Must not cross session scope",
+      type: "workflow",
+    });
+    const confusedTask = await handle.inject({
+      method: "POST",
+      url: "/actions/version/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id, taskId: otherTask.id },
+    });
+    assert.equal(confusedTask.statusCode, 409);
+    assert.match(confusedTask.body, /requested session/);
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });

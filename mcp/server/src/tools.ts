@@ -70,6 +70,55 @@ function asNumber(value: unknown, fallback = 0): number {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
 
+function canonicalApiUrl(config: ConfigSnapshot): URL {
+  const url = new URL(config.apiUrl);
+  if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "::1", "[::1]"].includes(url.hostname)) {
+    throw new Error("MCP workflow tools require a loopback Workbench API URL");
+  }
+  return url;
+}
+
+async function requestWorkbenchApi(
+  config: ConfigSnapshot,
+  path: string,
+  input: { method?: "GET" | "POST"; body?: Record<string, unknown>; timeoutMs?: number } = {}
+): Promise<unknown> {
+  const url = new URL(path, canonicalApiUrl(config));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), input.timeoutMs ?? 5_000);
+  timer.unref?.();
+  try {
+    const response = await fetch(url, {
+      method: input.method ?? "GET",
+      signal: controller.signal,
+      headers: { accept: "application/json", ...(input.body ? { "content-type": "application/json" } : {}) },
+      ...(input.body ? { body: JSON.stringify(input.body) } : {}),
+    });
+    const envelope = (await response.json()) as { status?: unknown; data?: unknown; error?: { message?: unknown } };
+    if (!response.ok || envelope.status !== "ok") {
+      const message = typeof envelope.error?.message === "string" ? envelope.error.message : `HTTP ${response.status}`;
+      throw new Error(`Workbench API rejected MCP request: ${message}`);
+    }
+    return envelope.data;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("Workbench API request timed out");
+    }
+    if (error instanceof Error && error.message.startsWith("Workbench API rejected")) throw error;
+    throw new Error(`Workbench API unavailable: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function assertExecutionProject(output: unknown, projectId: string): void {
+  const record = asRecord(output);
+  const execution = asRecord(record.execution);
+  if (asString(execution.projectId) !== projectId) {
+    throw new Error("workflow execution belongs to a different project");
+  }
+}
+
 function toolDescriptors(): ToolDescriptor[] {
   return [
     {
@@ -294,6 +343,48 @@ function toolDescriptors(): ToolDescriptor[] {
           sessionId: { type: "string" },
         },
         required: ["sessionId"],
+      },
+    },
+    {
+      name: "ai_list_actions",
+      description: "List canonical manifest workflows for an explicit project (read-only).",
+      inputSchema: {
+        type: "object",
+        properties: { projectId: { type: "string" } },
+        required: ["projectId"],
+      },
+    },
+    {
+      name: "ai_get_action_execution",
+      description: "Get a canonical workflow execution and approval state for an explicit project (read-only).",
+      inputSchema: {
+        type: "object",
+        properties: { projectId: { type: "string" }, executionId: { type: "string" } },
+        required: ["projectId", "executionId"],
+      },
+    },
+    {
+      name: "ai_run_action",
+      description:
+        "Request a canonical project workflow (mutating). Read-only workflows execute; mutating workflows stop for independent user approval.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: { type: "string" },
+          workflowId: { type: "string" },
+          sessionId: { type: "string" },
+          taskId: { type: "string" },
+        },
+        required: ["projectId", "workflowId"],
+      },
+    },
+    {
+      name: "ai_cancel_action",
+      description: "Cancel a running canonical workflow after verifying its explicit project scope (mutating).",
+      inputSchema: {
+        type: "object",
+        properties: { projectId: { type: "string" }, executionId: { type: "string" } },
+        required: ["projectId", "executionId"],
       },
     },
     {
@@ -529,6 +620,46 @@ async function handleTool(
   args: Record<string, unknown>
 ): Promise<unknown> {
   switch (name) {
+    case "ai_list_actions": {
+      const projectId = asString(args.projectId).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      return requestWorkbenchApi(config, `/actions?projectId=${encodeURIComponent(projectId)}`);
+    }
+    case "ai_get_action_execution": {
+      const projectId = asString(args.projectId).trim();
+      const executionId = asString(args.executionId).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      if (!executionId) throw new Error("executionId is required");
+      const output = await requestWorkbenchApi(config, `/actions/executions/${encodeURIComponent(executionId)}`);
+      assertExecutionProject(output, projectId);
+      return output;
+    }
+    case "ai_run_action": {
+      const projectId = asString(args.projectId).trim();
+      const workflowId = asString(args.workflowId).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      if (!workflowId) throw new Error("workflowId is required");
+      return requestWorkbenchApi(config, `/actions/${encodeURIComponent(workflowId)}/run`, {
+        method: "POST",
+        timeoutMs: 10 * 60_000,
+        body: {
+          projectId,
+          ...(args.sessionId ? { sessionId: asString(args.sessionId) } : {}),
+          ...(args.taskId ? { taskId: asString(args.taskId) } : {}),
+        },
+      });
+    }
+    case "ai_cancel_action": {
+      const projectId = asString(args.projectId).trim();
+      const executionId = asString(args.executionId).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      if (!executionId) throw new Error("executionId is required");
+      const current = await requestWorkbenchApi(config, `/actions/executions/${encodeURIComponent(executionId)}`);
+      assertExecutionProject(current, projectId);
+      return requestWorkbenchApi(config, `/actions/executions/${encodeURIComponent(executionId)}/cancel`, {
+        method: "POST",
+      });
+    }
     case "ai_search_project": {
       const project = asString(args.project);
       const query = asString(args.query);
