@@ -487,7 +487,14 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   }
   const mode = input.input.mode ?? "local";
   const depth = input.input.depth ?? "standard";
-  const existingSession = input.sessionId ? input.store.getSession(input.sessionId) : null;
+  const requestedSessionId = input.sessionId ?? input.input.sessionId ?? null;
+  const existingSession = requestedSessionId ? input.store.getSession(requestedSessionId) : null;
+  if (requestedSessionId && !existingSession) {
+    throw new Error(`Unknown session: ${requestedSessionId}`);
+  }
+  if (existingSession?.projectId !== undefined && existingSession.projectId !== project.id) {
+    throw new Error(`Session ${existingSession.id} does not belong to project ${project.id}`);
+  }
   const { decision: routeDecision, profileId: selectedAnswerProfile } = await (async () => {
     const decision = await input.runtime.route({
       role: "answer",
@@ -511,16 +518,21 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     };
   })();
 
-  const session =
-    existingSession ??
-    input.store.createSession({
-      projectId: project.id,
-      title: `Ask: ${input.input.question.slice(0, 60)}`,
-      userGoal: input.input.question,
-      mode,
-      modelProfile: selectedAnswerProfile,
-      source: "cli",
-    });
+  const session = existingSession
+    ? input.store.updateSession(existingSession.id, {
+        status: "running",
+        finishedAt: null,
+        durationMs: null,
+        errorMessage: null,
+      })
+    : input.store.createSession({
+        projectId: project.id,
+        title: `Ask: ${input.input.question.slice(0, 60)}`,
+        userGoal: input.input.question,
+        mode,
+        modelProfile: selectedAnswerProfile,
+        source: "cli",
+      });
   input.store.models.recordRoute({
     taskPattern: "ask",
     mode,

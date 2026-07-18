@@ -6,11 +6,13 @@ import { api } from "./api.ts";
 import {
   AgentRunDetailPage,
   AgentsPage,
+  ApprovalPage,
   AskPage,
   ChecksPage,
   DashboardPage,
   DevPage,
   EvalPage,
+  HandoffDetailPage,
   HandoffPage,
   McpCallDetailPage,
   McpPage,
@@ -365,6 +367,8 @@ export function App() {
           <Route path="/prompts/:promptId" element={<PromptDetailPage />} />
           <Route path="/planner" element={<PlannerPage />} />
           <Route path="/handoff" element={<HandoffPage />} />
+          <Route path="/projects/:projectId/handoff" element={<HandoffPage />} />
+          <Route path="/handoffs/:handoffId" element={<HandoffDetailPage />} />
           <Route path="/checks" element={<ChecksPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/retrieval" element={<RetrievalPage />} />
@@ -374,7 +378,9 @@ export function App() {
           <Route path="/reviews" element={<ReviewsPage />} />
           <Route path="/reviews/:reviewId" element={<ReviewDetailPage />} />
           <Route path="/runs/:runId" element={<RunReviewPage />} />
+          <Route path="/approvals/:approvalId" element={<ApprovalPage />} />
           <Route path="/dev" element={<DevPage />} />
+          <Route path="/projects/:projectId/dev" element={<DevPage />} />
           <Route path="/models" element={<ModelsPage />} />
           <Route path="/mcp" element={<McpPage />} />
           <Route path="/mcp/calls/:callId" element={<McpCallDetailPage />} />

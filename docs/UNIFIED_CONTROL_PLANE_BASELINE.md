@@ -243,6 +243,22 @@ See `docs/PROJECT_REGISTRY_AND_ACTIVE_CONTEXT.md` for operations and troubleshoo
 
 Git now treats untracked-only repositories as dirty and reports detached/unborn heads, renames, conflicts, stashes and divergence. Compose discovers identities only with `docker compose config --services`, so volumes cannot become services. Package-manager detection covers all manifest enum values and explicit configuration wins. See `docs/PROJECT_STATUS.md`.
 
+## Phase 5–7 desktop and Workbench clients
+
+The first Phase 5 desktop slice migrates Kage status, project resume, scratchpads, AI helper context, Rofi and a
+grouped Wayle Work cluster to the verified compact status path. Legacy desktop probes remain available until parity
+and rollback checks pass. Phase 6–7 adds canonical web selection, project-aware deep links, the combined Work view,
+diff-first run review and persisted approval details.
+
+## Phase 8 shared sessions
+
+Shared sessions now span HTTP, browser, CLI and MCP. Ask, Plan and Dev can reuse one project-scoped session; the API
+rejects cross-project reuse. The inspectable compiler includes active/changed files, selected symbols, branch and
+commit context, failed checks, active runs, handoffs, memory and retrieval with deduplication, token budgeting and
+whole-envelope secret redaction. Explicit results can be saved as project memory. See `docs/SHARED_SESSIONS.md`.
+
 ## Next coherent slice
 
-The first Phase 5 desktop slice now migrates Kage status, project resume, scratchpads, AI helper context, Rofi and a grouped Wayle Work cluster to the verified compact status path. Legacy desktop probes remain available until parity and rollback checks pass. The first Phase 6 slice makes Workbench web selection canonical and adds project-aware overview, Work, Ask, Planner and Checks deep links; dedicated run/approval/session/handoff/retrieval pages and the combined Work view remain.
+Add durable per-session retrieval-scope fields and richer explicit-file/clipboard consent, then continue to Phase 9
+runtime supervision. Legacy Python RAG session data remains untouched until the Phase 10 dry-run importer and parity
+report exist.

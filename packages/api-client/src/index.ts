@@ -17,6 +17,7 @@ import type {
   CompiledPromptRecord,
   ConfigSnapshot,
   ContextPackRecord,
+  ConversationMessageRecord,
   EventEnvelope,
   HandoffRequest,
   HandoffResponse,
@@ -39,11 +40,14 @@ import type {
   ReviewRecord,
   ReviewRequest,
   ReviewResponse,
+  SessionContextPreview,
   SessionRecord,
   SessionReplayRequest,
   SessionReplayResponse,
   SessionTimelineResponse,
   SettingsSnapshot,
+  SharedSessionCreateInput,
+  SharedSessionMessageInput,
   SkillCandidateRecord,
   SkillRecord,
   StatusSnapshot,
@@ -260,6 +264,13 @@ export function createApiClient(options: ApiClientOptions) {
     listSessions(): Promise<{ status: "ok"; data: SessionRecord[] }> {
       return requestJson(options.baseUrl, "/sessions");
     },
+    createSession(input: SharedSessionCreateInput): Promise<{ status: "ok"; data: SessionRecord }> {
+      return requestJson(options.baseUrl, "/sessions", {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
     getSession(sessionId: string): Promise<{ status: "ok"; data: SessionRecord }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}`);
     },
@@ -268,6 +279,52 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getSessionTimeline(sessionId: string): Promise<{ status: "ok"; data: SessionTimelineResponse }> {
       return requestJson(options.baseUrl, `/sessions/${sessionId}/timeline`);
+    },
+    listSessionMessages(sessionId: string, limit = 200): Promise<{ status: "ok"; data: ConversationMessageRecord[] }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}`);
+    },
+    appendSessionMessage(
+      sessionId: string,
+      input: SharedSessionMessageInput
+    ): Promise<{ status: "ok"; data: ConversationMessageRecord }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/messages`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    resumeSession(sessionId: string): Promise<{ status: "ok"; data: SessionRecord }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/resume`, { method: "POST" });
+    },
+    closeSession(
+      sessionId: string,
+      input: { status?: "completed" | "cancelled"; summary?: string } = {}
+    ): Promise<{ status: "ok"; data: SessionRecord }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/close`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    saveSessionMemory(
+      sessionId: string,
+      input: { body: string; title?: string; tags?: string[]; importance?: number }
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/memory`, {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    getSessionContext(
+      sessionId: string,
+      input: { query?: string; tokenBudget?: number } = {}
+    ): Promise<{ status: "ok"; data: SessionContextPreview }> {
+      const params = new URLSearchParams();
+      if (input.query) params.set("query", input.query);
+      if (input.tokenBudget) params.set("tokenBudget", String(input.tokenBudget));
+      const suffix = params.size ? `?${params.toString()}` : "";
+      return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/context${suffix}`);
     },
     replaySession(
       sessionId: string,
@@ -320,6 +377,9 @@ export function createApiClient(options: ApiClientOptions) {
         body: JSON.stringify(input),
         headers: { "content-type": "application/json" },
       });
+    },
+    getHandoff(handoffId: string): Promise<{ status: "ok"; data: HandoffResponse }> {
+      return requestJson(options.baseUrl, `/handoffs/${encodeURIComponent(handoffId)}`);
     },
     listChecks(): Promise<{ status: "ok"; data: CheckRunSummary[] }> {
       return requestJson(options.baseUrl, "/checks");
@@ -622,6 +682,7 @@ export function createApiClient(options: ApiClientOptions) {
     devRun(input: {
       project: string;
       goal: string;
+      sessionId?: string | null;
       mode?: string;
       approvalPolicy?: string;
       approveEdits?: boolean;
@@ -643,6 +704,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getDevRunDiff(runId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/dev/runs/${encodeURIComponent(runId)}/diff`);
+    },
+    getApproval(approvalId: string): Promise<{
+      status: "ok";
+      data: { approval: Record<string, unknown>; run: Record<string, unknown> | null };
+    }> {
+      return requestJson(options.baseUrl, `/approvals/${encodeURIComponent(approvalId)}`);
     },
     approveDevRun(runId: string, notes?: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/dev/runs/${encodeURIComponent(runId)}/approve`, {

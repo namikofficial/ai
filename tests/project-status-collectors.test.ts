@@ -10,10 +10,12 @@ import {
   type CommandResult,
   type CommandRunner,
   collectComposeStatus,
+  collectGitChangedPaths,
   collectGitStatus,
   compactProjectStatus,
   defaultProjectStatusCachePath,
   detectPackageManager,
+  parseGitChangedPaths,
   parseGitPorcelainV2,
   recommendedActionsFromManifest,
   writeProjectStatusCache,
@@ -48,6 +50,24 @@ u UU N... 000000 000000 000000 000000 aaaaa bbbbb ccccc conflict.ts
   assert.equal(status.conflicts, 1);
   assert.equal(status.untracked, 1);
   assert.equal(status.dirty, true);
+});
+
+test("Git changed-file collection preserves spaces and rename destinations", async () => {
+  const porcelain = " M src/with space.ts\0R  src/new.ts\0src/old.ts\0?? new-file.ts\0";
+  assert.deepEqual(parseGitChangedPaths(porcelain), ["src/with space.ts", "src/new.ts", "new-file.ts"]);
+  const calls: string[][] = [];
+  const runner: CommandRunner = {
+    async run(binary, args) {
+      calls.push([binary, ...args]);
+      return result(porcelain);
+    },
+  };
+  assert.deepEqual((await collectGitChangedPaths("/project", runner)).paths, [
+    "src/with space.ts",
+    "src/new.ts",
+    "new-file.ts",
+  ]);
+  assert.deepEqual(calls[0], ["git", "status", "--porcelain=v1", "-z", "--untracked-files=normal"]);
 });
 
 test("Git collection uses porcelain v2 and treats untracked-only repositories as dirty", async () => {

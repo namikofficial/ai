@@ -67,6 +67,99 @@ test("serves MCP tools and logs calls", async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("MCP clients share canonical sessions, messages, and context previews", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-mcp-session-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src", "context.ts"), "export const canonicalContext = true;\n");
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "session repo" });
+  await store.indexProject(project.id);
+  const config = resolveConfig({
+    databasePath: join(workspace, "ai.db"),
+    runtimeDir: join(workspace, "runtime"),
+    apiUrl: "http://127.0.0.1:4242",
+    webPort: 4242,
+    apiPort: 4242,
+  });
+
+  try {
+    const createdResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "ai_create_session",
+        arguments: { project: project.id, goal: "Explain canonicalContext", title: "Shared MCP session" },
+      },
+    });
+    const createdResult = createdResponse?.result as { content: Array<{ text: string }> };
+    const session = JSON.parse(createdResult.content[0].text) as { id: string; projectId: string };
+    assert.equal(session.projectId, project.id);
+
+    const appendedResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "ai_append_session_message",
+        arguments: { sessionId: session.id, role: "user", content: "Where is canonicalContext defined?" },
+      },
+    });
+    assert.equal(Boolean(appendedResponse?.error), false);
+    assert.equal(store.conversation.listMessages(session.id).length, 1);
+
+    const contextResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: {
+        name: "ai_get_session_context",
+        arguments: { sessionId: session.id, query: "canonicalContext", tokenBudget: 4000 },
+      },
+    });
+    const contextResult = contextResponse?.result as { content: Array<{ text: string }> };
+    const context = JSON.parse(contextResult.content[0].text) as {
+      schemaVersion: number;
+      selectedFiles: string[];
+      included: Array<{ reason: string }>;
+    };
+    assert.equal(context.schemaVersion, 1);
+    assert.ok(context.selectedFiles.includes("src/context.ts"));
+    assert.ok(context.included.every((item) => item.reason.length > 0));
+
+    const planResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: {
+        name: "ai_create_plan",
+        arguments: { project: project.id, sessionId: session.id, goal: "Document canonicalContext", risk: "low" },
+      },
+    });
+    const planResult = planResponse?.result as { content: Array<{ text: string }> };
+    const plan = JSON.parse(planResult.content[0].text) as { sessionId: string; taskGraph: unknown[] };
+    assert.equal(plan.sessionId, session.id);
+    assert.ok(plan.taskGraph.length > 0);
+
+    const memoryResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: "ai_save_session_memory",
+        arguments: { sessionId: session.id, title: "MCP continuity", body: "The canonical session was reused." },
+      },
+    });
+    assert.equal(Boolean(memoryResponse?.error), false);
+    assert.ok(store.listProjectLessons(project.id, 20).some((lesson) => lesson.title === "MCP continuity"));
+    assert.ok(store.listMcpCalls(20).some((call) => call.toolName === "ai_get_session_context"));
+  } finally {
+    store.db.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
 test("ai_run_check executes allowlisted project checks and blocks unknown checks", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-mcp-check-"));
   const repo = join(workspace, "repo");

@@ -153,6 +153,38 @@ export async function collectGitStatus(
   return { state: "ready", status: parseGitPorcelainV2(result.stdout), error: null };
 }
 
+/** Parse NUL-delimited porcelain-v1 output without breaking paths containing spaces. */
+export function parseGitChangedPaths(output: string): string[] {
+  const records = output.split("\0");
+  const paths: string[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (record.length < 4) continue;
+    const status = record.slice(0, 2);
+    const path = record.slice(3);
+    if (path) paths.push(path);
+    if (status.includes("R") || status.includes("C")) index += 1;
+  }
+  return [...new Set(paths)];
+}
+
+export async function collectGitChangedPaths(
+  projectPath: string,
+  runner: CommandRunner = processCommandRunner
+): Promise<{ paths: string[]; error: string | null }> {
+  const result = await runner.run("git", ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], {
+    cwd: projectPath,
+    timeoutMs: 5_000,
+  });
+  if (result.exitCode !== 0) {
+    return {
+      paths: [],
+      error: result.timedOut ? "Git changed-file query timed out" : result.stderr.trim() || "Git unavailable",
+    };
+  }
+  return { paths: parseGitChangedPaths(result.stdout), error: null };
+}
+
 export interface ComposeServiceStatus {
   id: string;
   name: string;
@@ -360,6 +392,9 @@ function buildActiveWork(store: Store, projectId: string, branch: string | null,
       : null;
   if (!session && !latestRun && !task) return null;
   const tasks = session ? store.listTasks(session.id, 100) : [];
+  const approval = latestRun
+    ? (store.execution.listApprovals(latestRun.id).find((candidate) => candidate.status === "pending") ?? null)
+    : null;
   const completed = tasks.filter((candidate) => candidate.status === "completed").length;
   const blocker =
     task?.status === "blocked"
@@ -395,7 +430,7 @@ function buildActiveWork(store: Store, projectId: string, branch: string | null,
     taskProgress: tasks.length > 0 ? { completed, total: tasks.length } : null,
     runId: latestRun?.id ?? null,
     sessionId: session?.id ?? latestRun?.sessionId ?? null,
-    approvalId: null,
+    approvalId: approval?.id ?? null,
     blocker,
     branch: latestRun?.workspace?.branch ?? branch,
     files: latestRun ? [...new Set([...latestRun.filesEdited, ...latestRun.filesCreated])] : [],
@@ -494,8 +529,8 @@ export async function buildProjectStatus(
   if (activeWork?.blocker) blockers.push(activeWork.blocker);
   const state: UnifiedState = blockers.some((blocker) => blocker.code !== "project_required")
     ? "blocked"
-    : activeWork?.state === "running"
-      ? "running"
+    : activeWork && ["running", "waiting", "starting"].includes(activeWork.state)
+      ? activeWork.state
       : projectId
         ? "ready"
         : "unknown";
@@ -549,6 +584,7 @@ export function compactProjectStatus(status: ProjectStatus): CompactProjectStatu
     ...status.blockers.map((blocker) => blocker.summary),
     ...(status.index.stale ? ["Project index is stale"] : []),
     ...(status.context?.confirmationRecommended ? ["Project context needs confirmation"] : []),
+    ...(status.activeWork?.approvalId ? ["Approval is pending"] : []),
   ];
   const progress = status.activeWork?.taskProgress
     ? `${status.activeWork.taskProgress.completed}/${status.activeWork.taskProgress.total}`
@@ -586,7 +622,9 @@ export function compactProjectStatus(status: ProjectStatus): CompactProjectStatu
       state: status.git ? (status.git.conflicts > 0 ? "failed" : "ready") : "unknown",
     },
     work: {
-      label: status.activeWork?.taskTitle ?? "No active task",
+      label: status.activeWork?.approvalId
+        ? `Approval: ${status.activeWork.taskTitle ?? "development run"}`
+        : (status.activeWork?.taskTitle ?? "No active task"),
       state: status.activeWork?.state ?? "unknown",
       progress,
     },

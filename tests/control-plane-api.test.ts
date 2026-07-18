@@ -31,6 +31,31 @@ test("control-plane API approves manifests, persists selection, and resolves des
     approvedRoots: [project.path],
   };
   const proposal = store.projectRegistry.proposeManifest(project.id, manifest, "test");
+  const session = store.createSession({
+    projectId: project.id,
+    title: "Approval session",
+    userGoal: "Review a safe change",
+    mode: "dev",
+    source: "test",
+  });
+  const run = store.dev.createRun({
+    sessionId: session.id,
+    projectId: project.id,
+    goal: session.userGoal,
+    mode: "local",
+    approvalPolicy: "manual",
+    approveEdits: false,
+    maxRepairs: 1,
+  });
+  store.dev.updateRun(run.id, { status: "awaiting_approval" });
+  const approval = store.execution.requestApproval({
+    runId: run.id,
+    projectId: project.id,
+    policy: "manual",
+    risk: "low",
+    requiresExplicit: true,
+    reason: "Review the proposed patch",
+  });
   const previousCacheHome = process.env.XDG_CACHE_HOME;
   process.env.XDG_CACHE_HOME = join(workspace, "cache");
   const handle = await startWorkbenchServer({ config, store, inProcess: true });
@@ -90,6 +115,25 @@ test("control-plane API approves manifests, persists selection, and resolves des
     assert.ok(statusBody.data.generatedAt);
     const cached = await readFile(join(workspace, "cache", "ai-workbench", "project-status-v1.json"), "utf8");
     assert.match(cached, /API Project/);
+
+    const approvalResponse = await handle.inject({
+      method: "GET",
+      url: `/approvals/${approval.id}`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(approvalResponse.statusCode, 200);
+    const approvalBody = JSON.parse(approvalResponse.body) as {
+      data: { approval: { id: string }; run: { id: string } };
+    };
+    assert.equal(approvalBody.data.approval.id, approval.id);
+    assert.equal(approvalBody.data.run.id, run.id);
+    const fullStatus = await handle.inject({
+      method: "GET",
+      url: "/project-status",
+      headers: { accept: "application/json" },
+    });
+    const fullStatusBody = JSON.parse(fullStatus.body) as { data: { activeWork: { approvalId: string } } };
+    assert.equal(fullStatusBody.data.activeWork.approvalId, approval.id);
   } finally {
     await handle.close();
     process.env.XDG_CACHE_HOME = previousCacheHome;

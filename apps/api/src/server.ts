@@ -324,6 +324,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   registerSessionRoutes(sessionRouter, {
     store,
     config,
+    publish,
     buildRuntimeForStore: () => buildRuntimeForStore(store, config.cloudEnabled),
     buildSessionTraceData: (sessionId) => buildSessionTraceData(store, sessionId),
     buildSessionTimeline: (sessionId) => buildSessionTimelineForRequest(store, sessionId),

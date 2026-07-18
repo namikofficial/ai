@@ -50,6 +50,15 @@ export function registerWorkflowRoutes(
           : Object.fromEntries(new URLSearchParams(await readTextBody(req)))
       ) as Record<string, unknown>;
       const normalized: AskRequest = parseAskRequest(body);
+      const askSession = normalized.sessionId ? deps.store.getSession(normalized.sessionId) : null;
+      if (normalized.sessionId && !askSession) {
+        sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+        return;
+      }
+      if (askSession && askSession.projectId !== normalized.project) {
+        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        return;
+      }
       const result = await deps.store.ask(normalized);
       deps.store.listEvents(result.sessionId).forEach(deps.publish);
       if (isHtmlRequest(req)) {
@@ -159,8 +168,18 @@ export function registerWorkflowRoutes(
       const normalized: PlanRequest = {
         project: String(body.project ?? ""),
         goal: String(body.goal ?? ""),
+        sessionId: typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : null,
         risk: body.risk === "low" || body.risk === "medium" || body.risk === "high" ? body.risk : "medium",
       };
+      const planSession = normalized.sessionId ? deps.store.getSession(normalized.sessionId) : null;
+      if (normalized.sessionId && !planSession) {
+        sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+        return;
+      }
+      if (planSession && planSession.projectId !== normalized.project) {
+        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        return;
+      }
       const result = await deps.store.createPlan(normalized);
       if (isHtmlRequest(req)) {
         sendHtml(res, renderPlannerPage(deps.store, { result: result.response }));
@@ -385,6 +404,10 @@ export function registerWorkflowRoutes(
   router.get("/handoffs/:handoffId", (req, res) => {
     const handoffId = decodeURIComponent(String(req.params.handoffId ?? ""));
     const handoff = deps.store.listHandoffs(undefined, 100).find((item) => item.id === handoffId) ?? null;
+    if (!handoff) {
+      sendJson(res, json("error", undefined, { message: "handoff not found" }), 404);
+      return;
+    }
     sendJson(res, json("ok", handoff));
   });
 
@@ -411,14 +434,33 @@ export function registerWorkflowRoutes(
         sendJson(res, json("error", undefined, { message: `unknown project: ${projectId}` }), 404);
         return;
       }
-      const session = deps.store.createSession({
-        projectId: project.id,
-        title: devRequest.goal.slice(0, 80),
-        userGoal: devRequest.goal,
-        mode: "dev",
-        source: "api",
-        modelProfile: "dev-editor-local",
-      });
+      const requestedSessionId =
+        typeof body.sessionId === "string" && body.sessionId.trim() ? body.sessionId.trim() : null;
+      const existingSession = requestedSessionId ? deps.store.getSession(requestedSessionId) : null;
+      if (requestedSessionId && !existingSession) {
+        sendJson(res, json("error", undefined, { message: "session not found" }), 404);
+        return;
+      }
+      if (existingSession && existingSession.projectId !== project.id) {
+        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        return;
+      }
+      const session = existingSession
+        ? deps.store.updateSession(existingSession.id, {
+            status: "running",
+            finishedAt: null,
+            durationMs: null,
+            errorMessage: null,
+            modelProfile: "dev-editor-local",
+          })
+        : deps.store.createSession({
+            projectId: project.id,
+            title: devRequest.goal.slice(0, 80),
+            userGoal: devRequest.goal,
+            mode: "dev",
+            source: "api",
+            modelProfile: "dev-editor-local",
+          });
       await deps.store.ensureRuntimeDirs(deps.config.runtimeDir);
       const result = await runDevWorkflow({
         request: devRequest,
@@ -499,6 +541,17 @@ export function registerWorkflowRoutes(
         filesCreated: run.filesCreated,
       })
     );
+  });
+
+  router.get("/approvals/:approvalId", (req, res) => {
+    const approvalId = decodeURIComponent(String(req.params.approvalId ?? ""));
+    const approval = deps.store.execution.getApproval(approvalId);
+    if (!approval) {
+      sendJson(res, json("error", undefined, { message: "approval not found" }), 404);
+      return;
+    }
+    const run = deps.store.dev.getRun(approval.runId);
+    sendJson(res, json("ok", { approval, run }));
   });
 
   router.post(

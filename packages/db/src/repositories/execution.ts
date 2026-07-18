@@ -447,6 +447,12 @@ export function createExecutionRepo(db: DatabaseSync) {
         .all(runId) as ApprovalRow[];
       return rows.map(rowToApproval);
     },
+    getApproval(approvalId: string): ExecutionApprovalRecord | null {
+      const row = db.prepare("SELECT * FROM execution_approvals WHERE id = ? LIMIT 1").get(approvalId) as
+        | ApprovalRow
+        | undefined;
+      return row ? rowToApproval(row) : null;
+    },
     recordPatch(input: {
       runId: string;
       projectId: string;

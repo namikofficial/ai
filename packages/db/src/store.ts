@@ -1294,6 +1294,11 @@ export function createStore(db: DatabaseSync) {
     }> {
       const project = store.getProject(input.project);
       if (!project) throw new Error(`Unknown project: ${input.project}`);
+      const existingSession = input.sessionId ? store.getSession(input.sessionId) : null;
+      if (input.sessionId && !existingSession) throw new Error(`Unknown session: ${input.sessionId}`);
+      if (existingSession && existingSession.projectId !== project.id) {
+        throw new Error(`Session ${existingSession.id} does not belong to project ${project.id}`);
+      }
       const risk = input.risk ?? "medium";
       const { decision: routeDecision, profileId: selectedPlannerProfile } = await resolveModelProfile(
         {
@@ -1309,14 +1314,22 @@ export function createStore(db: DatabaseSync) {
         },
         selectModelProfile("plan", { risk, goal: input.goal })
       );
-      const session = store.createSession({
-        projectId: project.id,
-        title: `Plan: ${input.goal.slice(0, 60)}`,
-        userGoal: input.goal,
-        mode: "plan",
-        modelProfile: selectedPlannerProfile,
-        source: "cli",
-      });
+      const session = existingSession
+        ? store.updateSession(existingSession.id, {
+            status: "running",
+            finishedAt: null,
+            durationMs: null,
+            errorMessage: null,
+            modelProfile: selectedPlannerProfile,
+          })
+        : store.createSession({
+            projectId: project.id,
+            title: `Plan: ${input.goal.slice(0, 60)}`,
+            userGoal: input.goal,
+            mode: "plan",
+            modelProfile: selectedPlannerProfile,
+            source: "cli",
+          });
       modelsRepo.recordRoute({
         taskPattern: "plan",
         mode: "any",
@@ -2212,6 +2225,7 @@ export function createStore(db: DatabaseSync) {
         cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
         input,
         preferredAnswerProfileId: projectConfig?.models.answer ?? null,
+        sessionId: input.sessionId,
       });
     },
     getConfig(config: ConfigSnapshot): ConfigSnapshot {

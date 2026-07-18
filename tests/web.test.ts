@@ -121,7 +121,7 @@ test("defines the Vite React shell and router surface", async () => {
 test("project deep links synchronize canonical selection and flow into work surfaces", async () => {
   const appSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/App.tsx", "utf8");
   const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
-  for (const suffix of ["work", "ask", "planner", "checks"]) {
+  for (const suffix of ["work", "ask", "planner", "checks", "dev"]) {
     assert.ok(appSource.includes(`/projects/:projectId/${suffix}`), `missing project deep link for ${suffix}`);
   }
   assert.match(appSource, /api\.selectProject\(routeProjectId, null, "workbench_route"\)/);
@@ -133,10 +133,23 @@ test("project deep links synchronize canonical selection and flow into work surf
   assert.match(pagesSource, /function ProjectWorkPage/);
   assert.match(pagesSource, /api\.listDevRuns\(projectId\)/);
   assert.match(pagesSource, /function RunReviewPage/);
-  const runReview = pagesSource.slice(pagesSource.indexOf("function RunReviewPage"), pagesSource.indexOf("function DevPage"));
+  const runReview = pagesSource.slice(
+    pagesSource.indexOf("function RunReviewPage"),
+    pagesSource.indexOf("function DevPage")
+  );
   assert.ok(runReview.indexOf('title="Diff"') < runReview.indexOf('title="Checks and warnings"'));
   assert.match(runReview, /api\.approveDevRun\(runId\)/);
   assert.match(runReview, /api\.applyDevRun\(runId\)/);
+  assert.match(pagesSource, /api\s*\.getSessionContext\(\s*result\.sessionId/);
+  assert.match(pagesSource, /api\s*\.saveSessionMemory\(\s*result\.sessionId/);
+  assert.match(pagesSource, /api\.plan\(\{ project, goal, risk, sessionId: inheritedSessionId \}\)/);
+  assert.match(pagesSource, /sessionId: inheritedSessionId/);
+  assert.match(pagesSource, /Turn into plan/);
+  assert.match(pagesSource, /Start development run/);
+  assert.match(appSource, /path="\/handoffs\/:handoffId" element=\{<HandoffDetailPage \/>\}/);
+  assert.match(appSource, /path="\/projects\/:projectId\/handoff" element=\{<HandoffPage \/>\}/);
+  assert.match(pagesSource, /function HandoffDetailPage/);
+  assert.match(pagesSource, /searchParams\.get\("session"\)/);
 });
 
 test("logs MCP calls through the shared store", async () => {

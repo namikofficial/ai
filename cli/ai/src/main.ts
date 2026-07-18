@@ -47,17 +47,24 @@ function printUsage(): void {
   ai project graph <project>
   ai project symbols <project> [--query <text>] [--limit <n>]
   ai project symbol <symbol-id>
-  ai ask "<question>" --project <project>
+  ai ask "<question>" --project <project> [--session <session-id>]
   ai context explain "<question>" --project <project>
   ai context status [--json] [--compact]
   ai context explain
   ai config show --project <project>
   ai config init --project <project>
   ai config validate --project <project>
-  ai plan "<goal>" --project <project>
+  ai plan "<goal>" --project <project> [--session <session-id>]
   ai research "<topic>" --project <project>
   ai handoff --session <session-id> --project <project> --target <target> --subtask "<text>"
-  ai sessions
+  ai sessions [list]
+  ai sessions create "<goal>" --project <project> [--title <title>]
+  ai sessions show <session-id>
+  ai sessions append <session-id> "<message>" [--role user|assistant|agent]
+  ai sessions context <session-id> [--query <query>] [--token-budget <tokens>]
+  ai sessions resume <session-id>
+  ai sessions close <session-id> [--cancelled] [--summary <summary>]
+  ai sessions memory <session-id> "<outcome>" [--title <title>] [--tags <comma-list>]
   ai trace <session-id>
   ai trace timeline <session-id>
   ai checks list
@@ -86,7 +93,7 @@ function printUsage(): void {
   ai eval run --project <project> [--limit <n>]
   ai embeddings stats
   ai embeddings purge [--older-than <days>] [--provider <id>] [--model <name>]
-  ai dev "<goal>" --project <project> [--mode local|hybrid|cloud] [--approve-edits] [--checks <checks>] [--max-repairs <n>]
+  ai dev "<goal>" --project <project> [--session <session-id>] [--mode local|hybrid|cloud] [--approve-edits] [--checks <checks>] [--max-repairs <n>]
   ai dev runs
   ai dev show <run-id>
   ai dev diff <run-id>
@@ -602,6 +609,7 @@ async function run(): Promise<void> {
     const result = await client.ask({
       question,
       project,
+      sessionId: options.session ?? null,
       mode: options.mode === "cloud" || options.mode === "hybrid" ? options.mode : "local",
       depth: options.depth === "shallow" || options.depth === "deep" ? options.depth : "standard",
     });
@@ -741,6 +749,7 @@ async function run(): Promise<void> {
     const result = await client.plan({
       project,
       goal,
+      sessionId: options.session ?? null,
       risk: options.risk === "low" || options.risk === "high" ? options.risk : "medium",
     });
     printJson(result);
@@ -787,9 +796,77 @@ async function run(): Promise<void> {
   }
 
   if (command === "sessions") {
-    const result = await client.listSessions();
-    printJson(result);
-    return;
+    const subcommand = positionals.shift() ?? "list";
+    if (subcommand === "list") {
+      printJson(await client.listSessions());
+      return;
+    }
+    if (subcommand === "create") {
+      const projectId = options.project;
+      const goal = positionals.join(" ").trim();
+      if (!projectId || !goal) throw new Error('sessions create requires "<goal>" --project <project>');
+      printJson(
+        await client.createSession({
+          projectId,
+          title: options.title?.trim() || `Session: ${goal.slice(0, 80)}`,
+          userGoal: goal,
+          mode: "local",
+          source: "cli",
+        })
+      );
+      return;
+    }
+    const sessionId = positionals.shift();
+    if (!sessionId) throw new Error(`sessions ${subcommand} requires a session id`);
+    if (subcommand === "show") {
+      printJson(await client.getSession(sessionId));
+      return;
+    }
+    if (subcommand === "append") {
+      const content = positionals.join(" ").trim();
+      const role = options.role === "assistant" || options.role === "agent" ? options.role : "user";
+      if (!content) throw new Error("sessions append requires a message");
+      printJson(await client.appendSessionMessage(sessionId, { role, content, agent: "cli" }));
+      return;
+    }
+    if (subcommand === "context") {
+      printJson(
+        await client.getSessionContext(sessionId, {
+          query: options.query,
+          tokenBudget: options["token-budget"] ? Number(options["token-budget"]) : undefined,
+        })
+      );
+      return;
+    }
+    if (subcommand === "resume") {
+      printJson(await client.resumeSession(sessionId));
+      return;
+    }
+    if (subcommand === "close") {
+      printJson(
+        await client.closeSession(sessionId, {
+          status: options.cancelled === "true" ? "cancelled" : "completed",
+          summary: options.summary,
+        })
+      );
+      return;
+    }
+    if (subcommand === "memory") {
+      const body = positionals.join(" ").trim();
+      if (!body) throw new Error("sessions memory requires an outcome");
+      printJson(
+        await client.saveSessionMemory(sessionId, {
+          body,
+          title: options.title,
+          tags: options.tags
+            ?.split(",")
+            .map((tag) => tag.trim())
+            .filter(Boolean),
+        })
+      );
+      return;
+    }
+    throw new Error(`unknown sessions subcommand: ${subcommand}`);
   }
 
   if (command === "trace") {
@@ -999,6 +1076,7 @@ async function run(): Promise<void> {
         await client.devRun({
           project,
           goal: subcommand,
+          sessionId: options.session ?? null,
           mode,
           approveEdits,
           checks,

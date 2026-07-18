@@ -103,6 +103,7 @@ export interface RetrievalChunk {
 export interface AskRequest {
   project: string;
   question: string;
+  sessionId?: string | null;
   mode?: AskMode;
   depth?: "shallow" | "standard" | "deep";
 }
@@ -128,6 +129,7 @@ export interface AskResponse {
 export interface PlanRequest {
   project: string;
   goal: string;
+  sessionId?: string | null;
   risk?: "low" | "medium" | "high";
 }
 
@@ -421,6 +423,7 @@ export type EventType =
   | "session.completed"
   | "session.failed"
   | "session.reflected"
+  | "session.message_appended"
   | "task.created"
   | "task.started"
   | "task.completed"
@@ -566,6 +569,7 @@ export function parseAskRequest(value: unknown): AskRequest {
   return {
     project: requireString(input.project, "project"),
     question: requireString(input.question, "question"),
+    sessionId: optionalString(input.sessionId),
     mode: input.mode === "local" || input.mode === "cloud" || input.mode === "hybrid" ? input.mode : undefined,
     depth: input.depth === "shallow" || input.depth === "standard" || input.depth === "deep" ? input.depth : undefined,
   };
@@ -606,6 +610,65 @@ export interface ConversationMessageRecord {
   parentMessageId: string | null;
   ts: string;
   createdAt: string;
+}
+
+export interface SharedSessionCreateInput {
+  projectId: string | null;
+  title: string;
+  userGoal: string;
+  mode?: AskMode | "plan" | "handoff" | "check" | "reflect" | "dev";
+  source?: string;
+  modelProfile?: string | null;
+}
+
+export interface SharedSessionMessageInput {
+  role: Extract<ConversationMessageRole, "user" | "assistant" | "agent">;
+  content: string;
+  agent?: string | null;
+  parentMessageId?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SessionContextPreviewItem {
+  id: string;
+  kind:
+    | "session"
+    | "message"
+    | "task"
+    | "git"
+    | "active_file"
+    | "changed_file"
+    | "symbol"
+    | "commit"
+    | "check"
+    | "run"
+    | "handoff"
+    | "memory"
+    | "rule"
+    | "lesson"
+    | "retrieval";
+  source: string;
+  reason: string;
+  title: string;
+  content: string;
+  estimatedTokens: number;
+  freshness: string | null;
+}
+
+export interface SessionContextPreview {
+  schemaVersion: 1;
+  id: string;
+  generatedAt: string;
+  session: SessionRecord;
+  project: ProjectRecord | null;
+  query: string;
+  tokenBudget: number;
+  estimatedTokens: number;
+  included: SessionContextPreviewItem[];
+  excluded: Array<{ id: string; reason: string; estimatedTokens: number }>;
+  selectedFiles: string[];
+  index: { stale: boolean; lastIndexedAt: string | null };
+  warnings: string[];
 }
 
 export type RetrievalIntentKind = "lookup" | "explain" | "debug" | "plan" | "review" | "summary";

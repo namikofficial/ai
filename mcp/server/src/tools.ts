@@ -8,6 +8,7 @@ import {
   runValidationPipeline,
 } from "../../../packages/execution-engine/src/index.ts";
 import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import { compileSessionContextPreview } from "../../../packages/session-context/src/index.ts";
 import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
 
@@ -92,6 +93,7 @@ function toolDescriptors(): ToolDescriptor[] {
         properties: {
           project: { type: "string" },
           question: { type: "string" },
+          sessionId: { type: "string" },
           mode: { type: "string", enum: ["local", "cloud", "hybrid"] },
           depth: { type: "string", enum: ["shallow", "standard", "deep"] },
         },
@@ -100,7 +102,7 @@ function toolDescriptors(): ToolDescriptor[] {
     },
     {
       name: "ai_create_session",
-      description: "Create a new tracked session.",
+      description: "Create a canonical project-scoped session (mutating).",
       inputSchema: {
         type: "object",
         properties: {
@@ -112,6 +114,59 @@ function toolDescriptors(): ToolDescriptor[] {
       },
     },
     {
+      name: "ai_append_session_message",
+      description: "Append a user, assistant, or agent message to a canonical shared session (mutating).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          role: { type: "string", enum: ["user", "assistant", "agent"] },
+          content: { type: "string" },
+          agent: { type: "string" },
+          parentMessageId: { type: "string" },
+        },
+        required: ["sessionId", "role", "content"],
+      },
+    },
+    {
+      name: "ai_get_session_context",
+      description:
+        "Preview compiled shared-session context, provenance, exclusions, budget, and index freshness (read-only).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          query: { type: "string" },
+          tokenBudget: { type: "number" },
+        },
+        required: ["sessionId"],
+      },
+    },
+    {
+      name: "ai_resume_session",
+      description: "Resume a canonical shared session while preserving its project scope (mutating).",
+      inputSchema: {
+        type: "object",
+        properties: { sessionId: { type: "string" } },
+        required: ["sessionId"],
+      },
+    },
+    {
+      name: "ai_save_session_memory",
+      description: "Save an explicit session outcome as durable project memory (mutating).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          sessionId: { type: "string" },
+          title: { type: "string" },
+          body: { type: "string" },
+          tags: { type: "array", items: { type: "string" } },
+          importance: { type: "number" },
+        },
+        required: ["sessionId", "body"],
+      },
+    },
+    {
       name: "ai_create_plan",
       description: "Generate a task graph for a project goal.",
       inputSchema: {
@@ -119,6 +174,7 @@ function toolDescriptors(): ToolDescriptor[] {
         properties: {
           project: { type: "string" },
           goal: { type: "string" },
+          sessionId: { type: "string" },
           risk: { type: "string", enum: ["low", "medium", "high"] },
         },
         required: ["project", "goal"],
@@ -277,6 +333,7 @@ function toolDescriptors(): ToolDescriptor[] {
         properties: {
           project: { type: "string" },
           goal: { type: "string" },
+          sessionId: { type: "string" },
           mode: { type: "string", enum: ["local", "hybrid", "cloud"] },
           approvalPolicy: { type: "string", enum: ["auto", "manual", "high_risk_only"] },
           approveEdits: { type: "boolean" },
@@ -485,25 +542,130 @@ async function handleTool(
       return store.ask({
         project: asString(args.project),
         question: asString(args.question),
+        sessionId: args.sessionId ? asString(args.sessionId) : null,
         mode: args.mode === "cloud" || args.mode === "hybrid" ? args.mode : "local",
         depth: args.depth === "shallow" || args.depth === "deep" ? args.depth : "standard",
       });
     }
     case "ai_create_session": {
+      const projectId = asString(args.project);
+      if (!store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      const goal = asString(args.goal).trim();
+      if (!goal) throw new Error("goal is required");
       const session = store.createSession({
-        projectId: asString(args.project),
-        title: asString(args.title, `Session: ${asString(args.goal)}`),
-        userGoal: asString(args.goal),
+        projectId,
+        title: asString(args.title, `Session: ${goal}`).slice(0, 240),
+        userGoal: goal.slice(0, 32_000),
         mode: "plan",
         source: "mcp",
       });
+      store.appendEvent(
+        createEvent(
+          "session.created",
+          { title: session.title, mode: session.mode },
+          {
+            sessionId: session.id,
+            projectId,
+            agent: "mcp",
+          }
+        )
+      );
       return session;
+    }
+    case "ai_append_session_message": {
+      const sessionId = asString(args.sessionId);
+      const session = store.getSession(sessionId);
+      if (!session) throw new Error(`Unknown session: ${sessionId}`);
+      if (args.role !== "user" && args.role !== "assistant" && args.role !== "agent") {
+        throw new Error("role must be user, assistant, or agent");
+      }
+      const content = asString(args.content).trim();
+      if (!content) throw new Error("content is required");
+      if (content.length > 200_000) throw new Error("content exceeds 200000 characters");
+      const parentMessageId = args.parentMessageId ? asString(args.parentMessageId) : null;
+      if (parentMessageId) {
+        const parent = store.conversation.getMessage(parentMessageId);
+        if (!parent || parent.sessionId !== sessionId)
+          throw new Error("parent message does not belong to this session");
+      }
+      const message = store.conversation.appendMessage({
+        sessionId,
+        projectId: session.projectId,
+        role: args.role,
+        content,
+        agent: args.agent ? asString(args.agent).slice(0, 120) : "mcp",
+        parentMessageId,
+        meta: { client: "mcp" },
+      });
+      store.appendEvent(
+        createEvent(
+          "session.message_appended",
+          { messageId: message.id, role: message.role, tokenCount: message.tokenCount },
+          { sessionId, projectId: session.projectId, agent: message.agent }
+        )
+      );
+      return message;
+    }
+    case "ai_get_session_context": {
+      const sessionId = asString(args.sessionId);
+      const preview = await compileSessionContextPreview(store, {
+        sessionId,
+        query: args.query ? asString(args.query) : null,
+        tokenBudget: asNumber(args.tokenBudget, 8_000),
+      });
+      if (!preview) throw new Error(`Unknown session: ${sessionId}`);
+      return preview;
+    }
+    case "ai_resume_session": {
+      const sessionId = asString(args.sessionId);
+      const session = store.getSession(sessionId);
+      if (!session) throw new Error(`Unknown session: ${sessionId}`);
+      if (session.status === "running") return session;
+      const resumed = store.updateSession(sessionId, {
+        status: "running",
+        finishedAt: null,
+        durationMs: null,
+        errorMessage: null,
+      });
+      store.appendEvent(createEvent("session.resumed", {}, { sessionId, projectId: session.projectId, agent: "mcp" }));
+      return resumed;
+    }
+    case "ai_save_session_memory": {
+      const sessionId = asString(args.sessionId);
+      const session = store.getSession(sessionId);
+      if (!session) throw new Error(`Unknown session: ${sessionId}`);
+      if (!session.projectId) throw new Error("Session has no project scope");
+      const body = asString(args.body).trim();
+      if (!body) throw new Error("body is required");
+      if (body.length > 100_000) throw new Error("body exceeds 100000 characters");
+      const lesson = store.createLesson({
+        projectId: session.projectId,
+        sessionId,
+        title: asString(args.title, `Session outcome: ${session.title}`).slice(0, 240),
+        body,
+        tags: Array.isArray(args.tags)
+          ? args.tags
+              .map(String)
+              .map((tag) => tag.slice(0, 80))
+              .slice(0, 20)
+          : ["session"],
+        importance: Math.min(5, Math.max(1, asNumber(args.importance, 3))),
+      });
+      store.appendEvent(
+        createEvent(
+          "lesson.created",
+          { lessonId: lesson.id, title: lesson.title, source: "mcp-session" },
+          { sessionId, projectId: session.projectId, agent: "mcp" }
+        )
+      );
+      return lesson;
     }
     case "ai_create_plan":
       return (
         await store.createPlan({
           project: asString(args.project),
           goal: asString(args.goal),
+          sessionId: args.sessionId ? asString(args.sessionId) : null,
           risk: args.risk === "low" || args.risk === "high" ? args.risk : "medium",
         })
       ).response;
@@ -797,14 +959,28 @@ async function handleTool(
       if (!project) {
         throw new Error(`Unknown project: ${devRequest.project}`);
       }
-      const session = store.createSession({
-        projectId: project.id,
-        title: devRequest.goal.slice(0, 80),
-        userGoal: devRequest.goal,
-        mode: "dev",
-        source: "mcp",
-        modelProfile: "dev-editor-local",
-      });
+      const requestedSessionId = args.sessionId ? asString(args.sessionId) : null;
+      const existingSession = requestedSessionId ? store.getSession(requestedSessionId) : null;
+      if (requestedSessionId && !existingSession) throw new Error(`Unknown session: ${requestedSessionId}`);
+      if (existingSession && existingSession.projectId !== project.id) {
+        throw new Error(`Session ${existingSession.id} does not belong to project ${project.id}`);
+      }
+      const session = existingSession
+        ? store.updateSession(existingSession.id, {
+            status: "running",
+            finishedAt: null,
+            durationMs: null,
+            errorMessage: null,
+            modelProfile: "dev-editor-local",
+          })
+        : store.createSession({
+            projectId: project.id,
+            title: devRequest.goal.slice(0, 80),
+            userGoal: devRequest.goal,
+            mode: "dev",
+            source: "mcp",
+            modelProfile: "dev-editor-local",
+          });
       await store.ensureRuntimeDirs(config.runtimeDir);
       const result = await runDevWorkflow({
         request: devRequest,

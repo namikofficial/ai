@@ -1,6 +1,6 @@
 import type { FormEvent, ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type {
   AgentRunRecord,
   AskResponse,
@@ -13,6 +13,7 @@ import type {
   PromptLabRunRecord,
   RetrievalQueryRecord,
   ReviewRecord,
+  SessionContextPreview,
   SessionRecord,
   SessionTimelineResponse,
   TimelineItem,
@@ -1062,6 +1063,29 @@ function SessionDetailPage(): ReactNode {
     [sessionId],
     { live: true }
   );
+  const [contextPreview, setContextPreview] = useState<SessionContextPreview | null>(null);
+  const [sessionAction, setSessionAction] = useState<"preview" | "resume" | "close" | null>(null);
+  const [sessionActionError, setSessionActionError] = useState<string | null>(null);
+
+  const runSessionAction = async (action: "preview" | "resume" | "close") => {
+    setSessionAction(action);
+    setSessionActionError(null);
+    try {
+      if (action === "preview") {
+        setContextPreview((await api.getSessionContext(sessionId)).data);
+      } else if (action === "resume") {
+        await api.resumeSession(sessionId);
+        sessionResource.refresh();
+      } else {
+        await api.closeSession(sessionId, { status: "completed" });
+        sessionResource.refresh();
+      }
+    } catch (cause) {
+      setSessionActionError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSessionAction(null);
+    }
+  };
 
   const session = sessionResource.data;
   const events = eventsResource.data ?? [];
@@ -1144,6 +1168,62 @@ function SessionDetailPage(): ReactNode {
       </Panel>
       <Panel title="Final Summary" span={6}>
         <pre>{session.finalSummary ?? "No final summary yet."}</pre>
+        <div className="row">
+          <button type="button" disabled={sessionAction !== null} onClick={() => void runSessionAction("preview")}>
+            {sessionAction === "preview" ? "Compiling..." : "Preview context"}
+          </button>
+          {session.status === "running" ? (
+            <button type="button" disabled={sessionAction !== null} onClick={() => void runSessionAction("close")}>
+              Close session
+            </button>
+          ) : (
+            <button type="button" disabled={sessionAction !== null} onClick={() => void runSessionAction("resume")}>
+              Resume session
+            </button>
+          )}
+        </div>
+        {sessionActionError ? <div className="error">{sessionActionError}</div> : null}
+        {session.projectId ? (
+          <a
+            className="button-link"
+            href={`/projects/${session.projectId}/handoff?session=${encodeURIComponent(session.id)}`}
+          >
+            Create handoff
+          </a>
+        ) : null}
+      </Panel>
+      <Panel title="Compiled context" span={12}>
+        {contextPreview ? (
+          <div className="stack">
+            <div className="row">
+              <Badge tone={contextPreview.index.stale ? "warn" : "good"}>
+                {contextPreview.index.stale ? "stale index" : "fresh index"}
+              </Badge>
+              <span className="tiny">
+                {contextPreview.estimatedTokens}/{contextPreview.tokenBudget} tokens · {contextPreview.included.length}{" "}
+                included · {contextPreview.excluded.length} excluded
+              </span>
+            </div>
+            <div className="list">
+              {contextPreview.included.map((item) => (
+                <div className="list-item" key={item.id}>
+                  <div className="row">
+                    <strong>{item.title}</strong>
+                    <Badge>{item.kind}</Badge>
+                  </div>
+                  <div className="tiny">
+                    {item.reason} · {item.source}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <EmptyState
+            title="Context not compiled"
+            body="Preview on demand to avoid background Git and retrieval work."
+          />
+        )}
       </Panel>
       <Panel title="Tasks" span={12}>
         {tasksResource.error ? (
@@ -1427,6 +1507,7 @@ function TaskDetailPage(): ReactNode {
 
 function AskPage(): ReactNode {
   const { projectId: routeProjectId } = useParams();
+  const navigate = useNavigate();
   const resource = useResource(() => api.listProjects());
   const projects = resource.data?.data ?? [];
   const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
@@ -1434,6 +1515,8 @@ function AskPage(): ReactNode {
   const [depth, setDepth] = useState<"shallow" | "standard" | "deep">("standard");
   const [project, setProject] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
   const [result, setResult] = useState<AskResponse | null>(null);
+  const [contextPreview, setContextPreview] = useState<SessionContextPreview | null>(null);
+  const [memorySaved, setMemorySaved] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -1447,8 +1530,10 @@ function AskPage(): ReactNode {
     setSubmitting(true);
     setError("");
     try {
-      const response = await api.ask({ project, question, depth, mode: "local" });
+      const response = await api.ask({ project, question, depth, mode: "local", sessionId: result?.sessionId ?? null });
       setResult(response.data);
+      setContextPreview(null);
+      setMemorySaved(false);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -1460,7 +1545,14 @@ function AskPage(): ReactNode {
     <PageShell title="Ask" subtitle="Retrieval-backed question answering">
       <Panel title="Ask a Question" span={6}>
         <form className="stack" onSubmit={submit}>
-          <select value={project} onChange={(event) => setProject(event.currentTarget.value)}>
+          <select
+            value={project}
+            onChange={(event) => {
+              setProject(event.currentTarget.value);
+              setResult(null);
+              setContextPreview(null);
+            }}
+          >
             {projects.length > 0 ? (
               projects.map((item) => (
                 <option key={item.id} value={item.id}>
@@ -1493,6 +1585,45 @@ function AskPage(): ReactNode {
               confidence {Math.round(result.confidence * 100)}%
             </Badge>
             <pre>{result.answer}</pre>
+            <div className="row">
+              <button
+                type="button"
+                onClick={() =>
+                  void api
+                    .getSessionContext(result.sessionId, { query: question })
+                    .then((response) => setContextPreview(response.data))
+                    .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+                }
+              >
+                Preview context
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  navigate(
+                    `/projects/${project}/planner?session=${encodeURIComponent(result.sessionId)}&goal=${encodeURIComponent(question)}`
+                  )
+                }
+              >
+                Turn into plan
+              </button>
+              <button
+                type="button"
+                disabled={memorySaved}
+                onClick={() =>
+                  void api
+                    .saveSessionMemory(result.sessionId, {
+                      title: `Answer: ${question.slice(0, 80)}`,
+                      body: result.answer,
+                      tags: ["answer"],
+                    })
+                    .then(() => setMemorySaved(true))
+                    .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+                }
+              >
+                {memorySaved ? "Saved" : "Save as memory"}
+              </button>
+            </div>
           </>
         ) : (
           <EmptyState
@@ -1521,19 +1652,60 @@ function AskPage(): ReactNode {
           )}
         </div>
       </Panel>
+      <Panel title="Context preview" span={12}>
+        {contextPreview ? (
+          <div className="stack">
+            <div className="row">
+              <Badge tone={contextPreview.index.stale ? "warn" : "good"}>
+                index {contextPreview.index.stale ? "stale" : "fresh"}
+              </Badge>
+              <span className="tiny">
+                {contextPreview.estimatedTokens}/{contextPreview.tokenBudget} estimated tokens ·{" "}
+                {contextPreview.included.length} included · {contextPreview.excluded.length} excluded
+              </span>
+            </div>
+            <div className="list">
+              {contextPreview.included.map((item) => (
+                <div className="list-item" key={item.id}>
+                  <div className="row">
+                    <strong>{item.title}</strong>
+                    <Badge>{item.kind}</Badge>
+                  </div>
+                  <div className="tiny">
+                    {item.reason} · {item.source} · ~{item.estimatedTokens} tokens
+                  </div>
+                </div>
+              ))}
+            </div>
+            {contextPreview.warnings.map((warning) => (
+              <div className="error" key={warning}>
+                {warning}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState
+            title="Context not previewed"
+            body="Run an Ask, then inspect exactly what a follow-up client would receive."
+          />
+        )}
+      </Panel>
     </PageShell>
   );
 }
 
 function PlannerPage(): ReactNode {
   const { projectId: routeProjectId } = useParams();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const inheritedSessionId = searchParams.get("session");
   const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const resource = useResource(() => Promise.all([api.listProjects(), api.listTasks(), api.listSessions()]));
   const projects = resource.data?.[0].data ?? [];
   const tasks = resource.data?.[1].data ?? [];
   const sessions = resource.data?.[2].data ?? [];
   const [project, setProject] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
-  const [goal, setGoal] = useState("");
+  const [goal, setGoal] = useState(searchParams.get("goal") ?? "");
   const [risk, setRisk] = useState<"low" | "medium" | "high">("medium");
   const [result, setResult] = useState<PlanResponse | null>(null);
 
@@ -1544,7 +1716,7 @@ function PlannerPage(): ReactNode {
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const response = await api.plan({ project, goal, risk });
+    const response = await api.plan({ project, goal, risk, sessionId: inheritedSessionId });
     setResult(response.data);
   };
 
@@ -1578,14 +1750,27 @@ function PlannerPage(): ReactNode {
       </Panel>
       <Panel title="Plan Summary" span={6}>
         {result ? (
-          <KeyValueList
-            items={[
-              ["Risk", result.risk],
-              ["Model", result.modelRecommendation],
-              ["Depth", result.researchDepth],
-              ["Checks", formatList(result.checks)],
-            ]}
-          />
+          <div className="stack">
+            <KeyValueList
+              items={[
+                ["Session", result.sessionId],
+                ["Risk", result.risk],
+                ["Model", result.modelRecommendation],
+                ["Depth", result.researchDepth],
+                ["Checks", formatList(result.checks)],
+              ]}
+            />
+            <button
+              type="button"
+              onClick={() =>
+                navigate(
+                  `/projects/${project}/dev?session=${encodeURIComponent(result.sessionId)}&goal=${encodeURIComponent(goal)}`
+                )
+              }
+            >
+              Start development run
+            </button>
+          </div>
         ) : (
           <EmptyState title="No plan yet" body="Generate a task graph for a project goal." />
         )}
@@ -1643,11 +1828,13 @@ function PlannerPage(): ReactNode {
 }
 
 function HandoffPage(): ReactNode {
+  const { projectId: routeProjectId } = useParams();
+  const [searchParams] = useSearchParams();
   const resource = useResource(() => Promise.all([api.listProjects(), api.listSessions()]));
   const projects = resource.data?.[0].data ?? [];
   const sessions = resource.data?.[1].data ?? [];
-  const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
-  const [project, setProject] = useState(projects[0]?.id ?? "");
+  const [sessionId, setSessionId] = useState(searchParams.get("session") ?? sessions[0]?.id ?? "");
+  const [project, setProject] = useState(routeProjectId ?? projects[0]?.id ?? "");
   const [target, setTarget] = useState<HandoffResponse["target"]>("manual");
   const [subtask, setSubtask] = useState("");
   const [result, setResult] = useState<HandoffResponse | null>(null);
@@ -1709,7 +1896,12 @@ function HandoffPage(): ReactNode {
       </Panel>
       <Panel title="Prompt" span={6}>
         {result ? (
-          <pre>{result.prompt}</pre>
+          <div className="stack">
+            <pre>{result.prompt}</pre>
+            <a className="button-link" href={`/handoffs/${result.id}`}>
+              Open handoff detail
+            </a>
+          </div>
         ) : (
           <EmptyState title="No handoff yet" body="Generate a target-specific prompt from a live session." />
         )}
@@ -1727,6 +1919,50 @@ function HandoffPage(): ReactNode {
         ) : (
           <EmptyState title="No context yet" body="The handoff will include files, checks, and constraints." />
         )}
+      </Panel>
+    </PageShell>
+  );
+}
+
+function HandoffDetailPage(): ReactNode {
+  const { handoffId = "" } = useParams();
+  const resource = useResource(() => api.getHandoff(handoffId), [handoffId]);
+  const handoff = resource.data?.data;
+  if (!handoff) {
+    return (
+      <PageShell title="Handoff" subtitle={handoffId}>
+        <Panel title="Handoff" span={12}>
+          <EmptyState title="Handoff unavailable" body={resource.error ?? "Loading canonical handoff data."} />
+        </Panel>
+      </PageShell>
+    );
+  }
+  return (
+    <PageShell title={`Handoff to ${handoff.target}`} subtitle={handoff.id}>
+      <Panel title="Scope" span={4}>
+        <KeyValueList
+          items={[
+            ["Project", handoff.projectId],
+            ["Session", handoff.sessionId],
+            ["Target", handoff.target],
+          ]}
+        />
+        <a className="button-link" href={`/sessions/${handoff.sessionId}`}>
+          Open shared session
+        </a>
+      </Panel>
+      <Panel title="Prompt" span={8}>
+        <pre>{handoff.prompt}</pre>
+      </Panel>
+      <Panel title="Selected context" span={12}>
+        <KeyValueList
+          items={[
+            ["Files to inspect", formatList(handoff.selectedContext.filesToInspect)],
+            ["Files likely to edit", formatList(handoff.selectedContext.filesLikelyToEdit)],
+            ["Checks", formatList(handoff.selectedContext.checksToRun)],
+            ["Constraints", formatList(handoff.selectedContext.constraints)],
+          ]}
+        />
       </Panel>
     </PageShell>
   );
@@ -3264,14 +3500,92 @@ function RunReviewPage(): ReactNode {
   );
 }
 
+function ApprovalPage(): ReactNode {
+  const { approvalId = "" } = useParams();
+  const resource = useResource(() => api.getApproval(approvalId), [approvalId]);
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const approval = resource.data?.data.approval ?? null;
+  const run = resource.data?.data.run ?? null;
+  const runId = String(approval?.runId ?? "");
+  const pending = approval?.status === "pending";
+
+  const resolve = async (decision: "approve" | "reject") => {
+    if (!runId) return;
+    setBusy(decision);
+    setError(null);
+    try {
+      if (decision === "approve") await api.approveDevRun(runId);
+      else await api.cancelDevRun(runId);
+      resource.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <PageShell title="Approval" subtitle={approvalId}>
+      <Panel title="Scoped development approval" span={6}>
+        {approval ? (
+          <KeyValueList
+            items={[
+              ["Status", String(approval.status ?? "unknown")],
+              ["Project", String(approval.projectId ?? "unknown")],
+              ["Run", runId],
+              ["Risk", String(approval.risk ?? "unknown")],
+              ["Reason", String(approval.reason ?? "No reason recorded")],
+              ["Requested", String(approval.requestedAt ?? "")],
+            ]}
+          />
+        ) : resource.error ? (
+          <EmptyState title="Approval unavailable" body={resource.error} />
+        ) : (
+          <EmptyState title="Loading approval" body="Reading canonical approval state." />
+        )}
+        {error ? <div className="error">{error}</div> : null}
+        {pending ? (
+          <div className="row">
+            <button type="button" disabled={busy !== null} onClick={() => void resolve("approve")}>
+              {busy === "approve" ? "Approving..." : "Approve"}
+            </button>
+            <button className="secondary" type="button" disabled={busy !== null} onClick={() => void resolve("reject")}>
+              {busy === "reject" ? "Rejecting..." : "Reject"}
+            </button>
+          </div>
+        ) : null}
+      </Panel>
+      <Panel title="Run context" span={6}>
+        {run ? (
+          <div className="stack">
+            <strong>{String(run.goal ?? "Development run")}</strong>
+            <div className="tiny">Status: {String(run.status ?? "unknown")}</div>
+            <div className="tiny">
+              Branch: {String((run.workspace as Record<string, unknown> | null)?.branch ?? "unknown")}
+            </div>
+            <a className="button-link" href={`/runs/${runId}`}>
+              Review diff and checks
+            </a>
+          </div>
+        ) : (
+          <EmptyState title="Run not available" body="The linked run may have been archived or removed." />
+        )}
+      </Panel>
+    </PageShell>
+  );
+}
+
 function DevPage(): ReactNode {
   const { projectId: routeProjectId } = useParams();
+  const [searchParams] = useSearchParams();
+  const inheritedSessionId = searchParams.get("session");
   const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const resource = useResource(() => api.listProjects());
   const projects = (resource.data?.data ?? []) as Array<{ id: string; name: string }>;
 
   const [projectId, setProjectId] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
-  const [goal, setGoal] = useState("");
+  const [goal, setGoal] = useState(searchParams.get("goal") ?? "");
   const [mode, setMode] = useState<"local" | "hybrid" | "cloud">("local");
   const [approvalPolicy, setApprovalPolicy] = useState<"auto" | "manual" | "high_risk_only">("manual");
   const [approveEdits, setApproveEdits] = useState(false);
@@ -3304,6 +3618,7 @@ function DevPage(): ReactNode {
       const result = await api.devRun({
         project: projectId,
         goal: goal.trim(),
+        sessionId: inheritedSessionId,
         mode,
         approvalPolicy,
         approveEdits,
@@ -3581,11 +3896,13 @@ function DevPage(): ReactNode {
 export {
   AgentRunDetailPage,
   AgentsPage,
+  ApprovalPage,
   AskPage,
   ChecksPage,
   DashboardPage,
   DevPage,
   EvalPage,
+  HandoffDetailPage,
   HandoffPage,
   McpCallDetailPage,
   McpPage,
