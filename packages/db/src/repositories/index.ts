@@ -10,5 +10,5 @@ export { createMemoryRepo, type MemoryRepo } from "./memory.ts";
 export { createModelsRepo, type ModelsRepo } from "./models.ts";
 export { createPromptLabRepo, type PromptLabRepo } from "./prompt-lab.ts";
 export { createPromptRepo, type PromptRepo } from "./prompts.ts";
-export { type RetrievalRepo, createRetrievalRepo } from "./retrieval.ts";
+export { createRetrievalRepo, type RetrievalRepo } from "./retrieval.ts";
 export { createSkillsRepo, type SkillsRepo } from "./skills.ts";

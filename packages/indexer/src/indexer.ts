@@ -118,19 +118,8 @@ function globMatch(value: string, pattern: string): boolean {
 }
 
 export async function indexProject(options: IndexProjectOptions): Promise<IndexProjectResult> {
-  const {
-    db,
-    projectId,
-    projectPath,
-    projectConfig,
-    qdrant,
-    embedBatch,
-    embeddingModel,
-    embeddingProvider,
-    embeddingDimension,
-    onWarning,
-    onProgress,
-  } = options;
+  const { db, projectId, projectPath, projectConfig, qdrant, embedBatch, embeddingDimension, onWarning, onProgress } =
+    options;
   const codeIntelligenceEnabled = projectConfig?.codeIntelligence?.enabled ?? false;
   const extractIntelligence = options.codeIntelligenceExtractor ?? extractCodeIntelligence;
   const files = (await walkFiles(projectPath)).filter((path) => {

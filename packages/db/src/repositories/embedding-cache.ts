@@ -166,9 +166,9 @@ export function createEmbeddingCacheRepo(db: DatabaseSync): EmbeddingCacheRepo {
     },
     recordHit(id) {
       db.prepare("UPDATE embedding_cache SET hit_count = hit_count + 1, last_used_at = ? WHERE id = ?").run(now(), id);
-      const row = db
-        .prepare("SELECT provider_id, model_name, dimension FROM embedding_cache WHERE id = ?")
-        .get(id) as { provider_id: string; model_name: string; dimension: number } | undefined;
+      const row = db.prepare("SELECT provider_id, model_name, dimension FROM embedding_cache WHERE id = ?").get(id) as
+        | { provider_id: string; model_name: string; dimension: number }
+        | undefined;
       if (!row) return;
       const stats = ensureStatsRow(row.provider_id, row.model_name, row.dimension);
       db.prepare(
@@ -206,9 +206,7 @@ export function createEmbeddingCacheRepo(db: DatabaseSync): EmbeddingCacheRepo {
         args.push(opts.modelName);
       }
       if (conditions.length === 0) return 0;
-      const result = db
-        .prepare(`DELETE FROM embedding_cache WHERE ${conditions.join(" AND ")}`)
-        .run(...args);
+      const result = db.prepare(`DELETE FROM embedding_cache WHERE ${conditions.join(" AND ")}`).run(...args);
       return Number(result.changes);
     },
     count() {

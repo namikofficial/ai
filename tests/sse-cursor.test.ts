@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import http from "node:http";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -90,9 +90,7 @@ test("sse: future cursor returns no events", async () => {
   const { workspace, handle } = await startTestServer();
   try {
     const futureCursor = "2099-01-01T00:00:00.000Z";
-    const events = await sseEvents(
-      `${handle.url}/events/stream?since=${encodeURIComponent(futureCursor)}`
-    );
+    const events = await sseEvents(`${handle.url}/events/stream?since=${encodeURIComponent(futureCursor)}`);
     assert.ok(Array.isArray(events), "should return array");
     assert.equal(events.length, 0, "future cursor should return no events");
   } finally {

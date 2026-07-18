@@ -34,7 +34,9 @@ function hashEmbedding(input: string, dim: number): number[] {
 }
 
 function buildHeuristicDevPlan(prompt: string): string {
-  const fileMatches = Array.from(prompt.matchAll(/^FILE:\s+(.+)$/gm)).map((match) => match[1]?.trim()).filter(Boolean);
+  const fileMatches = Array.from(prompt.matchAll(/^FILE:\s+(.+)$/gm))
+    .map((match) => match[1]?.trim())
+    .filter(Boolean);
   const readme = fileMatches.find((file) => /^README\.md$/i.test(file ?? "")) ?? "README.md";
   const note = prompt.toLowerCase().includes("status")
     ? "Workbench status: local dev-agent run prepared this change.\n"
@@ -77,25 +79,26 @@ export class HeuristicAdapter implements ModelProviderAdapter {
       text = buildHeuristicDevPlan(lastUserMessage);
     } else if (request.metadata?.kind === "dev-repair") {
       text = JSON.stringify({ summary: "No deterministic repair available.", edits: [], checks: [], risk: "low" });
-    } else switch (request.role) {
-      case "summarizer":
-        text = `Summary: ${lastUserMessage}`.slice(0, 800);
-        break;
-      case "intent":
-        text = `lookup: heuristic classification of "${lastUserMessage.slice(0, 80)}"`;
-        break;
-      case "query_rewrite":
-        text = lastUserMessage.replace(/\?$/, "").trim();
-        break;
-      case "answer":
-        text = `Heuristic answer based on the provided context:\n${lastUserMessage}`.slice(0, 1200);
-        break;
-      case "reflection":
-        text = `Reflection notes: ${lastUserMessage.slice(0, 600)}`;
-        break;
-      default:
-        text = `Heuristic ${request.role} response:\n${lastUserMessage}`.slice(0, 1200);
-    }
+    } else
+      switch (request.role) {
+        case "summarizer":
+          text = `Summary: ${lastUserMessage}`.slice(0, 800);
+          break;
+        case "intent":
+          text = `lookup: heuristic classification of "${lastUserMessage.slice(0, 80)}"`;
+          break;
+        case "query_rewrite":
+          text = lastUserMessage.replace(/\?$/, "").trim();
+          break;
+        case "answer":
+          text = `Heuristic answer based on the provided context:\n${lastUserMessage}`.slice(0, 1200);
+          break;
+        case "reflection":
+          text = `Reflection notes: ${lastUserMessage.slice(0, 600)}`;
+          break;
+        default:
+          text = `Heuristic ${request.role} response:\n${lastUserMessage}`.slice(0, 1200);
+      }
 
     return {
       text,

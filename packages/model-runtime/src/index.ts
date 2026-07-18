@@ -1,9 +1,4 @@
 import { checkCloudGuard, redactSecrets } from "../../safety/src/index.ts";
-import {
-  PROFILE_PLANNER_BALANCED,
-  PROFILE_PLANNER_DEEP,
-  PROFILE_PLANNER_FAST,
-} from "../../shared/src/model-profiles.ts";
 import type {
   ModelCallStatus,
   ModelHealthStatus,
@@ -11,12 +6,17 @@ import type {
   ModelProviderRecord,
   ModelRole,
 } from "../../shared/src/index.ts";
+import {
+  PROFILE_PLANNER_BALANCED,
+  PROFILE_PLANNER_DEEP,
+  PROFILE_PLANNER_FAST,
+} from "../../shared/src/model-profiles.ts";
 import { FastembedAdapter } from "./adapters/fastembed.ts";
 import { HeuristicAdapter } from "./adapters/heuristic.ts";
 import { MockAdapter } from "./adapters/mock.ts";
 import { OpenAICompatAdapter } from "./adapters/openai-compat.ts";
 import type { ModelHealthResult, ModelProviderAdapter } from "./adapters/types.ts";
-import { HeuristicModelRouter, type ModelRouter } from "./router.ts";
+import { HeuristicModelRouter } from "./router.ts";
 
 export type { ModelHealthResult, ModelProviderAdapter };
 

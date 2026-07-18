@@ -39,4 +39,3 @@ export function redirect(res: Response, location: string): void {
   res.writeHead(303, { location, connection: "close" });
   res.end();
 }
-

@@ -8,8 +8,6 @@ import { resolveConfig } from "../packages/config/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import { compilePrompt } from "../packages/prompt-compiler/src/index.ts";
 
-type McpEnvelope = Awaited<ReturnType<typeof handleMcpRequest>>;
-
 async function callTool(
   store: ReturnType<typeof createStore>,
   config: ReturnType<typeof resolveConfig>,
@@ -272,8 +270,8 @@ test("ai_record_feedback records good/bad ratings on chunks and updates chunk_pa
   })) as { feedback: { rating: string }; pathBoost: { path: string; weight: number } | null };
   assert.equal(goodResult.feedback.rating, "good");
   assert.ok(goodResult.pathBoost);
-  assert.equal(goodResult.pathBoost!.path, "src/alpha.ts");
-  assert.ok(goodResult.pathBoost!.weight > 0.5, "good feedback should push weight above neutral");
+  assert.equal(goodResult.pathBoost?.path, "src/alpha.ts");
+  assert.ok(goodResult.pathBoost?.weight > 0.5, "good feedback should push weight above neutral");
 
   const badResult = (await callTool(store, config, 2, "ai_record_feedback", {
     retrievalQueryId: query.id,
@@ -283,9 +281,9 @@ test("ai_record_feedback records good/bad ratings on chunks and updates chunk_pa
   })) as { feedback: { rating: string }; pathBoost: { path: string; weight: number } | null };
   assert.equal(badResult.feedback.rating, "bad");
   assert.ok(badResult.pathBoost);
-  assert.equal(badResult.pathBoost!.path, "src/beta.ts");
-  assert.ok(badResult.pathBoost!.weight < 0.5, "bad feedback should push weight below neutral");
-  assert.ok(goodResult.pathBoost!.weight > badResult.pathBoost!.weight);
+  assert.equal(badResult.pathBoost?.path, "src/beta.ts");
+  assert.ok(badResult.pathBoost?.weight < 0.5, "bad feedback should push weight below neutral");
+  assert.ok(goodResult.pathBoost?.weight > badResult.pathBoost?.weight);
 
   const missResult = (await callTool(store, config, 3, "ai_record_feedback", {
     retrievalQueryId: query.id,
@@ -299,7 +297,7 @@ test("ai_record_feedback records good/bad ratings on chunks and updates chunk_pa
   assert.equal(missResult.feedback.rating, "missed");
   assert.equal(missResult.feedback.missedPath, "src/gamma.ts");
   assert.ok(missResult.pathBoost);
-  assert.equal(missResult.pathBoost!.path, "src/gamma.ts");
+  assert.equal(missResult.pathBoost?.path, "src/gamma.ts");
 
   const pathFeedback = store.retrieval.listPathFeedback(project.id, 50);
   assert.equal(pathFeedback.length, 3);
@@ -350,16 +348,16 @@ test("ai_reflect_session enqueues a session.reflect worker job and emits a sessi
     | { id: string; type: string; status: string; payload_json: string }
     | undefined;
   assert.ok(queued);
-  assert.equal(queued!.type, "session.reflect");
-  assert.equal(queued!.status, "queued");
-  const payload = JSON.parse(queued!.payload_json) as { sessionId: string; source: string };
+  assert.equal(queued?.type, "session.reflect");
+  assert.equal(queued?.status, "queued");
+  const payload = JSON.parse(queued?.payload_json) as { sessionId: string; source: string };
   assert.equal(payload.sessionId, session.id);
   assert.equal(payload.source, "mcp");
 
   const events = store.listEvents();
   const reflected = events.find((e) => e.type === "session.reflected");
   assert.ok(reflected, "should emit a session.reflected event");
-  const eventPayload = reflected!.payload as { queuedJobId: string; source: string };
+  const eventPayload = reflected?.payload as { queuedJobId: string; source: string };
   assert.equal(eventPayload.queuedJobId, result.jobId);
   assert.equal(eventPayload.source, "mcp");
 
@@ -373,7 +371,7 @@ test("ai_reflect_session rejects unknown sessions", async () => {
   await mkdir(join(repo, "src"), { recursive: true });
   await writeFile(join(repo, "src", "x.ts"), "export const x = 1;\n");
   const store = createStore(initializeStore(join(workspace, "ai.db")));
-  const project = store.createProject({ path: repo, name: "repo" });
+  const _project = store.createProject({ path: repo, name: "repo" });
   const config = resolveConfig({
     databasePath: join(workspace, "ai.db"),
     runtimeDir: join(workspace, "runtime"),

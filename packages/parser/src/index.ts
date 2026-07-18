@@ -30,15 +30,7 @@ import { tsPlugin } from "acorn-typescript";
 export type ParserLanguage = "typescript" | "javascript" | "python" | "unknown";
 
 export interface ParserSymbol {
-  kind:
-    | "function"
-    | "class"
-    | "method"
-    | "arrow"
-    | "const"
-    | "interface"
-    | "type"
-    | "enum";
+  kind: "function" | "class" | "method" | "arrow" | "const" | "interface" | "type" | "enum";
   name: string;
   qualifiedName: string;
   startLine: number;
@@ -90,12 +82,7 @@ function detectLanguage(path: string, fallback: string | null | undefined): Pars
   if (lower.endsWith(".ts") || lower.endsWith(".tsx") || lower.endsWith(".mts") || lower.endsWith(".cts")) {
     return "typescript";
   }
-  if (
-    lower.endsWith(".js") ||
-    lower.endsWith(".jsx") ||
-    lower.endsWith(".mjs") ||
-    lower.endsWith(".cjs")
-  ) {
+  if (lower.endsWith(".js") || lower.endsWith(".jsx") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) {
     return "javascript";
   }
   if (lower.endsWith(".py")) {
@@ -198,9 +185,11 @@ function parseTypeScriptOrJavaScript(
     // acorn's `Parser.extend` expects the plugin itself, so we
     // invoke tsPlugin first and then pass the result.
     const plugin = (tsPlugin as unknown as (opts?: unknown) => unknown)();
-    const extended = (AcornParser.extend as unknown as (...plugins: unknown[]) => {
-      parse: (src: string, opts: unknown) => unknown;
-    })(plugin);
+    const extended = (
+      AcornParser.extend as unknown as (...plugins: unknown[]) => {
+        parse: (src: string, opts: unknown) => unknown;
+      }
+    )(plugin);
     ast = extended.parse(content, {
       ecmaVersion: "latest",
       sourceType: "module",
@@ -245,9 +234,11 @@ function parseTypeScriptOrJavaScript(
   }
 
   function signatureForMethod(node: AcornNode, className: string | null): string | null {
-    const keyName = node.key?.name ?? (node.key?.type === "Literal" ? String((node.key as { value: unknown }).value) : null);
+    const keyName =
+      node.key?.name ?? (node.key?.type === "Literal" ? String((node.key as { value: unknown }).value) : null);
     if (!keyName) return null;
-    const params = (node.value && "params" in node.value ? (node.value as { params?: AcornNode[] }).params : node.params) ?? [];
+    const params =
+      (node.value && "params" in node.value ? (node.value as { params?: AcornNode[] }).params : node.params) ?? [];
     const paramNames = params.map((param) => {
       if (param.type === "Identifier" && param.name) return param.name;
       return "?";
@@ -276,10 +267,7 @@ function parseTypeScriptOrJavaScript(
       }
       case "VariableDeclarator": {
         const init = node.init;
-        if (
-          init &&
-          (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression")
-        ) {
+        if (init && (init.type === "ArrowFunctionExpression" || init.type === "FunctionExpression")) {
           const name = node.id?.name ?? "<anonymous>";
           const loc = location(init);
           const signature = signatureForFunction(init as unknown as AcornNode);
@@ -423,13 +411,19 @@ function parseTypeScriptOrJavaScript(
         const decl = node.declaration;
         if (decl) {
           const declLoc = location(decl);
-          if (decl.type === "FunctionDeclaration" || decl.type === "ClassDeclaration" || decl.type === "TSInterfaceDeclaration" || decl.type === "TSTypeAliasDeclaration" || decl.type === "TSEnumDeclaration") {
+          if (
+            decl.type === "FunctionDeclaration" ||
+            decl.type === "ClassDeclaration" ||
+            decl.type === "TSInterfaceDeclaration" ||
+            decl.type === "TSTypeAliasDeclaration" ||
+            decl.type === "TSEnumDeclaration"
+          ) {
             visit(decl, parent);
             const last = symbols[symbols.length - 1];
             if (last) {
               symbols[symbols.length - 1] = { ...last, exported: true, endLine: declLoc.endLine };
             }
-          } else           if (decl.type === "VariableDeclaration") {
+          } else if (decl.type === "VariableDeclaration") {
             const declarators = (decl.declarations ?? []) as AcornNode[];
             for (const d of declarators) {
               visit(d, parent);

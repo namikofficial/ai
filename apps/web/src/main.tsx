@@ -1,4 +1,4 @@
-import { Component, StrictMode, type ErrorInfo, type ReactNode } from "react";
+import { Component, type ErrorInfo, type ReactNode, StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.tsx";
 import "./styles.css";
@@ -17,7 +17,15 @@ class FrontendErrorBoundary extends Component<{ children: ReactNode }, { error: 
   render() {
     if (this.state.error) {
       return (
-        <main style={{ padding: "2rem", fontFamily: "system-ui", color: "#e2e8f0", background: "#07111f", minHeight: "100vh" }}>
+        <main
+          style={{
+            padding: "2rem",
+            fontFamily: "system-ui",
+            color: "#e2e8f0",
+            background: "#07111f",
+            minHeight: "100vh",
+          }}
+        >
           <h1>AI Workbench could not render</h1>
           <p>{this.state.error.message}</p>
           <button type="button" onClick={() => window.location.reload()}>

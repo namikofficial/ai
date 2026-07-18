@@ -3,8 +3,8 @@ import test from "node:test";
 import {
   buildSkillCandidateRecord,
   detectContradictions,
-  reflect,
   type FactProposal,
+  reflect,
 } from "../packages/reflection-engine/src/index.ts";
 import type { FactRecord } from "../packages/shared/src/index.ts";
 
@@ -219,7 +219,15 @@ test("reflection-engine: detectContradictions flags a conflicting currently-vali
     },
   ];
   const proposals: FactProposal[] = [
-    { key: "runtime", value: "node20", kind: "runtime", confidence: 0.8, sourceKind: "reflection", sources: [], evidence: [] },
+    {
+      key: "runtime",
+      value: "node20",
+      kind: "runtime",
+      confidence: 0.8,
+      sourceKind: "reflection",
+      sources: [],
+      evidence: [],
+    },
   ];
   const contradictions = detectContradictions(existing, proposals);
   assert.equal(contradictions.length, 1, "stale fact must not count as a contradiction");

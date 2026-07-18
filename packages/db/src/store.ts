@@ -1,11 +1,11 @@
-import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { basename, extname, join, normalize, relative, resolve } from "node:path";
+import { basename, join, normalize, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runAskWorkflow } from "../../ask-engine/src/index.ts";
 import { boostWeightForPath, resolveProjectConfig } from "../../config/src/index.ts";
 import { buildContextPack } from "../../context-engine/src/index.ts";
+import { embedWithCache } from "../../embeddings-cache/src/index.ts";
 import { readEmbeddingConfig } from "../../indexer/src/config.ts";
 import { indexProject as runIndexerProject } from "../../indexer/src/index.ts";
 import { seedDefaultModelCatalog } from "../../model-runtime/src/default-catalog.ts";
@@ -16,25 +16,16 @@ import type {
   ModelRuntime,
 } from "../../model-runtime/src/index.ts";
 import { createModelRuntime, selectModelProfile } from "../../model-runtime/src/index.ts";
-import type { CompiledPrompt, PromptMode } from "../../prompt-compiler/src/index.ts";
+import type { CompiledPrompt } from "../../prompt-compiler/src/index.ts";
 import { compilePrompt } from "../../prompt-compiler/src/index.ts";
-import { reflect as reflectEngine } from "../../reflection-engine/src/index.ts";
-import { embedWithCache } from "../../embeddings-cache/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import {
-  buildFtsQuery,
   embedQueryForQdrant,
   QdrantClient,
-  rankChunk,
   readQdrantRuntimeSettings,
   tryEnableSearchIndex,
 } from "../../retrieval-engine/src/index.ts";
 import { searchProjectChunks } from "../../retrieval-engine/src/search.ts";
-import {
-  PROFILE_PLANNER_BALANCED,
-  PROFILE_PLANNER_DEEP,
-  PROFILE_PLANNER_FAST,
-} from "../../shared/src/model-profiles.ts";
 import type {
   AskMode,
   AskRequest,
@@ -59,9 +50,7 @@ import type {
   ProjectRecord,
   ProjectStatus,
   ProjectSummary,
-  QueryAnalysis,
   RetrievalChunk,
-  RetrievalIntentKind,
   ReviewRecord,
   ReviewRequest,
   ReviewResponse,
@@ -73,6 +62,11 @@ import type {
 } from "../../shared/src/index.ts";
 import { createEvent, createId, slugifyName } from "../../shared/src/index.ts";
 import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
+import {
+  PROFILE_PLANNER_BALANCED,
+  PROFILE_PLANNER_DEEP,
+  PROFILE_PLANNER_FAST,
+} from "../../shared/src/model-profiles.ts";
 import { runMigrations } from "./migrate.ts";
 import {
   createAgentsRepo,
@@ -92,9 +86,9 @@ import {
 } from "./repositories/index.ts";
 
 type Row = Record<string, unknown>;
-const require = createRequire(import.meta.url);
+const _require = createRequire(import.meta.url);
 
-const DEFAULT_IGNORE_DIRS = new Set([
+const _DEFAULT_IGNORE_DIRS = new Set([
   ".git",
   "node_modules",
   "dist",
@@ -105,7 +99,7 @@ const DEFAULT_IGNORE_DIRS = new Set([
   "runtime",
 ]);
 
-const TEXT_EXTENSIONS = new Set([
+const _TEXT_EXTENSIONS = new Set([
   ".ts",
   ".tsx",
   ".js",
@@ -129,6 +123,11 @@ const TEXT_EXTENSIONS = new Set([
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function requireRecord<T>(value: T | null, description: string): T {
+  if (value === null) throw new Error(`${description} was not persisted`);
+  return value;
 }
 
 function toBool(value: unknown): boolean {
@@ -456,7 +455,7 @@ export function createStore(db: DatabaseSync) {
         .prepare("SELECT * FROM projects WHERE path = ? OR name = ? LIMIT 1")
         .get(resolvedPath, inferredName) as Row | undefined;
       if (existing) {
-        return store.getProject(asString(existing.id))!;
+        return requireRecord(store.getProject(asString(existing.id)), "existing project");
       }
       const id = createId("proj");
       const ts = now();
@@ -479,7 +478,7 @@ export function createStore(db: DatabaseSync) {
         ts,
         ts
       );
-      return store.getProject(id)!;
+      return requireRecord(store.getProject(id), "project");
     },
     updateProjectStatus(projectId: string, status: ProjectStatus, lastIndexedAt: string | null = null): void {
       const ts = now();
@@ -526,7 +525,7 @@ export function createStore(db: DatabaseSync) {
         ts,
         ts
       );
-      return store.getSession(id)!;
+      return requireRecord(store.getSession(id), "session");
     },
     updateSession(sessionId: string, patch: Partial<SessionRecord>): SessionRecord {
       const current = store.getSession(sessionId);
@@ -562,7 +561,7 @@ export function createStore(db: DatabaseSync) {
         next.updatedAt,
         sessionId
       );
-      return store.getSession(sessionId)!;
+      return requireRecord(store.getSession(sessionId), "updated session");
     },
     createTask(input: CreateTaskInput): TaskRecord {
       const id = createId("task");
@@ -589,7 +588,7 @@ export function createStore(db: DatabaseSync) {
         ts,
         ts
       );
-      return store.getTask(id)!;
+      return requireRecord(store.getTask(id), "task");
     },
     getTask(taskId: string): TaskRecord | null {
       const row = db.prepare("SELECT * FROM agent_tasks WHERE id = ? LIMIT 1").get(taskId) as Row | undefined;
@@ -624,7 +623,7 @@ export function createStore(db: DatabaseSync) {
         next.updatedAt,
         taskId
       );
-      return store.getTask(taskId)!;
+      return requireRecord(store.getTask(taskId), "updated task");
     },
     appendEvent(event: EventEnvelope): EventEnvelope {
       db.prepare(
@@ -668,9 +667,7 @@ export function createStore(db: DatabaseSync) {
       let tsCursor: string;
       if (/^[a-zA-Z][a-zA-Z0-9]*_/.test(since)) {
         // Likely an event ID — look up the event's timestamp
-        const row = db
-          .prepare("SELECT ts FROM agent_events WHERE id = ?")
-          .get(since) as { ts: string } | undefined;
+        const row = db.prepare("SELECT ts FROM agent_events WHERE id = ?").get(since) as { ts: string } | undefined;
         if (!row) {
           // Cursor event not found; treat as timestamp directly
           tsCursor = since;
@@ -682,13 +679,9 @@ export function createStore(db: DatabaseSync) {
       }
       const rows = sessionId
         ? (db
-            .prepare(
-              "SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC LIMIT ?"
-            )
+            .prepare("SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC LIMIT ?")
             .all(sessionId, tsCursor, limit) as Row[])
-        : (db
-            .prepare("SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC LIMIT ?")
-            .all(tsCursor, limit) as Row[]);
+        : (db.prepare("SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC LIMIT ?").all(tsCursor, limit) as Row[]);
       return rows.map((row) => ({
         id: asString(row.id),
         type: asString(row.type),
@@ -849,8 +842,8 @@ export function createStore(db: DatabaseSync) {
       }));
     },
     listCheckRuns(limit = 20): CheckRunSummary[] {
-      return (db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(
-        (row) => rowToCheckRun(row)
+      return (db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map((row) =>
+        rowToCheckRun(row)
       );
     },
     listReviews(projectId?: string | null, limit = 20): ReviewRecord[] {
@@ -1016,7 +1009,7 @@ export function createStore(db: DatabaseSync) {
         ts,
         ts
       );
-      return store.getCheckRun(id)!;
+      return requireRecord(store.getCheckRun(id), "check run");
     },
     updateCheckRun(checkId: string, patch: Partial<CheckRunSummary>): CheckRunSummary {
       const current = store.getCheckRun(checkId);
@@ -1047,7 +1040,7 @@ export function createStore(db: DatabaseSync) {
         next.updatedAt,
         checkId
       );
-      return store.getCheckRun(checkId)!;
+      return requireRecord(store.getCheckRun(checkId), "updated check run");
     },
     getCurrentTask(sessionId: string): TaskRecord | null {
       const session = store.getSession(sessionId);
@@ -1448,7 +1441,8 @@ export function createStore(db: DatabaseSync) {
           taskGraphDraft = parsedPlanner.taskGraph;
           likelyFiles = parsedPlanner.likelyFiles.length > 0 ? parsedPlanner.likelyFiles.slice(0, 8) : likelyFiles;
           checks = parsedPlanner.checks.length > 0 ? parsedPlanner.checks : checks;
-          modelRecommendation = (parsedPlanner.modelRecommendation ?? modelRecommendation) as typeof modelRecommendation;
+          modelRecommendation = (parsedPlanner.modelRecommendation ??
+            modelRecommendation) as typeof modelRecommendation;
         }
         plannerModelCallId =
           modelsRepo
@@ -2129,7 +2123,7 @@ export function createStore(db: DatabaseSync) {
       enqueueReflectionJob(store, session.id, "index", project.id);
 
       return {
-        project: store.getProject(project.id)!,
+        project: requireRecord(store.getProject(project.id), "indexed project"),
         session: completedSession,
         events,
         filesIndexed: indexSummary.filesIndexed,

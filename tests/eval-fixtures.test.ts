@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { fileURLToPath } from "node:url";
 import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -53,7 +53,10 @@ test("eval fixtures: retrieval-quality.json is valid and well-formed", () => {
   for (const c of cases) {
     assert.ok(c.id, `Case missing id: ${JSON.stringify(c)}`);
     assert.ok(c.question && c.question.length > 5, `Case ${c.id}: question too short`);
-    assert.ok(Array.isArray(c.expectedFiles) && c.expectedFiles.length > 0, `Case ${c.id}: expectedFiles must be non-empty array`);
+    assert.ok(
+      Array.isArray(c.expectedFiles) && c.expectedFiles.length > 0,
+      `Case ${c.id}: expectedFiles must be non-empty array`
+    );
     assert.ok(typeof c.expectedAnswerContains === "string", `Case ${c.id}: expectedAnswerContains must be string`);
     assert.ok(["easy", "standard", "hard"].includes(c.difficulty), `Case ${c.id}: invalid difficulty`);
     assert.ok(Array.isArray(c.tags) && c.tags.length > 0, `Case ${c.id}: tags must be non-empty array`);
@@ -88,8 +91,14 @@ test("eval fixtures: answer-grounding.json is valid and well-formed", () => {
   for (const c of cases) {
     assert.ok(c.id, `Case missing id: ${JSON.stringify(c)}`);
     assert.ok(c.question && c.question.length > 5, `Case ${c.id}: question too short`);
-    assert.ok(Array.isArray(c.expectedAnswerContains) && c.expectedAnswerContains.length > 0, `Case ${c.id}: expectedAnswerContains must be non-empty array`);
-    assert.ok(typeof c.minCitations === "number" && c.minCitations >= 0, `Case ${c.id}: minCitations must be non-negative number`);
+    assert.ok(
+      Array.isArray(c.expectedAnswerContains) && c.expectedAnswerContains.length > 0,
+      `Case ${c.id}: expectedAnswerContains must be non-empty array`
+    );
+    assert.ok(
+      typeof c.minCitations === "number" && c.minCitations >= 0,
+      `Case ${c.id}: minCitations must be non-negative number`
+    );
     assert.ok(["easy", "standard", "hard"].includes(c.difficulty), `Case ${c.id}: invalid difficulty`);
     assert.ok(Array.isArray(c.tags) && c.tags.length > 0, `Case ${c.id}: tags must be non-empty array`);
   }

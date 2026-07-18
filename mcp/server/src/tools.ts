@@ -8,7 +8,7 @@ import {
   runValidationPipeline,
 } from "../../../packages/execution-engine/src/index.ts";
 import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
-import type { ConfigSnapshot, ProjectSummary, SessionRecord, TaskRecord } from "../../../packages/shared/src/index.ts";
+import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
 import { createEvent } from "../../../packages/shared/src/index.ts";
 
 type Store = ReturnType<typeof createStore>;

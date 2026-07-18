@@ -1,6 +1,6 @@
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { createServer as createViteServer } from "vite";
-import { fileURLToPath } from "node:url";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
 import type { ConfigSnapshot } from "../../../packages/shared/src/index.ts";
 import { startWorkbenchServer } from "../../api/src/server.ts";

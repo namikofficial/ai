@@ -1,17 +1,12 @@
 import type { FormEvent, ReactNode } from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import type {
   AgentRunRecord,
   AskResponse,
-  CompiledPromptRecord,
   ContextPackRecord,
   HandoffResponse,
   MemoryCandidateRecord,
-  ModelCallRecord,
-  ModelProfileRecord,
-  ModelProviderRecord,
-  ModelRouteRecord,
   PlanResponse,
   ProjectSummary,
   PromptLabResultRecord,
@@ -20,9 +15,6 @@ import type {
   ReviewRecord,
   SessionRecord,
   SessionTimelineResponse,
-  SkillCandidateRecord,
-  SkillRecord,
-  TaskRecord,
   TimelineItem,
 } from "../../../packages/shared/src/index.ts";
 import { api } from "./api.ts";
@@ -70,7 +62,11 @@ function formatList(items: string[]): ReactNode {
 
 function DashboardPage(): ReactNode {
   const resource = useResource(
-    () => Promise.all([api.status(), api.healthDeep().catch((error) => ({ status: "degraded" as const, data: { error: String(error) } }))]),
+    () =>
+      Promise.all([
+        api.status(),
+        api.healthDeep().catch((error) => ({ status: "degraded" as const, data: { error: String(error) } })),
+      ]),
     [],
     { live: true }
   );
@@ -1809,12 +1805,7 @@ function ChecksPage(): ReactNode {
           <button type="submit" disabled={busy !== null || !projectId}>
             {busy === "execute" ? "Executing..." : "Execute check"}
           </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={handleRecordOnly}
-            disabled={busy !== null}
-          >
+          <button type="button" className="secondary" onClick={handleRecordOnly} disabled={busy !== null}>
             {busy === "record" ? "Recording..." : "Record check only"}
           </button>
         </form>
@@ -1844,9 +1835,7 @@ function ChecksPage(): ReactNode {
                     {check.durationMs != null ? ` · ${check.durationMs}ms` : ""}
                   </span>
                 </div>
-                {check.errorOutput ? (
-                  <pre className="diff-view">stderr: {check.errorOutput}</pre>
-                ) : null}
+                {check.errorOutput ? <pre className="diff-view">stderr: {check.errorOutput}</pre> : null}
                 {check.output ? (
                   <pre className="diff-view">stdout: {check.output}</pre>
                 ) : (
@@ -2006,9 +1995,7 @@ function RetrievalPage(): ReactNode {
   );
   const projects = (resource.data?.[0].data ?? []) as ProjectSummary[];
   const sessions = (resource.data?.[1].data ?? []) as SessionRecord[];
-  const misses = (resource.data?.[2].data ?? []).filter(
-    (c: MemoryCandidateRecord) => c.kind === "retrieval_miss"
-  );
+  const misses = (resource.data?.[2].data ?? []).filter((c: MemoryCandidateRecord) => c.kind === "retrieval_miss");
   const [project, setProject] = useState(projects[0]?.id ?? "");
   const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
   const [query, setQuery] = useState("");
@@ -2398,9 +2385,7 @@ function ModelsPage(): ReactNode {
   const profiles = resource.data?.[1].data?.profiles ?? [];
   const healthProviders = resource.data?.[2].data?.providers ?? [];
   const callsData = resource.data?.[3].data;
-  const calls = Array.isArray(callsData)
-    ? callsData
-    : (callsData?.data ?? []);
+  const calls = Array.isArray(callsData) ? callsData : (callsData?.data ?? []);
   const routes = resource.data?.[4].data ?? [];
 
   return (
@@ -2493,12 +2478,12 @@ function ModelsPage(): ReactNode {
           {calls.length > 0 ? (
             calls.map((call) => (
               <div className="list-item" key={String(call.id)}>
-                  <div className="row">
-                    <strong>{String(call.role ?? "call")}</strong>
-                    <Badge tone={call.status === "failed" ? "bad" : "good"}>
-                      {String(call.status === "failed" ? "failed" : call.status)}
-                    </Badge>
-                  </div>
+                <div className="row">
+                  <strong>{String(call.role ?? "call")}</strong>
+                  <Badge tone={call.status === "failed" ? "bad" : "good"}>
+                    {String(call.status === "failed" ? "failed" : call.status)}
+                  </Badge>
+                </div>
                 <div className="tiny">
                   profile {String(call.profileId ?? "?")} · prompt {Number(call.promptTokens ?? 0)} · completion{" "}
                   {Number(call.completionTokens ?? 0)} · {Number(call.latencyMs ?? 0)}
@@ -2639,9 +2624,8 @@ function EvalPage(): ReactNode {
   useEffect(() => {
     api.listProjects().then((response) => {
       setProjectOptions(response.data);
-      if (!projectId && response.data[0]?.id) setProjectId(response.data[0].id);
+      setProjectId((current) => current || response.data[0]?.id || "");
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
@@ -3027,10 +3011,10 @@ function DevPage(): ReactNode {
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const defaultProjectId = projects[0]?.id;
   useEffect(() => {
-    if (projects[0]?.id) setProjectId(projects[0].id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projects.length]);
+    if (defaultProjectId) setProjectId(defaultProjectId);
+  }, [defaultProjectId]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -3048,17 +3032,17 @@ function DevPage(): ReactNode {
         mode,
         approvalPolicy,
         approveEdits,
-        checks: checks.split(",").map((c) => c.trim()).filter(Boolean),
+        checks: checks
+          .split(",")
+          .map((c) => c.trim())
+          .filter(Boolean),
         maxRepairs,
       });
       setRunResult(result.data);
       const runIdVal = String((result.data as Record<string, unknown>)?.runId ?? "");
       if (runIdVal) {
         setRunId(runIdVal);
-        const [detail, diff] = await Promise.all([
-          api.getDevRun(runIdVal),
-          api.getDevRunDiff(runIdVal),
-        ]);
+        const [detail, diff] = await Promise.all([api.getDevRun(runIdVal), api.getDevRunDiff(runIdVal)]);
         setRunDetail(detail.data);
         setRunDiff(diff.data);
       }
@@ -3070,10 +3054,7 @@ function DevPage(): ReactNode {
   };
 
   const refreshRunDetail = async (id: string) => {
-    const [detail, diff] = await Promise.all([
-      api.getDevRun(id),
-      api.getDevRunDiff(id),
-    ]);
+    const [detail, diff] = await Promise.all([api.getDevRun(id), api.getDevRunDiff(id)]);
     setRunDetail(detail.data);
     setRunDiff(diff.data);
   };
@@ -3116,9 +3097,7 @@ function DevPage(): ReactNode {
   const status = String(run?.status ?? "queued");
   const workspace = (runDetail as Record<string, unknown>)?.workspace as Record<string, unknown> | undefined;
   const edits = ((runDetail as Record<string, unknown>)?.edits as Array<Record<string, unknown>>) ?? [];
-  const appliedFiles = Array.isArray(run?.appliedFiles)
-    ? ((run?.appliedFiles as Array<unknown>) as Array<string>)
-    : [];
+  const appliedFiles = Array.isArray(run?.appliedFiles) ? (run?.appliedFiles as Array<unknown> as Array<string>) : [];
   const appliedAt = run?.appliedAt ? String(run.appliedAt) : null;
   const finalSummary = run?.summary ? String(run.summary) : null;
 
@@ -3126,14 +3105,12 @@ function DevPage(): ReactNode {
     <PageShell title="Dev" subtitle="goal → plan → edit → check → approve">
       <Panel title="New Dev Run" span={6}>
         <form className="stack" onSubmit={submit}>
-          <select
-            value={projectId}
-            onChange={(e) => setProjectId(e.currentTarget.value)}
-            disabled={submitting}
-          >
+          <select value={projectId} onChange={(e) => setProjectId(e.currentTarget.value)} disabled={submitting}>
             {projects.length > 0 ? (
               projects.map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
               ))
             ) : (
               <option value="">Add a project first</option>
@@ -3147,11 +3124,7 @@ function DevPage(): ReactNode {
             disabled={submitting}
           />
           <div className="row">
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.currentTarget.value as typeof mode)}
-              disabled={submitting}
-            >
+            <select value={mode} onChange={(e) => setMode(e.currentTarget.value as typeof mode)} disabled={submitting}>
               <option value="local">local</option>
               <option value="hybrid">hybrid</option>
               <option value="cloud">cloud</option>
@@ -3207,22 +3180,23 @@ function DevPage(): ReactNode {
               <strong>{status}</strong>
               <Badge
                 tone={
-                  status === "completed" || status === "applied" ? "good" :
-                  status === "failed" ? "bad" :
-                  status === "awaiting_approval" || status === "approved" ? "warn" :
-                  status === "cancelled" ? "bad" : "neutral"
+                  status === "completed" || status === "applied"
+                    ? "good"
+                    : status === "failed"
+                      ? "bad"
+                      : status === "awaiting_approval" || status === "approved"
+                        ? "warn"
+                        : status === "cancelled"
+                          ? "bad"
+                          : "neutral"
                 }
               >
                 {status}
               </Badge>
             </div>
             <div className="tiny">run {String(run.id)}</div>
-            {run.durationMs != null ? (
-              <div className="tiny">{Number(run.durationMs)}ms</div>
-            ) : null}
-            {workspace ? (
-              <div className="tiny">workspace: {String(workspace.path ?? workspace.id ?? "—")}</div>
-            ) : null}
+            {run.durationMs != null ? <div className="tiny">{Number(run.durationMs)}ms</div> : null}
+            {workspace ? <div className="tiny">workspace: {String(workspace.path ?? workspace.id ?? "—")}</div> : null}
             {run.checks && Array.isArray(run.checks) ? (
               <div className="list">
                 {(run.checks as Array<Record<string, unknown>>).map((c, i) => (
@@ -3242,16 +3216,18 @@ function DevPage(): ReactNode {
                 </ul>
               </div>
             ) : null}
-            {appliedAt ? (
-              <div className="tiny">applied at: {appliedAt}</div>
-            ) : null}
+            {appliedAt ? <div className="tiny">applied at: {appliedAt}</div> : null}
             {finalSummary && (status === "applied" || status === "completed") ? (
               <div className="tiny">summary: {finalSummary}</div>
             ) : null}
             {status === "awaiting_approval" && (
               <div className="row">
-                <button type="button" onClick={handleApprove} disabled={submitting || applying}>Approve</button>
-                <button type="button" onClick={handleCancel} disabled={submitting || applying}>Cancel</button>
+                <button type="button" onClick={handleApprove} disabled={submitting || applying}>
+                  Approve
+                </button>
+                <button type="button" onClick={handleCancel} disabled={submitting || applying}>
+                  Cancel
+                </button>
               </div>
             )}
             {status === "approved" && (
@@ -3291,7 +3267,7 @@ function DevPage(): ReactNode {
       </Panel>
 
       <Panel title="Diff" span={6}>
-        {runDiff && runDiff.diffText ? (
+        {runDiff?.diffText ? (
           <pre className="diff-view">{String(runDiff.diffText)}</pre>
         ) : (
           <EmptyState title="No diff" body="Diff output will appear after the run completes." />
@@ -3305,9 +3281,7 @@ function DevPage(): ReactNode {
               <div className="list-item" key={String(c.name ?? `check-${i}`)}>
                 <div className="row">
                   <strong>{String(c.name ?? "check")}</strong>
-                  <Badge tone={c.status === "passed" ? "good" : "bad"}>
-                    {String(c.status ?? "unknown")}
-                  </Badge>
+                  <Badge tone={c.status === "passed" ? "good" : "bad"}>{String(c.status ?? "unknown")}</Badge>
                 </div>
                 <div className="tiny">{String(c.output ?? c.error ?? "")}</div>
               </div>

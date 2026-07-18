@@ -14,7 +14,7 @@
 import { existsSync } from "node:fs";
 import { type ExecutionEvent, parseDevRequest } from "../../agent-protocol/src/dev.ts";
 import type { ConversationRepo } from "../../db/src/repositories/conversation.ts";
-import type { DevRunsRepo, DevRunUpdateInput } from "../../db/src/repositories/dev-runs.ts";
+import type { DevRunsRepo } from "../../db/src/repositories/dev-runs.ts";
 import type { ExecutionRepo, ExecutionWorkspaceRecord } from "../../db/src/repositories/execution.ts";
 import type { ModelsRepo } from "../../db/src/repositories/models.ts";
 import type { RetrievalRepo } from "../../db/src/repositories/retrieval.ts";
@@ -48,10 +48,7 @@ import type {
 } from "../../shared/src/index.ts";
 import { createId } from "../../shared/src/index.ts";
 import { extractJsonFragment } from "../../shared/src/model-output.ts";
-import {
-  PROFILE_DEV_REPAIR,
-  PROFILE_PLANNER_BALANCED,
-} from "../../shared/src/model-profiles.ts";
+import { PROFILE_DEV_REPAIR, PROFILE_PLANNER_BALANCED } from "../../shared/src/model-profiles.ts";
 
 export interface RunDevWorkflowInput {
   request: DevRequest;
@@ -123,7 +120,9 @@ function buildDevPrompt(input: {
     input.testFiles && input.testFiles.length > 0
       ? `Relevant tests:\n${input.testFiles.map((f) => `FILE: ${f.path}\n\`\`\`\n${f.content}\n\`\`\``).join("\n")}\n\n`
       : "";
-  const scriptsSection = input.packageScripts ? `Package scripts:\n\`\`\`\n${input.packageScripts.content}\n\`\`\`\n\n` : "";
+  const scriptsSection = input.packageScripts
+    ? `Package scripts:\n\`\`\`\n${input.packageScripts.content}\n\`\`\`\n\n`
+    : "";
   return [
     `You are the workbench dev editor. Plan the smallest possible set of edits for this goal.`,
     `Project: ${input.projectName}`,
@@ -287,7 +286,7 @@ function pickFileHints(queries: RetrievalQueryRecord[], projectPath: string, rep
     const results = repo.listResults(query.id, 8) as Array<{ path: string }>;
     for (const result of results) {
       if (typeof result.path === "string") {
-        const relative = result.path.startsWith(projectPath + "/")
+        const relative = result.path.startsWith(`${projectPath}/`)
           ? result.path.slice(projectPath.length + 1)
           : result.path;
         hints.add(relative);
@@ -387,7 +386,6 @@ async function applyEditsToWorkspace(input: {
     }
     if (guard.isHighRisk && !input.approveEdits) {
       failed.push({ edit, reason: "high-risk file requires approveEdits=true" });
-      continue;
     }
   }
   for (const edit of input.edits) {
@@ -628,7 +626,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       chosenQuery = created;
     }
     const queries = existingQueries.length > 0 ? existingQueries : [chosenQuery];
-    const contextChunks = retrievalContextForQueries(queries, input.runtime.retrieval);
+    const _contextChunks = retrievalContextForQueries(queries, input.runtime.retrieval);
     const hints = pickFileHints(queries, input.project.path, input.runtime.retrieval);
     const fallbackPaths = hints.length > 0 ? hints : ["README.md", "package.json"];
     const sources = await readProjectSources(input, fallbackPaths);
@@ -795,7 +793,11 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       approveEdits: parsedRequest.approveEdits ?? false,
     });
 
-    const editOutcomes = await applyEditsToWorkspace({ workspace, edits, approveEdits: parsedRequest.approveEdits ?? false });
+    const editOutcomes = await applyEditsToWorkspace({
+      workspace,
+      edits,
+      approveEdits: parsedRequest.approveEdits ?? false,
+    });
     for (const success of editOutcomes.applied) {
       const editId = input.runtime.devRuns.addEdit({
         runId: run.id,
@@ -903,7 +905,11 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
           emit({ kind: "repair.attempted", level: "warn", message: "repair returned no edits" });
           break;
         }
-        const repairOutcome = await applyEditsToWorkspace({ workspace, edits: repairPlan.edits, approveEdits: parsedRequest.approveEdits ?? false });
+        const repairOutcome = await applyEditsToWorkspace({
+          workspace,
+          edits: repairPlan.edits,
+          approveEdits: parsedRequest.approveEdits ?? false,
+        });
         for (const success of repairOutcome.applied) {
           input.runtime.devRuns.addEdit({
             runId: run.id,

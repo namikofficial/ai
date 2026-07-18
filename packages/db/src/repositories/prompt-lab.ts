@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { PromptLabResultRecord, PromptLabRunRecord } from "../../../shared/src/index.ts";
-import { asNumber, asString, asStringOrNull, newId, now, safeParseJsonArray } from "./_shared.ts";
+import { asNumber, asString, asStringOrNull, now, safeParseJsonArray } from "./_shared.ts";
 
 interface PromptLabRunRow {
   id: string;

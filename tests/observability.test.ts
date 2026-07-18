@@ -175,7 +175,7 @@ test("observability: createHandoff records agent handoff and context pack", asyn
 
   const handoffCalls = store.models.listCalls(answer.sessionId, 100).filter((call) => call.role === "coder_handoff");
   assert.equal(handoffCalls.length, 1, "handoff should record exactly one runtime-backed model call");
-  const handoffRequest = handoffCalls[0]!.request as {
+  const handoffRequest = handoffCalls[0]?.request as {
     metadata?: {
       compiledPrompt?: {
         id?: string;
@@ -198,12 +198,12 @@ test("observability: createHandoff records agent handoff and context pack", asyn
   assert.ok(contextPacks.length >= 1);
   const handoffPack = contextPacks.find((p) => p.id === handoffs[0].contextPackId);
   assert.ok(handoffPack, "handoff pack not found");
-  assert.equal(handoffPack!.reason, "handoff:opencode");
+  assert.equal(handoffPack?.reason, "handoff:opencode");
 
   const runs = store.agents.listRuns(answer.sessionId);
   const handoffRun = runs.find((r) => r.agent === "handoff_agent");
   assert.ok(handoffRun, "handoff_agent run not found");
-  assert.equal(handoffRun!.status, "completed");
+  assert.equal(handoffRun?.status, "completed");
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -222,15 +222,15 @@ test("observability: indexProject records an indexer agent run", async () => {
   const runs = store.agents.listRuns(result.session.id);
   const indexerRun = runs.find((r) => r.agent === "indexer");
   assert.ok(indexerRun, "indexer run not found");
-  assert.equal(indexerRun!.status, "completed");
-  assert.equal(indexerRun!.modelRole, "embedding");
-  const output = indexerRun!.output as Record<string, unknown> | null;
+  assert.equal(indexerRun?.status, "completed");
+  assert.equal(indexerRun?.modelRole, "embedding");
+  const output = indexerRun?.output as Record<string, unknown> | null;
   assert.ok(output && typeof output === "object");
   assert.ok("filesIndexed" in (output as Record<string, unknown>));
 
   const embeddingCalls = store.models.listCalls(result.session.id, 100).filter((call) => call.role === "embedding");
   assert.ok(embeddingCalls.length >= 1, "indexing should record runtime-backed embedding calls");
-  const embeddingResponse = embeddingCalls[0]!.response as {
+  const embeddingResponse = embeddingCalls[0]?.response as {
     modelName?: string;
     dimensions?: number;
     providerId?: string;
@@ -250,9 +250,9 @@ test("observability: indexProject records an indexer agent run", async () => {
       }
     | undefined;
   assert.ok(chunk);
-  assert.equal(chunk!.embedding_model, embeddingResponse.modelName);
-  assert.equal(chunk!.embedding_dim, embeddingResponse.dimensions);
-  assert.equal(chunk!.embedding_provider, embeddingResponse.providerId);
+  assert.equal(chunk?.embedding_model, embeddingResponse.modelName);
+  assert.equal(chunk?.embedding_dim, embeddingResponse.dimensions);
+  assert.equal(chunk?.embedding_provider, embeddingResponse.providerId);
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
@@ -327,14 +327,14 @@ test("agent-protocol: registry has expected agents and tool gating works", () =>
   assert.ok(agents.length >= 10);
   const orchestrator = getAgent("orchestrator");
   assert.ok(orchestrator, "orchestrator missing");
-  assert.ok(orchestrator!.allowedTools.includes("session.emit"));
-  assert.equal(orchestrator!.risk, "medium");
+  assert.ok(orchestrator?.allowedTools.includes("session.emit"));
+  assert.equal(orchestrator?.risk, "medium");
   assert.equal(isToolAllowed("orchestrator", "project.write"), false);
   assert.equal(isToolAllowed("orchestrator", "session.emit"), true);
 
   const answerer = getAgent("answer_agent");
   assert.ok(answerer, "answer_agent missing");
-  assert.equal(answerer!.modelRole, "answer");
+  assert.equal(answerer?.modelRole, "answer");
 
   const handoff = getAgent("handoff_agent");
   assert.ok(handoff, "handoff_agent missing");
@@ -351,14 +351,14 @@ test("agent-protocol: registry has expected agents and tool gating works", () =>
 test("agent-protocol: agent descriptors expose required events", () => {
   const retrieval = getAgent("retrieval_agent");
   assert.ok(retrieval);
-  assert.ok(retrieval!.requiredEvents.includes("retrieval.started"));
-  assert.ok(retrieval!.requiredEvents.includes("retrieval.completed"));
+  assert.ok(retrieval?.requiredEvents.includes("retrieval.started"));
+  assert.ok(retrieval?.requiredEvents.includes("retrieval.completed"));
 
   const indexer = getAgent("indexer");
   assert.ok(indexer);
-  assert.ok(indexer!.requiredEvents.includes("task.started"));
+  assert.ok(indexer?.requiredEvents.includes("task.started"));
 
   const check = getAgent("check_agent");
   assert.ok(check);
-  assert.ok(check!.requiredEvents.includes("check.started"));
+  assert.ok(check?.requiredEvents.includes("check.started"));
 });

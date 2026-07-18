@@ -53,10 +53,7 @@ export function clampLimit(raw: number, defaultLimit = DEFAULT_LIMIT): number {
  * - If no pagination params requested (no cursor/offset), return plain array
  * - Otherwise return paginated envelope with data + pagination info
  */
-export function buildPaginatedResponse<T>(
-  data: T[],
-  params: PaginationParams
-): T[] | PaginatedResult<T> {
+export function buildPaginatedResponse<T>(data: T[], params: PaginationParams): T[] | PaginatedResult<T> {
   const hasMore = data.length > params.limit;
   const trimmed = hasMore ? data.slice(0, params.limit) : data;
 

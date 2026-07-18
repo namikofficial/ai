@@ -46,18 +46,22 @@ test("retrieval recordFeedback writes to retrieval_path_feedback and chunk_path_
   assert.ok(file2);
   const db = store.db;
   const fileIdToChunkId = new Map<string, string>();
-  for (const file of [file1!, file2!]) {
+  for (const file of [file1, file2]) {
     const chunkRow = db
       .prepare(
         "SELECT c.id AS id FROM rag_chunks c JOIN rag_documents d ON d.id = c.document_id WHERE c.project_id = ? AND d.path = ? LIMIT 1"
       )
       .get(project.id, file.path) as { id: string } | undefined;
     assert.ok(chunkRow, `chunk for ${file.path} should exist after indexProject`);
-    fileIdToChunkId.set(file.path, chunkRow!.id);
+    fileIdToChunkId.set(file.path, chunkRow?.id);
   }
+  const alphaChunkId = fileIdToChunkId.get("src/alpha.ts");
+  const betaChunkId = fileIdToChunkId.get("src/beta.ts");
+  assert.ok(alphaChunkId);
+  assert.ok(betaChunkId);
   store.retrieval.recordResults(query.id, [
     {
-      chunkId: fileIdToChunkId.get("src/alpha.ts")!,
+      chunkId: alphaChunkId,
       path: "src/alpha.ts",
       startLine: 1,
       endLine: 1,
@@ -67,7 +71,7 @@ test("retrieval recordFeedback writes to retrieval_path_feedback and chunk_path_
       included: true,
     },
     {
-      chunkId: fileIdToChunkId.get("src/beta.ts")!,
+      chunkId: betaChunkId,
       path: "src/beta.ts",
       startLine: 1,
       endLine: 1,
@@ -109,11 +113,11 @@ test("retrieval recordFeedback writes to retrieval_path_feedback and chunk_path_
   assert.ok(betaBoost);
   assert.ok(missBoost);
   assert.ok(
-    alphaBoost!.weight > betaBoost!.weight,
-    `alpha (${alphaBoost!.weight}) should outrank beta (${betaBoost!.weight})`
+    alphaBoost?.weight > betaBoost?.weight,
+    `alpha (${alphaBoost?.weight}) should outrank beta (${betaBoost?.weight})`
   );
-  assert.ok(alphaBoost!.weight > 0.5, "good feedback should push weight above neutral");
-  assert.ok(betaBoost!.weight < 0.5, "bad feedback should push weight below neutral");
+  assert.ok(alphaBoost?.weight > 0.5, "good feedback should push weight above neutral");
+  assert.ok(betaBoost?.weight < 0.5, "bad feedback should push weight below neutral");
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
 });

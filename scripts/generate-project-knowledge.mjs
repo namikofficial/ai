@@ -18,7 +18,17 @@ import { basename, join, relative, resolve } from "node:path";
 
 function walk(dir) {
   const files = [];
-  const skip = new Set([".git", "node_modules", "dist", "build", "coverage", "runtime", ".venv", "__pycache__", "target"]);
+  const skip = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    "runtime",
+    ".venv",
+    "__pycache__",
+    "target",
+  ]);
   try {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
       if (skip.has(entry.name) || entry.name.startsWith(".")) continue;
@@ -26,14 +36,18 @@ function walk(dir) {
       if (entry.isDirectory()) files.push(...walk(abs));
       else files.push(abs);
     }
-  } catch { /* noop */ }
+  } catch {
+    /* noop */
+  }
   return files;
 }
 
 function readLines(path, max = 30000) {
   try {
     return readFileSync(path, "utf8").split("\n").slice(0, max);
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function grepLines(lines, ...patterns) {
@@ -54,7 +68,11 @@ function relativePaths(root, absPaths) {
 }
 
 function safeReadJson(path) {
-  try { return JSON.parse(readFileSync(path, "utf8")); } catch { return null; }
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +81,7 @@ function safeReadJson(path) {
 
 function genProjectSummary(input) {
   const pkg = safeReadJson(join(input.root, "package.json"));
-  const hasTurbo = input.allFiles.some((f) => basename(f) === "turbo.json");
+  const _hasTurbo = input.allFiles.some((f) => basename(f) === "turbo.json");
   const hasPoetry = input.allFiles.some((f) => basename(f) === "pyproject.toml");
   const hasCargo = input.allFiles.some((f) => basename(f) === "Cargo.toml");
   const hasDocker = input.allFiles.some((f) => basename(f) === "Dockerfile" || basename(f) === "docker-compose.yml");
@@ -118,7 +136,9 @@ function genRoutes(input) {
 
 function genDbSchema(input) {
   const sqlFiles = input.allFiles.filter((f) => f.endsWith(".sql") && /migration|schema/.test(f));
-  const ormFiles = input.allFiles.filter((f) => /schema|prisma|drizzle|entity/.test(basename(f)) && /\.(prisma|ts|py)$/.test(f));
+  const ormFiles = input.allFiles.filter(
+    (f) => /schema|prisma|drizzle|entity/.test(basename(f)) && /\.(prisma|ts|py)$/.test(f)
+  );
   const lines = ["# DB Schema", ""];
   for (const file of [...sqlFiles.slice(0, 20), ...ormFiles.slice(0, 10)]) {
     const rel = relative(input.root, file);
@@ -192,7 +212,9 @@ function genScripts(input) {
 
 function genTesting(input) {
   const testFiles = input.allFiles.filter((f) => /\.(test|spec)\.[a-z]+$/.test(f) || /__tests__|tests?\//i.test(f));
-  const configFiles = input.allFiles.filter((f) => /(jest|vitest|playwright|ava|mocha|pytest|test)\.config/.test(basename(f)));
+  const configFiles = input.allFiles.filter((f) =>
+    /(jest|vitest|playwright|ava|mocha|pytest|test)\.config/.test(basename(f))
+  );
   const pkg = safeReadJson(join(input.root, "package.json"));
   const lines = ["# Testing", ""];
   if (pkg?.scripts) {
@@ -213,7 +235,9 @@ function genTesting(input) {
 }
 
 function genDeployment(input) {
-  const deployFiles = input.allFiles.filter((f) => /docker-compose|Dockerfile|\.github\/|\.gitlab-ci|deploy|k8s|helm/i.test(f) && !/node_modules/.test(f));
+  const deployFiles = input.allFiles.filter(
+    (f) => /docker-compose|Dockerfile|\.github\/|\.gitlab-ci|deploy|k8s|helm/i.test(f) && !/node_modules/.test(f)
+  );
   const lines = ["# Deployment", ""];
   for (const f of deployFiles.slice(0, 20)) {
     const content = readLines(f, 30);
@@ -243,12 +267,16 @@ function genKnownBugs(input) {
 }
 
 function genDecisions(input) {
-  const adrFiles = input.allFiles.filter((f) => /adr|decision|design-doc|RFC|rfcs?\/\d+/i.test(f) && /\.(md|mdx)$/.test(f));
+  const adrFiles = input.allFiles.filter(
+    (f) => /adr|decision|design-doc|RFC|rfcs?\/\d+/i.test(f) && /\.(md|mdx)$/.test(f)
+  );
   const lines = ["# Architecture Decisions", ""];
   if (adrFiles.length > 0) {
     lines.push(...relativePaths(input.root, adrFiles).map((r) => `- ${r}`));
   } else {
-    const docsDecisions = input.allFiles.filter((f) => /docs\/.*(?:architecture|decision|design)/i.test(f) && f.endsWith(".md"));
+    const docsDecisions = input.allFiles.filter(
+      (f) => /docs\/.*(?:architecture|decision|design)/i.test(f) && f.endsWith(".md")
+    );
     if (docsDecisions.length > 0) {
       lines.push(...relativePaths(input.root, docsDecisions).map((r) => `- ${r}`));
     } else {

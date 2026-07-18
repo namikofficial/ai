@@ -40,9 +40,9 @@ test("safety: checkPathPolicy blocks escape attempts and allows relative paths",
   const inside = checkPathPolicy({ projectRoot, candidatePath: "src/auth.ts" });
   assert.equal(inside.allowed, true);
 
-  const escape = checkPathPolicy({ projectRoot, candidatePath: "../etc/passwd" });
-  assert.equal(escape.allowed, false);
-  assert.match(escape.reason, /escapes project root/);
+  const escapedPath = checkPathPolicy({ projectRoot, candidatePath: "../etc/passwd" });
+  assert.equal(escapedPath.allowed, false);
+  assert.match(escapedPath.reason, /escapes project root/);
 });
 
 test("safety: isCheckAllowed gates known checks and rejects unknown commands", () => {

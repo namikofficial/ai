@@ -1,7 +1,7 @@
 import type { EmbeddingRequest, EmbeddingResult, ModelInvokeRequest, ModelInvokeResult } from "../index.ts";
 import type { ModelHealthResult, ModelProviderAdapter } from "./types.ts";
 
-function estimateTokens(text: string): number {
+function _estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
 }
 
@@ -63,7 +63,9 @@ export class FastembedAdapter implements ModelProviderAdapter {
       return {
         status: response.ok ? "healthy" : "degraded",
         latencyMs: Date.now() - started,
-        detail: response.ok ? "fastembed server reachable" : `health check failed: ${JSON.stringify(raw).slice(0, 200)}`,
+        detail: response.ok
+          ? "fastembed server reachable"
+          : `health check failed: ${JSON.stringify(raw).slice(0, 200)}`,
       };
     } catch (error) {
       return {

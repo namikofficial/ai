@@ -270,6 +270,11 @@ textarea {
 .timeline-main {
   min-width: 0;
 }
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 .timeline-item pre {
   margin: 0 0.85rem 0.75rem;
   white-space: pre-wrap;
@@ -372,11 +377,6 @@ textarea {
 .stack {
   display: grid;
   gap: 0.75rem;
-}
-pre {
-  margin: 0;
-  white-space: pre-wrap;
-  word-break: break-word;
 }
 @media (max-width: 1200px) {
   .app {

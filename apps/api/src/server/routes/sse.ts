@@ -20,9 +20,7 @@ export function registerSseRoutes(
 
     const since = req.query.since;
     const events: EventEnvelope[] =
-      since && typeof since === "string"
-        ? deps.listEventsSince(since)
-        : deps.listEvents();
+      since && typeof since === "string" ? deps.listEventsSince(since) : deps.listEvents();
 
     for (const event of events) {
       res.write(`data: ${JSON.stringify(event)}\n\n`);

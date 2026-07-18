@@ -156,9 +156,9 @@ test("API POST /reviews enqueues a review.reflect worker job", async () => {
         | { id: string; type: string; status: string; payload_json: string }
         | undefined;
       assert.ok(job);
-      assert.equal(job!.type, "review.reflect");
-      assert.equal(job!.status, "queued");
-      const payload = JSON.parse(job!.payload_json) as { reviewId: string; source: string };
+      assert.equal(job?.type, "review.reflect");
+      assert.equal(job?.status, "queued");
+      const payload = JSON.parse(job?.payload_json) as { reviewId: string; source: string };
       assert.equal(payload.reviewId, body.data.result.id);
       assert.equal(payload.source, "api");
     } finally {

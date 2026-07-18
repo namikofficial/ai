@@ -114,7 +114,7 @@ test("code-intelligence: indexing reuses changed-file ids and refreshes symbol r
     .prepare("SELECT summary_json FROM project_context_graphs WHERE project_id = ?")
     .get(project.id) as { summary_json: string } | undefined;
   assert.ok(graphRow);
-  const graph = JSON.parse(graphRow!.summary_json) as { routeFiles: string[]; hotPaths: string[] };
+  const graph = JSON.parse(graphRow?.summary_json) as { routeFiles: string[]; hotPaths: string[] };
   assert.ok(Array.isArray(graph.hotPaths));
 
   store.db.close();

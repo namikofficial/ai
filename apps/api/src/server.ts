@@ -2,16 +2,19 @@ import { mkdir, stat } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import * as path from "node:path";
 import express, { type Request } from "express";
-import { resolveConfig } from "../../../packages/config/src/index.ts";
-import { resolveEmbeddingConfig } from "../../../packages/config/src/index.ts";
+import { resolveConfig, resolveEmbeddingConfig } from "../../../packages/config/src/index.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
-import {
-  createModelRuntime,
-  type ModelRuntime,
-} from "../../../packages/model-runtime/src/index.ts";
-import type { ConfigSnapshot, EventEnvelope, ModelProfileRecord, ModelProviderRecord } from "../../../packages/shared/src/index.ts";
+import { createModelRuntime, type ModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import type {
+  ConfigSnapshot,
+  EventEnvelope,
+  ModelProfileRecord,
+  ModelProviderRecord,
+} from "../../../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
+import { runExplainWithStore } from "./retrieval-explain.ts";
 import { getRequestPath, isHtmlRequest, safeParseJson } from "./server/http.ts";
+import { renderDashboard, renderErrorPage, renderNotFoundPage } from "./server/render-pages.ts";
 import { json, sendJson } from "./server/response.ts";
 import { registerAgentRoutes } from "./server/routes/agents.ts";
 import { registerEvalRoutes } from "./server/routes/eval.ts";
@@ -22,14 +25,12 @@ import { registerModelRoutes } from "./server/routes/models.ts";
 import { registerProjectRoutes } from "./server/routes/projects.ts";
 import { registerPromptRoutes } from "./server/routes/prompts.ts";
 import { registerRetrievalRoutes } from "./server/routes/retrieval.ts";
-import { registerSsrRoutes } from "./server/routes/ssr.ts";
-import { renderDashboard, renderErrorPage, renderNotFoundPage } from "./server/render-pages.ts";
 import { registerSessionRoutes } from "./server/routes/sessions.ts";
 import { registerSettingsRoutes } from "./server/routes/settings.ts";
 import { registerSseRoutes } from "./server/routes/sse.ts";
+import { registerSsrRoutes } from "./server/routes/ssr.ts";
 import { registerTaskRoutes } from "./server/routes/tasks.ts";
 import { registerWorkflowRoutes } from "./server/routes/workflows.ts";
-import { runExplainWithStore } from "./retrieval-explain.ts";
 
 export interface IntelligenceStack {
   runtime: ModelRuntime;
@@ -70,7 +71,8 @@ function buildHealthSnapshot(store: ReturnType<typeof createStore>, config: Conf
   const sessionCount = readCount(store, "SELECT COUNT(*) AS count FROM agent_sessions");
   const modelProviderCount = readCount(store, "SELECT COUNT(*) AS count FROM model_providers");
   const promptCount = readCount(store, "SELECT COUNT(*) AS count FROM compiled_prompts");
-  const databaseReachable = migrationsApplied.ok && projectCount.ok && sessionCount.ok && modelProviderCount.ok && promptCount.ok;
+  const databaseReachable =
+    migrationsApplied.ok && projectCount.ok && sessionCount.ok && modelProviderCount.ok && promptCount.ok;
   return {
     uptime: process.uptime(),
     databasePath: config.databasePath ? `.../${path.basename(config.databasePath)}` : null,
@@ -97,9 +99,17 @@ async function probe(url: string | null): Promise<{ ok: boolean; latencyMs: numb
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
     const response = await fetch(url, { signal: controller.signal });
-    return { ok: response.ok, latencyMs: Date.now() - started, ...(response.ok ? {} : { error: `HTTP ${response.status}` }) };
+    return {
+      ok: response.ok,
+      latencyMs: Date.now() - started,
+      ...(response.ok ? {} : { error: `HTTP ${response.status}` }),
+    };
   } catch (error) {
-    return { ok: false, latencyMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) };
+    return {
+      ok: false,
+      latencyMs: Date.now() - started,
+      error: error instanceof Error ? error.message : String(error),
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -145,7 +155,15 @@ async function buildDeepHealthSnapshot(
   return {
     ...base,
     deep: true,
-    dependencies: { qdrant, models: { ...models, exposedModelIds, missingProfiles: expectedProfiles.filter((id) => !exposedModelIds.includes(id)) }, worker },
+    dependencies: {
+      qdrant,
+      models: {
+        ...models,
+        exposedModelIds,
+        missingProfiles: expectedProfiles.filter((id) => !exposedModelIds.includes(id)),
+      },
+      worker,
+    },
     embedding: resolveEmbeddingConfig(),
   };
 }
@@ -161,7 +179,9 @@ function buildRuntimeForStore(store: ReturnType<typeof createStore>, cloudEnable
 
 function readProjectGraph(store: ReturnType<typeof createStore>, projectId: string) {
   try {
-    const row = store.db.prepare("SELECT summary_json, updated_at FROM project_context_graphs WHERE project_id = ? LIMIT 1").get(projectId) as { summary_json: string; updated_at: string } | undefined;
+    const row = store.db
+      .prepare("SELECT summary_json, updated_at FROM project_context_graphs WHERE project_id = ? LIMIT 1")
+      .get(projectId) as { summary_json: string; updated_at: string } | undefined;
     if (!row) return null;
     const parsed = safeParseJson(row.summary_json);
     return typeof parsed === "object" && parsed !== null ? { ...(parsed as object), updatedAt: row.updated_at } : null;
@@ -189,7 +209,9 @@ function buildSessionTraceData(store: ReturnType<typeof createStore>, sessionId:
       items: store.context.listItems(pack.id),
       budgetEvents: store.context.listBudgetEvents(pack.id),
     })),
-    memoryCandidates: store.memory.listCandidates(undefined, projectId, 100).filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId),
+    memoryCandidates: store.memory
+      .listCandidates(undefined, projectId, 100)
+      .filter((candidate) => candidate.sessionId === sessionId || candidate.projectId === projectId),
     skills: store.skills.listSkills(undefined, 100),
     evalOutcomes: store.evals.listOutcomes(sessionId, 100),
   };
@@ -251,7 +273,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   app.use(express.text({ limit: "10mb", type: ["text/plain", "multipart/form-data"] }));
 
   // Catch JSON parse errors from express.json() and return clean 400
-  app.use((err: unknown, req: Request, res: express.Response, next: express.NextFunction) => {
+  app.use((err: unknown, _req: Request, res: express.Response, next: express.NextFunction) => {
     if (res.headersSent) return;
     const e = err as { type?: string; status?: number; message?: string };
     if (e.type === "entity.parse.failed") {
@@ -286,7 +308,11 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   app.use(sseRouter);
 
   const projectRouter = express.Router();
-  registerProjectRoutes(projectRouter, { store, publish, readProjectGraph: (projectId) => readProjectGraph(store, projectId) });
+  registerProjectRoutes(projectRouter, {
+    store,
+    publish,
+    readProjectGraph: (projectId) => readProjectGraph(store, projectId),
+  });
   app.use(projectRouter);
 
   const sessionRouter = express.Router();
@@ -346,7 +372,14 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   app.use((req, res) => {
     res.status(404);
     if (isHtmlRequest(req)) {
-      res.send(renderNotFoundPage(store, getRequestPath(req), "Not Found", `No route matched <code>${getRequestPath(req)}</code>.`));
+      res.send(
+        renderNotFoundPage(
+          store,
+          getRequestPath(req),
+          "Not Found",
+          `No route matched <code>${getRequestPath(req)}</code>.`
+        )
+      );
       return;
     }
     sendJson(res, json("error", undefined, { message: `No route matched ${getRequestPath(req)}` }), 404);
@@ -381,9 +414,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
             const chunks: string[] = [];
             response.setEncoding("utf8");
             response.on("data", (chunk: string) => chunks.push(chunk));
-            response.on("end", () =>
-              resolve({ statusCode: response.statusCode ?? 500, body: chunks.join("") })
-            );
+            response.on("end", () => resolve({ statusCode: response.statusCode ?? 500, body: chunks.join("") }));
           }
         );
         request.on("error", reject);

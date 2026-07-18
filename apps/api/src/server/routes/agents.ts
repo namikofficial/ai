@@ -1,8 +1,8 @@
 import type { Router } from "express";
-import { createStore } from "../../../../../packages/db/src/store.ts";
+import type { createStore } from "../../../../../packages/db/src/store.ts";
 import { asyncRoute, readJsonBody } from "../http.ts";
+import { buildPaginatedResponse, parsePagination } from "../pagination.ts";
 import { json, sendJson } from "../response.ts";
-import { parsePagination, buildPaginatedResponse } from "../pagination.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -26,7 +26,10 @@ export function registerAgentRoutes(router: Router, deps: { store: Store }) {
 
   router.get("/agents/handoffs", (req, res) => {
     const sessionId = typeof req.query.sessionId === "string" ? req.query.sessionId : null;
-    sendJson(res, json("ok", sessionId ? deps.store.agents.listHandoffs(sessionId, 100) : deps.store.agents.listAllHandoffs(100)));
+    sendJson(
+      res,
+      json("ok", sessionId ? deps.store.agents.listHandoffs(sessionId, 100) : deps.store.agents.listAllHandoffs(100))
+    );
   });
 
   router.get("/context/packs", (req, res) => {
@@ -44,15 +47,28 @@ export function registerAgentRoutes(router: Router, deps: { store: Store }) {
       sendJson(res, json("error", undefined, { message: "context pack not found" }), 404);
       return;
     }
-    sendJson(res, json("ok", { pack, items: deps.store.context.listItems(id), budgetEvents: deps.store.context.listBudgetEvents(id) }));
+    sendJson(
+      res,
+      json("ok", {
+        pack,
+        items: deps.store.context.listItems(id),
+        budgetEvents: deps.store.context.listBudgetEvents(id),
+      })
+    );
   });
 
   router.get("/conversations/:sessionId", (req, res) => {
-    sendJson(res, json("ok", deps.store.conversation.listMessages(decodeURIComponent(String(req.params.sessionId ?? "")), 200)));
+    sendJson(
+      res,
+      json("ok", deps.store.conversation.listMessages(decodeURIComponent(String(req.params.sessionId ?? "")), 200))
+    );
   });
 
   router.get("/skills/candidates", (req, res) => {
-    const status = typeof req.query.status === "string" ? req.query.status as "pending" | "active" | "deprecated" | "rejected" : undefined;
+    const status =
+      typeof req.query.status === "string"
+        ? (req.query.status as "pending" | "active" | "deprecated" | "rejected")
+        : undefined;
     sendJson(res, json("ok", deps.store.skills.listCandidates(status, 100)));
   });
 

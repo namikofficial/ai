@@ -71,9 +71,9 @@ test("api client exposes executeCheck for POST /checks/execute", async () => {
     const api = createApiClient({ baseUrl: "http://127.0.0.1:4242" });
     const response = await api.executeCheck({ name: "typecheck", projectId: "project-1" });
     assert.equal(calls.length, 1);
-    assert.equal(calls[0]!.url, "http://127.0.0.1:4242/checks/execute");
-    assert.equal(calls[0]!.init?.method, "POST");
-    assert.deepEqual(JSON.parse(String(calls[0]!.init?.body)), {
+    assert.equal(calls[0]?.url, "http://127.0.0.1:4242/checks/execute");
+    assert.equal(calls[0]?.init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
       name: "typecheck",
       projectId: "project-1",
     });

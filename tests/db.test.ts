@@ -11,7 +11,6 @@ async function startQdrantStub(vectorSize: number): Promise<{
   counts: { gets: number; puts: number; searches: number };
   close(): Promise<void>;
 }> {
-  type QdrantStubServer = ReturnType<typeof createServer>;
   const counts = { gets: 0, puts: 0, searches: 0 };
   const server = createServer(async (req, res) => {
     const url = req.url ?? "/";

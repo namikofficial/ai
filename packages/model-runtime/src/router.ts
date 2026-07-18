@@ -1,4 +1,4 @@
-import type { ModelProfileRecord, ModelRole } from "../../shared/src/index.ts";
+import type { ModelProfileRecord } from "../../shared/src/index.ts";
 import type { ModelRouteDecision, ModelRouteInput } from "./index.ts";
 
 export interface ModelRouter {
@@ -15,7 +15,7 @@ export class HeuristicModelRouter implements ModelRouter {
   async route(input: ModelRouteInput): Promise<ModelRouteDecision> {
     const candidates = this.profiles.filter((profile) => profile.role === input.role && profile.enabled);
     const localCandidates = candidates.filter((profile) => profile.localOnly);
-    const cloudCandidates = candidates.filter((profile) => !profile.localOnly);
+    const _cloudCandidates = candidates.filter((profile) => !profile.localOnly);
 
     const pickBest = (list: ModelProfileRecord[]): ModelProfileRecord | null =>
       list.slice().sort((left, right) => this.scoreProfile(right, input) - this.scoreProfile(left, input))[0] ?? null;

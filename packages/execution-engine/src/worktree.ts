@@ -10,7 +10,7 @@
 // original project path is stored so the patch can later be applied back
 // at the user's explicit request.
 
-import { execFile, type ExecFileOptions } from "node:child_process";
+import { type ExecFileOptions, execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import * as os from "node:os";
@@ -312,11 +312,10 @@ async function tryGitDiff(input: CollectDiffInput): Promise<CollectDiffResult | 
   try {
     if (workspace.isGitWorktree) {
       // git diff HEAD -- <paths> inside the worktree gives us changes vs the base commit.
-      const { stdout } = await execFileAsync(
-        "git",
-        ["diff", "--no-color", "HEAD", "--", ...paths],
-        { cwd: workspace.path, timeout: 30_000 }
-      );
+      const { stdout } = await execFileAsync("git", ["diff", "--no-color", "HEAD", "--", ...paths], {
+        cwd: workspace.path,
+        timeout: 30_000,
+      });
       raw = stdout;
     } else {
       // safe_copy: git diff --no-index original workspace compares two directory trees.
@@ -363,7 +362,9 @@ function parseGitDiffOutput(raw: string, requestedPaths: string[]): CollectDiffR
   for (const line of diffLines) {
     const diffHeader = line.match(/^diff --git a\/(.+) b\/(.+)$/);
     if (diffHeader) {
-      currentFile = diffHeader[2]!;
+      const diffPath = diffHeader[2];
+      if (!diffPath) continue;
+      currentFile = diffPath;
       continue;
     }
     if (line.startsWith("new file mode") || line.startsWith("new file")) {

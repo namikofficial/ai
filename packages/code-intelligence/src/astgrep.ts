@@ -5,7 +5,7 @@
 // `ai_search_code_struct`. Falls back to the regex-based scanners when ast-grep
 // is unavailable or a language is unsupported.
 
-import { SgNode, parse } from "@ast-grep/napi";
+import { parse } from "@ast-grep/napi";
 
 export interface AstGrepMatch {
   filePath: string;

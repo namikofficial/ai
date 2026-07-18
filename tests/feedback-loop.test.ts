@@ -43,13 +43,14 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
     mode: "local",
     depth: "standard",
   });
-  const firstQuery = store.retrieval.listQueriesForSession(first.sessionId, 5)[0]!;
+  const firstQuery = store.retrieval.listQueriesForSession(first.sessionId, 5)[0];
+  assert.ok(firstQuery);
   const firstResults = store.retrieval.listResults(firstQuery.id, 100);
   const authResult = firstResults.find((r) => r.path === "src/auth.ts");
   assert.ok(authResult, "auth.ts should be in the first ask's results");
   store.retrieval.recordFeedback({
     retrievalQueryId: firstQuery.id,
-    chunkId: authResult!.chunkId,
+    chunkId: authResult?.chunkId,
     rating: "good",
     notes: "exactly the answer",
   });
@@ -57,7 +58,7 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
   const beforeBoosts = store.retrieval.listPathBoosts(project.id, 50);
   const authBoostBefore = beforeBoosts.find((b) => b.path === "src/auth.ts");
   assert.ok(authBoostBefore, "chunk_path_boosts should contain src/auth.ts after recordFeedback");
-  assert.ok(authBoostBefore!.weight > 0.5, "good feedback should produce a weight above neutral");
+  assert.ok(authBoostBefore?.weight > 0.5, "good feedback should produce a weight above neutral");
 
   const second = await store.ask({
     project: project.id,
@@ -65,15 +66,16 @@ test("ask flow + recordFeedback: a positively-rated path ranks higher on the nex
     mode: "local",
     depth: "standard",
   });
-  const secondQuery = store.retrieval.listQueriesForSession(second.sessionId, 5)[0]!;
+  const secondQuery = store.retrieval.listQueriesForSession(second.sessionId, 5)[0];
+  assert.ok(secondQuery);
   const secondResults = store.retrieval.listResults(secondQuery.id, 100);
   const authResultSecond = secondResults.find((r) => r.path === "src/auth.ts");
   const billingResultSecond = secondResults.find((r) => r.path === "src/billing.ts");
   assert.ok(authResultSecond, "auth.ts should appear in the second ask's results");
   assert.ok(billingResultSecond, "billing.ts should appear in the second ask's results");
   assert.ok(
-    authResultSecond!.finalScore >= billingResultSecond!.finalScore,
-    `auth (${authResultSecond!.finalScore}) should be ranked at or above billing (${billingResultSecond!.finalScore}) after the boost`
+    authResultSecond?.finalScore >= billingResultSecond?.finalScore,
+    `auth (${authResultSecond?.finalScore}) should be ranked at or above billing (${billingResultSecond?.finalScore}) after the boost`
   );
 
   const authBoostAfter = store.retrieval.listPathBoosts(project.id, 50).find((b) => b.path === "src/auth.ts");
@@ -100,13 +102,14 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
     mode: "local",
     depth: "standard",
   });
-  const firstQuery = store.retrieval.listQueriesForSession(first.sessionId, 5)[0]!;
+  const firstQuery = store.retrieval.listQueriesForSession(first.sessionId, 5)[0];
+  assert.ok(firstQuery);
   const firstResults = store.retrieval.listResults(firstQuery.id, 100);
   const alphaResult = firstResults.find((r) => r.path === "src/alpha.ts");
   assert.ok(alphaResult);
   store.retrieval.recordFeedback({
     retrievalQueryId: firstQuery.id,
-    chunkId: alphaResult!.chunkId,
+    chunkId: alphaResult?.chunkId,
     rating: "bad",
     notes: "irrelevant",
   });
@@ -116,7 +119,7 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
   const betaBoost = boosts.find((b) => b.path === "src/beta.ts");
   assert.ok(alphaBoost);
   assert.equal(betaBoost, undefined, "beta should not have a boost since no feedback was recorded for it");
-  assert.ok(alphaBoost!.weight < 0.5, `bad feedback should produce weight below neutral (got ${alphaBoost!.weight})`);
+  assert.ok(alphaBoost?.weight < 0.5, `bad feedback should produce weight below neutral (got ${alphaBoost?.weight})`);
 
   const second = await store.ask({
     project: project.id,
@@ -124,15 +127,16 @@ test("recordFeedback: bad feedback lowers a path's weight in subsequent rerank",
     mode: "local",
     depth: "standard",
   });
-  const secondQuery = store.retrieval.listQueriesForSession(second.sessionId, 5)[0]!;
+  const secondQuery = store.retrieval.listQueriesForSession(second.sessionId, 5)[0];
+  assert.ok(secondQuery);
   const secondResults = store.retrieval.listResults(secondQuery.id, 100);
   const alphaResultSecond = secondResults.find((r) => r.path === "src/alpha.ts");
   const betaResultSecond = secondResults.find((r) => r.path === "src/beta.ts");
   assert.ok(alphaResultSecond);
   assert.ok(betaResultSecond);
   assert.ok(
-    alphaResultSecond!.finalScore <= betaResultSecond!.finalScore,
-    `bad-rated alpha (${alphaResultSecond!.finalScore}) should not rank above untouched beta (${betaResultSecond!.finalScore})`
+    alphaResultSecond?.finalScore <= betaResultSecond?.finalScore,
+    `bad-rated alpha (${alphaResultSecond?.finalScore}) should not rank above untouched beta (${betaResultSecond?.finalScore})`
   );
 
   store.db.close();

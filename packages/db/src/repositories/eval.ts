@@ -105,7 +105,7 @@ function rowToAnswerEvaluation(row: AnswerEvaluationRow): AnswerEvaluationRecord
   };
 }
 
-function rowToRetrievalEvaluation(row: RetrievalEvaluationRow): RetrievalEvaluationRecord {
+function _rowToRetrievalEvaluation(row: RetrievalEvaluationRow): RetrievalEvaluationRecord {
   return {
     id: asString(row.id),
     retrievalQueryId: asString(row.retrieval_query_id),

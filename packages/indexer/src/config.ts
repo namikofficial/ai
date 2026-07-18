@@ -75,7 +75,6 @@ export function defaultModelForProvider(provider: EmbeddingConfig["provider"]): 
       return "openai-compat-embedding";
     case "mock":
       return "mock-embedding";
-    case "heuristic":
     default:
       return "heuristic-embedding";
   }
@@ -91,7 +90,6 @@ export function defaultDimensionForProvider(provider: EmbeddingConfig["provider"
       return 1536;
     case "mock":
       return 4;
-    case "heuristic":
     default:
       return 32;
   }

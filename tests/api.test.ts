@@ -57,7 +57,7 @@ test("indexes a repo and answers from the local retrieval store", async () => {
   assert.ok(plan.response.taskGraph.length > 0);
   const plannerCalls = store.models.listCalls(plan.session.id, 100).filter((call) => call.role === "planner");
   assert.equal(plannerCalls.length, 1, "plan should record exactly one runtime-backed planner model call");
-  const plannerRequest = plannerCalls[0]!.request as {
+  const plannerRequest = plannerCalls[0]?.request as {
     metadata?: {
       compiledPrompt?: { mode?: string; messages?: Array<{ role: string; content: string }> };
       responseTrace?: { taskGraph?: unknown[] };

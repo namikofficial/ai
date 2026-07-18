@@ -587,12 +587,7 @@ export function createMemoryRepo(db: DatabaseSync) {
       );
       return { id, createdAt: ts };
     },
-    listMemoryGraph(opts?: {
-      projectId?: string | null;
-      entity?: string;
-      relation?: string;
-      asOf?: string;
-    }): {
+    listMemoryGraph(opts?: { projectId?: string | null; entity?: string; relation?: string; asOf?: string }): {
       nodes: Array<{
         id: string;
         projectId: string | null;

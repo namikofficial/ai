@@ -449,14 +449,14 @@ export async function runAllowedCommand(input: RunAllowedCommandInput): Promise<
     child.stdout?.on("data", (chunk: string | Uint8Array) => {
       stdout += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
       if (stdout.length > 200_000) {
-        stdout = stdout.slice(0, 200_000) + "\n...truncated...";
+        stdout = `${stdout.slice(0, 200_000)}\n...truncated...`;
       }
     });
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string | Uint8Array) => {
       stderr += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
       if (stderr.length > 200_000) {
-        stderr = stderr.slice(0, 200_000) + "\n...truncated...";
+        stderr = `${stderr.slice(0, 200_000)}\n...truncated...`;
       }
     });
     const timer = setTimeout(() => {

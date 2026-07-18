@@ -1,8 +1,8 @@
 import type { Router } from "express";
-import { createStore } from "../../../../../packages/db/src/store.ts";
+import type { createStore } from "../../../../../packages/db/src/store.ts";
 import { isHtmlRequest } from "../http.ts";
-import { json, sendHtml, sendJson } from "../response.ts";
 import { renderMcpCallDetailPage, renderMcpPage } from "../render-pages.ts";
+import { json, sendHtml, sendJson } from "../response.ts";
 
 type Store = ReturnType<typeof createStore>;
 

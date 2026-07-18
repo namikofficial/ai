@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
+import { parseSource } from "../../parser/src/index.ts";
 import type { CodeEdgeRecord, CodeSymbolRecord } from "../../shared/src/index.ts";
-import { parseSource, type ParserSymbol } from "../../parser/src/index.ts";
 
 export type CodeSymbol = CodeSymbolRecord;
 export type CodeEdge = CodeEdgeRecord;
@@ -795,22 +795,19 @@ function buildCallEdges(input: ExtractCodeSymbolsInput, symbols: CodeSymbol[], s
   for (let index = 0; index < sourceLines.length && produced < 400; index += 1) {
     const line = sourceLines[index] ?? "";
     const callLine = index + 1;
-    let match: RegExpExecArray | null;
     callRe.lastIndex = 0;
-    while ((match = callRe.exec(line)) !== null) {
+    for (let match = callRe.exec(line); match !== null; match = callRe.exec(line)) {
       const callee = match[1];
       if (CALL_KEYWORDS.has(callee)) continue;
       const targets = byName.get(callee);
       if (!targets || targets.length === 0) continue;
       const enclosing =
-        symbols.find(
-          (s) => s.kind !== "import" && s.startLine <= callLine && s.endLine >= callLine
-        ) ?? null;
+        symbols.find((s) => s.kind !== "import" && s.startLine <= callLine && s.endLine >= callLine) ?? null;
       for (const target of targets) {
         if (enclosing && enclosing.id === target.id) continue;
         if (target.startLine <= callLine && target.endLine >= callLine) continue;
         edges.push({
-          id: edgeId(input, (enclosing?.id ?? "file"), target.id, "calls"),
+          id: edgeId(input, enclosing?.id ?? "file", target.id, "calls"),
           projectId: input.projectId,
           fromSymbolId: enclosing?.id ?? "file",
           toSymbolId: target.id,
@@ -1019,7 +1016,9 @@ export function buildProjectContextGraph(input: {
     .slice(0, 24);
   const serviceFiles = uniquePaths.filter((path) => /service|usecase|domain|logic/i.test(path));
   const repositoryFiles = uniquePaths.filter((path) => /repository|repo|store|dao|persistence|entity/i.test(path));
-  const testFiles = uniquePaths.filter((path) => /\.(test|spec)\.[a-z]+$/.test(path) || /__tests__|tests?\//i.test(path));
+  const testFiles = uniquePaths.filter(
+    (path) => /\.(test|spec)\.[a-z]+$/.test(path) || /__tests__|tests?\//i.test(path)
+  );
   const callGraphEdgeCount = input.edges?.length ?? 0;
   const notes = [
     routeFiles.length > 0 ? `route files: ${routeFiles.length}` : "no obvious route files",

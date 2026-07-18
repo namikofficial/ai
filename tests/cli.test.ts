@@ -34,7 +34,7 @@ function attachDataListener(stream: ChildProcessLike["stdout"], handler: (chunk:
 }
 
 function runCli(env: Record<string, string | undefined>, args: string[]): Promise<CliRunResult> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve, _reject) => {
     const child = spawn(cliCommand, [...cliArgs, ...args], {
       env: { ...process.env, ...env } as Record<string, string | undefined>,
       stdio: ["ignore", "pipe", "pipe"],
@@ -129,7 +129,7 @@ test("ai project symbols and symbol inspect code intelligence rows", async () =>
   await store.indexProject(project.id);
   const symbols = store.codeIntelligence.listSymbols(project.id, "handleLogin", 10);
   assert.ok(symbols.length > 0);
-  const symbolId = symbols[0]!.id;
+  const symbolId = symbols[0]?.id;
   store.db.close();
 
   const list = await runCli(

@@ -468,7 +468,7 @@ export function createModelsRepo(db: DatabaseSync) {
               day, model_name, prompt_tokens, completion_tokens, requests, created_at, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?)`
           ).run(day, input.profileId, record.promptTokens, record.completionTokens, 1, ts, ts);
-        } catch (error) {
+        } catch (_error) {
           db.prepare(
             `UPDATE model_usage_daily
                SET prompt_tokens = prompt_tokens + ?,
@@ -501,15 +501,7 @@ export function createModelsRepo(db: DatabaseSync) {
           completion_tokens = completion_tokens + excluded.completion_tokens,
           requests = requests + excluded.requests,
           updated_at = excluded.updated_at`
-      ).run(
-        day,
-        input.modelName,
-        input.promptTokens ?? 0,
-        input.completionTokens ?? 0,
-        input.requests ?? 0,
-        ts,
-        ts
-      );
+      ).run(day, input.modelName, input.promptTokens ?? 0, input.completionTokens ?? 0, input.requests ?? 0, ts, ts);
     },
     listUsageDaily(limit = 50): Array<{
       day: string;

@@ -430,7 +430,7 @@ test("observability api: handoff records context pack, agent run, and handoff ro
 
     const packDetail = await getJson<{ status: "ok"; data: { items: Array<unknown> } }>(
       ctx.request,
-      `/context/packs/${handoffPack!.id}`
+      `/context/packs/${handoffPack?.id}`
     );
     assert.ok(packDetail.data.items.length >= 1);
 

@@ -15,9 +15,9 @@ const output =
         process.env.HOME || ".",
         "ai-knowledge",
         "packs",
-        basename(project) + "." + (style === "plain" ? "txt" : style)
+        `${basename(project)}.${style === "plain" ? "txt" : style}`
       );
-if (!existsSync(project)) throw new Error("project does not exist: " + project);
+if (!existsSync(project)) throw new Error(`project does not exist: ${project}`);
 if (!["xml", "markdown", "json", "plain"].includes(style)) throw new Error("invalid Repomix style");
 mkdirSync(dirname(output), { recursive: true });
 const forwarded = args.filter(

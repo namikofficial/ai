@@ -87,7 +87,7 @@ test("buildRetrievalPipelineInput loads FTS+heuristic+feedback+misses+memory+fac
   assert.equal(pipelineInput.pathBoosts.size, 1);
   const alphaWeight = pipelineInput.pathBoosts.get("src/alpha.ts");
   assert.ok(alphaWeight, "src/alpha.ts should be in pathBoosts");
-  assert.ok(alphaWeight! > 0.5, `good feedback should push weight above neutral (got ${alphaWeight})`);
+  assert.ok(alphaWeight > 0.5, `good feedback should push weight above neutral (got ${alphaWeight})`);
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

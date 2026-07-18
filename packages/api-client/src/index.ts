@@ -461,7 +461,12 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    getModelCalls(limit = 50): Promise<{ status: "ok"; data: ModelCallRecord[] | { data: ModelCallRecord[]; pagination: { limit: number; hasMore: boolean; nextCursor?: string } } }> {
+    getModelCalls(limit = 50): Promise<{
+      status: "ok";
+      data:
+        | ModelCallRecord[]
+        | { data: ModelCallRecord[]; pagination: { limit: number; hasMore: boolean; nextCursor?: string } };
+    }> {
       const params = new URLSearchParams({ limit: String(limit) });
       return requestJson(options.baseUrl, `/models/calls?${params}`);
     },
@@ -591,7 +596,10 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    getEmbeddingCache(): Promise<{ status: "ok"; data: { entryCount: number; stats: Array<Record<string, unknown>> } }> {
+    getEmbeddingCache(): Promise<{
+      status: "ok";
+      data: { entryCount: number; stats: Array<Record<string, unknown>> };
+    }> {
       return requestJson(options.baseUrl, `/embeddings/cache`);
     },
     purgeEmbeddingCache(input?: {

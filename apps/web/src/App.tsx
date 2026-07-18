@@ -38,10 +38,43 @@ const navGroups: readonly { label: string; items: readonly NavItem[] }[] = [
   { label: "Home", items: [["/dashboard", "Home"]] },
   { label: "Projects", items: [["/projects", "Projects"]] },
   { label: "Ask", items: [["/ask", "Ask"]] },
-  { label: "Work", items: [["/planner", "Planner"], ["/handoff", "Handoff"], ["/dev", "Dev"], ["/checks", "Checks"], ["/reviews", "Reviews"]] },
-  { label: "Runs", items: [["/sessions", "Sessions"], ["/tasks", "Tasks"], ["/agents", "Agents"]] },
-  { label: "Knowledge", items: [["/retrieval", "Retrieval"], ["/memory", "Memory"], ["/skills", "Skills"], ["/eval", "Eval"], ["/prompts", "Prompts"], ["/prompt-lab", "Prompt Lab"]] },
-  { label: "System", items: [["/models", "Models"], ["/mcp", "MCP"], ["/settings", "Settings"]] },
+  {
+    label: "Work",
+    items: [
+      ["/planner", "Planner"],
+      ["/handoff", "Handoff"],
+      ["/dev", "Dev"],
+      ["/checks", "Checks"],
+      ["/reviews", "Reviews"],
+    ],
+  },
+  {
+    label: "Runs",
+    items: [
+      ["/sessions", "Sessions"],
+      ["/tasks", "Tasks"],
+      ["/agents", "Agents"],
+    ],
+  },
+  {
+    label: "Knowledge",
+    items: [
+      ["/retrieval", "Retrieval"],
+      ["/memory", "Memory"],
+      ["/skills", "Skills"],
+      ["/eval", "Eval"],
+      ["/prompts", "Prompts"],
+      ["/prompt-lab", "Prompt Lab"],
+    ],
+  },
+  {
+    label: "System",
+    items: [
+      ["/models", "Models"],
+      ["/mcp", "MCP"],
+      ["/settings", "Settings"],
+    ],
+  },
 ];
 
 const navItems = navGroups.flatMap((group) => group.items);

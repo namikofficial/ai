@@ -8,7 +8,11 @@ export interface ResourceState<T> {
   refresh(): void;
 }
 
-export function useResource<T>(loader: () => Promise<T>, deps: ReadonlyArray<unknown> = [], options?: { live?: boolean }): ResourceState<T> {
+export function useResource<T>(
+  loader: () => Promise<T>,
+  deps: ReadonlyArray<unknown> = [],
+  options?: { live?: boolean }
+): ResourceState<T> {
   const liveTick = useWorkbenchStore((state) => state.liveTick);
   const refreshNonce = useWorkbenchStore((state) => state.refreshNonce);
   const [reloadTick, setReloadTick] = useState(0);
@@ -17,16 +21,30 @@ export function useResource<T>(loader: () => Promise<T>, deps: ReadonlyArray<unk
   const [error, setError] = useState<string | null>(null);
   const loaderRef = useRef(loader);
   const controllerRef = useRef<AbortController | null>(null);
+  const dependenciesRef = useRef<ReadonlyArray<unknown>>([...deps]);
+  if (
+    dependenciesRef.current.length !== deps.length ||
+    deps.some((value, index) => !Object.is(value, dependenciesRef.current[index]))
+  ) {
+    dependenciesRef.current = [...deps];
+  }
+  const resourceDependencies = dependenciesRef.current;
   loaderRef.current = loader;
   const refresh = useCallback(() => setReloadTick((value) => value + 1), []);
+  const liveDependency = options?.live ? liveTick : 0;
 
   useEffect(() => {
+    void liveDependency;
+    void refreshNonce;
+    void reloadTick;
+    void resourceDependencies;
     controllerRef.current?.abort();
     controllerRef.current = new AbortController();
     let active = true;
     setLoading(true);
     setError(null);
-    loaderRef.current()
+    loaderRef
+      .current()
       .then((value) => {
         if (active) {
           setData(value);
@@ -44,7 +62,7 @@ export function useResource<T>(loader: () => Promise<T>, deps: ReadonlyArray<unk
       controllerRef.current?.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [options?.live ? liveTick : 0, refreshNonce, reloadTick, ...deps]);
+  }, [liveDependency, refreshNonce, reloadTick, resourceDependencies]);
 
   return { data, loading, error, refresh };
 }
@@ -89,7 +107,11 @@ export function useApiQuery<T>(
         }
       })
       .catch((err) => {
-        if (active && currentReload === reloadCountRef.current && !(err instanceof DOMException && err.name === "AbortError")) {
+        if (
+          active &&
+          currentReload === reloadCountRef.current &&
+          !(err instanceof DOMException && err.name === "AbortError")
+        ) {
           setError(err instanceof Error ? err.message : String(err));
           setLoading(false);
         }

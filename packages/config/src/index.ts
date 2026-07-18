@@ -89,7 +89,7 @@ function compileGlobPattern(pattern: string): RegExp {
   const normalized = pattern.replaceAll("\\", "/").trim();
   let regex = "^";
   for (let index = 0; index < normalized.length; index += 1) {
-    const char = normalized[index]!;
+    const char = normalized.charAt(index);
     const next = normalized[index + 1] ?? "";
     if (char === "*" && next === "*") {
       regex += ".*";
@@ -207,11 +207,17 @@ export function resolveProjectConfig(projectPath: string): ProjectConfig {
       defaultChecks: hasConfig
         ? readStringArray((raw.dev as Record<string, unknown> | undefined)?.defaultChecks ?? ["typecheck"])
         : ["typecheck"],
-      maxRepairLoops: hasConfig
-        ? readNumber((raw.dev as Record<string, unknown> | undefined)?.maxRepairLoops, 1)
-        : 1,
+      maxRepairLoops: hasConfig ? readNumber((raw.dev as Record<string, unknown> | undefined)?.maxRepairLoops, 1) : 1,
       requireApprovalFor: hasConfig
-        ? readStringArray((raw.dev as Record<string, unknown> | undefined)?.requireApprovalFor ?? ["env", "migrations", "auth", "db", "package"])
+        ? readStringArray(
+            (raw.dev as Record<string, unknown> | undefined)?.requireApprovalFor ?? [
+              "env",
+              "migrations",
+              "auth",
+              "db",
+              "package",
+            ]
+          )
         : ["env", "migrations", "auth", "db", "package"],
     },
     raw,

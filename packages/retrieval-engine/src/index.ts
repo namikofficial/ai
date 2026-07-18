@@ -1,6 +1,4 @@
 import { redactSecrets } from "../../safety/src/index.ts";
-import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
-import { PROFILE_QUERY_REWRITE } from "../../shared/src/model-profiles.ts";
 import type {
   MemoryEntryRecord,
   ProjectRuleRecord,
@@ -15,6 +13,8 @@ import type {
   RetrievalResultRecord,
   RetrievalSelectedContextRecord,
 } from "../../shared/src/index.ts";
+import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
+import { PROFILE_QUERY_REWRITE } from "../../shared/src/model-profiles.ts";
 
 export {
   ftsSearch,
@@ -526,21 +526,22 @@ export async function rewriteQueryWithModel(
     memoryEntries?: MemoryEntryRecord[];
     profileId?: string;
   },
-  invoke: (profileId: string, request: {
-    role: string;
-    messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
-    temperature?: number;
-    maxOutputTokens?: number;
-    metadata?: Record<string, unknown>;
-  }) => Promise<{ text: string; usage?: { promptTokens: number; completionTokens: number } }>
+  invoke: (
+    profileId: string,
+    request: {
+      role: string;
+      messages: Array<{ role: "system" | "user" | "assistant"; content: string }>;
+      temperature?: number;
+      maxOutputTokens?: number;
+      metadata?: Record<string, unknown>;
+    }
+  ) => Promise<{ text: string; usage?: { promptTokens: number; completionTokens: number } }>
 ): Promise<{
   rewrites: RewriteCandidate[];
   parseStatus: "parsed" | "repaired" | "heuristic";
 }> {
   const profileId = input.profileId ?? PROFILE_QUERY_REWRITE;
-  const constraints: string[] = [
-    `Intent: ${input.analysis.notes.join(", ") || "lookup"}`,
-  ];
+  const constraints: string[] = [`Intent: ${input.analysis.notes.join(", ") || "lookup"}`];
   if (input.analysis.pathHints.length > 0) constraints.push(`Path hints: ${input.analysis.pathHints.join(", ")}`);
   if (input.analysis.symbolHints.length > 0) constraints.push(`Symbol hints: ${input.analysis.symbolHints.join(", ")}`);
   constraints.push("Return ONLY valid JSON matching the output schema. No markdown fences.");
@@ -583,7 +584,12 @@ export async function rewriteQueryWithModel(
       // Repair: try once with a fixed message
       const repairResult = await invoke(profileId, {
         role: "query_rewrite",
-        messages: [...systemMessages, userMessage, { role: "assistant" as const, content: result.text }, { role: "user" as const, content: "Return ONLY valid JSON matching the output schema. No markdown fences." }],
+        messages: [
+          ...systemMessages,
+          userMessage,
+          { role: "assistant" as const, content: result.text },
+          { role: "user" as const, content: "Return ONLY valid JSON matching the output schema. No markdown fences." },
+        ],
         temperature: 0,
         maxOutputTokens: 512,
       });
@@ -606,8 +612,8 @@ export async function rewriteQueryWithModel(
       const modelCandidates: RewriteCandidate[] = parsed.rewrites.slice(0, 5).map((variant, i) => ({
         variant,
         terms: input.analysis.terms,
-        pathHints: typeof parsed!.pathHints[i] === "string" ? [parsed!.pathHints[i]] : input.analysis.pathHints,
-        symbolHints: typeof parsed!.symbolHints[i] === "string" ? [parsed!.symbolHints[i]] : input.analysis.symbolHints,
+        pathHints: typeof parsed.pathHints[i] === "string" ? [parsed.pathHints[i]] : input.analysis.pathHints,
+        symbolHints: typeof parsed.symbolHints[i] === "string" ? [parsed.symbolHints[i]] : input.analysis.symbolHints,
         reason: `model-backed rewrite ${i + 1}`,
         score: 1.0 - i * 0.05,
       }));
@@ -628,7 +634,16 @@ export async function rewriteQueryWithModel(
     // fall through to heuristic
   }
 
-      return { rewrites: generateRewrites({ query: input.query, analysis: input.analysis, feedback: input.feedback ?? [], facts: input.facts ?? [], memory: input.memoryEntries ?? [] }), parseStatus };
+  return {
+    rewrites: generateRewrites({
+      query: input.query,
+      analysis: input.analysis,
+      feedback: input.feedback ?? [],
+      facts: input.facts ?? [],
+      memory: input.memoryEntries ?? [],
+    }),
+    parseStatus,
+  };
 }
 
 export interface HybridChunkSource {

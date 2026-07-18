@@ -135,7 +135,8 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
 
   const queries = store.retrieval.listQueriesForSession(answer.sessionId, 5);
   assert.equal(queries.length, 1);
-  const query = queries[0]!;
+  const query = queries[0];
+  assert.ok(query);
   const results = store.retrieval.listResults(query.id, 100);
   const selected = store.retrieval.listSelectedContext(query.id);
   assert.ok(results.length >= 1, "results should be recorded");
@@ -165,7 +166,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
 
   const rewriteCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "query_rewrite");
   assert.equal(rewriteCalls.length, 1, "ask should record exactly one query rewrite model call");
-  const rewriteRequest = rewriteCalls[0]!.request as {
+  const rewriteRequest = rewriteCalls[0]?.request as {
     metadata?: {
       compiledPrompt?: {
         id?: string;
@@ -185,7 +186,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
   assert.equal(answerCalls.length, 1, "ask should record exactly one answer model call");
   const embeddingCalls = store.models.listCalls(answer.sessionId, 100).filter((c) => c.role === "embedding");
   assert.ok(embeddingCalls.length >= 1, "ask should record a query embedding call");
-  const answerRequest = answerCalls[0]!.request as {
+  const answerRequest = answerCalls[0]?.request as {
     metadata?: {
       compiledPrompt?: {
         id?: string;
@@ -211,7 +212,7 @@ test("ask flow uses the full retrieval pipeline (ranked, selected, dropped, conf
 
   const contextPacks = store.context.listPacksForSession(answer.sessionId, 5);
   assert.equal(contextPacks.length, 1);
-  const packId = contextPacks[0]!.id;
+  const packId = contextPacks[0]?.id;
   const budgetEvents = store.context.listBudgetEvents(packId);
   assert.ok(budgetEvents.length >= 0);
 
@@ -242,7 +243,8 @@ test("ask flow records a retrieval_miss for an empty project", async () => {
 
   const queries = store.retrieval.listQueriesForSession(answer.sessionId, 5);
   assert.equal(queries.length, 1);
-  const query = queries[0]!;
+  const query = queries[0];
+  assert.ok(query);
   const misses = store.retrieval.listMisses(query.id);
   assert.ok(misses.length >= 1, "a retrieval_miss should be recorded for empty results");
 
@@ -314,7 +316,7 @@ test("runAskWorkflow records the current orchestration trace, compiled prompts, 
     const jobs = fixture.store.listJobs(10);
     const reflectionJob = jobs.find((job) => job.type === "session.reflect");
     assert.ok(reflectionJob, "ask should enqueue a reflection job");
-    assert.deepEqual(JSON.parse(reflectionJob!.payloadJson), {
+    assert.deepEqual(JSON.parse(reflectionJob?.payloadJson), {
       sessionId: response.sessionId,
       source: "ask",
       projectId: fixture.project.id,
@@ -479,7 +481,8 @@ test("runAskWorkflow prefers parsed JSON rewrite and retrieval judge outputs whe
       },
     });
     assert.equal(response.confidence, 0.88);
-    const query = fixture.store.retrieval.listQueriesForSession(response.sessionId, 5)[0]!;
+    const query = fixture.store.retrieval.listQueriesForSession(response.sessionId, 5)[0];
+    assert.ok(query);
     assert.equal(query.rewrittenQuery, "src/auth.ts handleLogin auth");
     const rewrites = fixture.store.retrieval.listRewrites(query.id);
     assert.ok(rewrites.length >= 2);
@@ -566,7 +569,8 @@ test("runAskWorkflow performs one repair attempt for JSON-like invalid rewrite/j
     assert.equal(queryRewriteCalls, 2);
     assert.equal(retrievalJudgeCalls, 2);
     assert.equal(response.confidence, 0.73);
-    const query = fixture.store.retrieval.listQueriesForSession(response.sessionId, 5)[0]!;
+    const query = fixture.store.retrieval.listQueriesForSession(response.sessionId, 5)[0];
+    assert.ok(query);
     assert.equal(query.rewrittenQuery, "auth repaired rewrite");
   } finally {
     fixture.store.invokeModel = originalInvoke;

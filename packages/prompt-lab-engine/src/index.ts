@@ -213,7 +213,16 @@ export async function runPromptLab(
   const results: PromptLabResultRecord[] = [];
 
   for (const profileId of selectedProfiles) {
-    console.log("[engine] processing profile:", profileId, "isCloud:", /cloud_openai_compat/i.test(store.listProviders().find((p) => p.id === store.getProfile(profileId)?.providerId)?.kind ?? ""), "profile exists:", !!store.getProfile(profileId));
+    console.log(
+      "[engine] processing profile:",
+      profileId,
+      "isCloud:",
+      /cloud_openai_compat/i.test(
+        store.listProviders().find((p) => p.id === store.getProfile(profileId)?.providerId)?.kind ?? ""
+      ),
+      "profile exists:",
+      !!store.getProfile(profileId)
+    );
     const profile = store.getProfile(profileId);
     if (!profile) {
       const result = createPromptLabResult(store, {
@@ -316,7 +325,12 @@ export async function runPromptLab(
     }
   }
 
-  console.log("[engine] returning, results.length=", results.length, "results=", results.map(r => ({ profileId: r.profileId, status: r.status })));
+  console.log(
+    "[engine] returning, results.length=",
+    results.length,
+    "results=",
+    results.map((r) => ({ profileId: r.profileId, status: r.status }))
+  );
 
   return {
     run: {

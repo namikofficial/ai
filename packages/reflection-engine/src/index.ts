@@ -135,8 +135,8 @@ function buildEvidence(parts: Array<ReflectionEvidence | null>): ReflectionEvide
 
 function extractUserPreference(conversation: ConversationMessageRecord[]): MemoryCandidateProposal | null {
   const userMessages = conversation.filter((entry) => entry.role === "user");
-  if (userMessages.length === 0) return null;
-  const last = userMessages.at(-1)!;
+  const last = userMessages.at(-1);
+  if (!last) return null;
   const lowered = last.content.toLowerCase();
   const preferenceTokens = ["prefer", "like", "always", "never", "use ", "avoid", "i want", "we use"];
   if (!preferenceTokens.some((token) => lowered.includes(token))) return null;
@@ -327,12 +327,7 @@ function isFactCurrentlyValid(fact: FactRecord, asOf: number): boolean {
   return true;
 }
 
-function windowsOverlap(
-  aFrom: string | null,
-  aTo: string | null,
-  bFrom: string | null,
-  bTo: string | null
-): boolean {
+function windowsOverlap(aFrom: string | null, aTo: string | null, bFrom: string | null, bTo: string | null): boolean {
   const aStart = aFrom ? new Date(aFrom).getTime() : -Infinity;
   const aEnd = aTo ? new Date(aTo).getTime() : Infinity;
   const bStart = bFrom ? new Date(bFrom).getTime() : -Infinity;
@@ -377,7 +372,8 @@ function proposeSkillFromChecks(input: ReflectInput): SkillCandidateProposal | n
   if (successfulChecks.length < 1) return null;
   const distinct = new Map<string, { command: string; count: number }>();
   for (const check of successfulChecks) {
-    const command = check.command!;
+    const command = check.command;
+    if (!command) continue;
     const current = distinct.get(command) ?? { command, count: 0 };
     current.count += 1;
     distinct.set(command, current);

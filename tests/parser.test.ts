@@ -12,11 +12,11 @@ test("parser: extracts a TypeScript function declaration with start/end lines", 
   assert.equal(result.language, "typescript");
   const fn = result.symbols.find((s) => s.name === "login");
   assert.ok(fn, "expected function symbol");
-  assert.equal(fn!.kind, "function");
-  assert.equal(fn!.exported, true);
-  assert.equal(fn!.startLine, 1);
-  assert.equal(fn!.endLine, 3);
-  assert.match(fn!.signature ?? "", /^login\(user, password\)$/);
+  assert.equal(fn?.kind, "function");
+  assert.equal(fn?.exported, true);
+  assert.equal(fn?.startLine, 1);
+  assert.equal(fn?.endLine, 3);
+  assert.match(fn?.signature ?? "", /^login\(user, password\)$/);
 });
 
 test("parser: extracts a class with methods and a parent prefix", () => {
@@ -31,13 +31,13 @@ test("parser: extracts a class with methods and a parent prefix", () => {
   const result = parseSource({ path: "src/router.ts", content });
   const cls = result.symbols.find((s) => s.name === "AuthRouter");
   assert.ok(cls);
-  assert.equal(cls!.kind, "class");
-  assert.ok((cls!.modifiers ?? []).some((m) => m.startsWith("extends")));
+  assert.equal(cls?.kind, "class");
+  assert.ok((cls?.modifiers ?? []).some((m) => m.startsWith("extends")));
   const method = result.symbols.find((s) => s.name === "login");
   assert.ok(method);
-  assert.equal(method!.kind, "method");
-  assert.equal(method!.parent, "AuthRouter");
-  assert.equal(method!.qualifiedName, "AuthRouter.login");
+  assert.equal(method?.kind, "method");
+  assert.equal(method?.parent, "AuthRouter");
+  assert.equal(method?.qualifiedName, "AuthRouter.login");
 });
 
 test("parser: extracts an arrow function assigned to const", () => {
@@ -45,9 +45,9 @@ test("parser: extracts an arrow function assigned to const", () => {
   const result = parseSource({ path: "src/handler.ts", content });
   const arrow = result.symbols.find((s) => s.name === "handler");
   assert.ok(arrow);
-  assert.equal(arrow!.kind, "arrow");
-  assert.equal(arrow!.exported, true);
-  assert.ok((arrow!.modifiers ?? []).includes("async"));
+  assert.equal(arrow?.kind, "arrow");
+  assert.equal(arrow?.exported, true);
+  assert.ok((arrow?.modifiers ?? []).includes("async"));
 });
 
 test("parser: extracts interfaces and type aliases", () => {
@@ -73,7 +73,8 @@ test("parser: extracts imports and re-exports", () => {
   ].join("\n");
   const result = parseSource({ path: "src/index.ts", content });
   assert.equal(result.imports.length, 2);
-  const first = result.imports[0]!;
+  const first = result.imports[0];
+  assert.ok(first);
   assert.equal(first.source, "./mod");
   assert.equal(first.specifiers.length, 2);
   assert.equal(first.specifiers[0]?.name, "foo");

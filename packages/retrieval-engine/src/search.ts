@@ -1,8 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { RetrievalChunk } from "../../shared/src/index.ts";
 import { ftsSearch } from "./fts.ts";
-import { embedQueryForQdrant, type QdrantRuntimeSettings, searchQdrantChunksSync } from "./qdrant.ts";
 import { buildFtsQuery, rankChunk, tokenize } from "./index.ts";
+import { embedQueryForQdrant, type QdrantRuntimeSettings, searchQdrantChunksSync } from "./qdrant.ts";
 
 // Shared row helpers — exported so fts.ts can re-use them without duplication
 export function asString(value: unknown): string {
@@ -80,7 +80,7 @@ function selectTopSymbolChunks(db: DatabaseSync, projectId: string, query: strin
       .filter((entry) => entry.score > 0)
       .sort((left, right) => right.score - left.score)
       .slice(0, Math.max(6, limit));
-    const symbolIds = new Set(scoredSymbols.map((entry) => asString(entry.row.id)));
+    const _symbolIds = new Set(scoredSymbols.map((entry) => asString(entry.row.id)));
     const chunks: RetrievalChunk[] = [];
     const chunkRows = db.prepare(
       `SELECT cs.symbol_id, cs.overlap_lines, c.*

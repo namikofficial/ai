@@ -6,11 +6,7 @@
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "--experimental-strip-types",
-        "--enable-source-maps",
-        "${workspaceFolder}/apps/api/src/main.ts"
-      ],
+      "runtimeArgs": ["--experimental-strip-types", "--enable-source-maps", "${workspaceFolder}/apps/api/src/main.ts"],
       "cwd": "${workspaceFolder}",
       "env": {
         "AI_DISABLE_INTELLIGENCE_STACK": "true"
@@ -95,12 +91,7 @@
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "node",
-      "runtimeArgs": [
-        "--experimental-strip-types",
-        "--test",
-        "--test-concurrency=1",
-        "${file}"
-      ],
+      "runtimeArgs": ["--experimental-strip-types", "--test", "--test-concurrency=1", "${file}"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "internalConsoleOptions": "neverOpen"

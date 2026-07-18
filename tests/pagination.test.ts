@@ -3,8 +3,14 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import {
+  buildPaginatedResponse,
+  clampLimit,
+  DEFAULT_LIMIT,
+  MAX_LIMIT,
+  parsePagination,
+} from "../apps/api/src/server/pagination.ts";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
-import { clampLimit, DEFAULT_LIMIT, MAX_LIMIT, parsePagination, buildPaginatedResponse } from "../apps/api/src/server/pagination.ts";
 
 // Unit tests for pagination utilities
 test("pagination: clampLimit respects MAX_LIMIT", () => {
@@ -139,7 +145,7 @@ test("pagination api: endpoints accept limit parameter and clamp to MAX", async 
     });
     const projectId = add.data.id;
     await postJson(ctx.request, `/projects/${projectId}/index`, {});
-    const ask = await postJson<{
+    const _ask = await postJson<{
       status: "ok";
       data: { sessionId: string };
     }>(ctx.request, "/ask", {
@@ -163,7 +169,6 @@ test("pagination api: endpoints accept limit parameter and clamp to MAX", async 
     // Test invalid limit uses default
     const res3 = await ctx.request("GET", `/prompts?limit=abc`);
     assert.equal(res3.statusCode, 200);
-
   } finally {
     await ctx.close();
   }
@@ -194,7 +199,6 @@ test("pagination api: /prompts returns plain array by default for backward compa
     }>(ctx.request, `/prompts?sessionId=${ask.data.sessionId}`);
     assert.ok(Array.isArray(res.data), "should return array");
     assert.ok(!("pagination" in res.data), "should not have pagination wrapper for default case");
-
   } finally {
     await ctx.close();
   }
@@ -230,7 +234,6 @@ test("pagination api: /models/calls respects limit parameter", async () => {
       data: unknown[];
     }>(ctx.request, `/models/calls?limit=200`);
     assert.ok(Array.isArray(res2.data));
-
   } finally {
     await ctx.close();
   }
@@ -275,7 +278,6 @@ test("pagination api: /sessions/:id/events respects limit parameter", async () =
       data: unknown[];
     }>(ctx.request, `/sessions/${ask.data.sessionId}/events?limit=1000`);
     assert.ok(Array.isArray(res3.data));
-
   } finally {
     await ctx.close();
   }
@@ -313,7 +315,6 @@ test("pagination api: /retrieval/queries respects limit parameter", async () => 
       data: unknown[];
     }>(ctx.request, `/retrieval/queries?sessionId=${ask.data.sessionId}&limit=5`);
     assert.ok(Array.isArray(res2.data));
-
   } finally {
     await ctx.close();
   }
@@ -363,7 +364,6 @@ test("pagination api: /tasks respects limit parameter and clamps to MAX", async 
       data: unknown[];
     }>(ctx.request, "/tasks?limit=abc");
     assert.ok(Array.isArray(res4.data));
-
   } finally {
     await ctx.close();
   }
@@ -409,7 +409,6 @@ test("pagination api: /agents/runs respects limit parameter and clamps to MAX", 
       data: unknown[];
     }>(ctx.request, `/agents/runs?sessionId=${ask.data.sessionId}&limit=500`);
     assert.ok(Array.isArray(res3.data));
-
   } finally {
     await ctx.close();
   }
@@ -455,7 +454,6 @@ test("pagination api: /context/packs respects limit parameter and clamps to MAX"
       data: unknown[];
     }>(ctx.request, `/context/packs?sessionId=${ask.data.sessionId}&limit=500`);
     assert.ok(Array.isArray(res3.data));
-
   } finally {
     await ctx.close();
   }

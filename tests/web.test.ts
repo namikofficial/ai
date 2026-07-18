@@ -6,7 +6,7 @@ import test from "node:test";
 import { EMPTY_SESSION_TIMELINE_COUNTS, getTimelineCounts, getTimelineItems } from "../apps/web/src/timeline.ts";
 import { handleMcpRequest } from "../mcp/server/src/tools.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
-import type { SessionTimelineResponse, TimelineItem } from "../packages/shared/src/index.ts";
+import type { SessionTimelineResponse } from "../packages/shared/src/index.ts";
 
 test("DevPage exposes an Apply action for approved runs and keeps approve/cancel gated on awaiting_approval", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-web-dev-"));
@@ -27,10 +27,10 @@ test("DevPage exposes an Apply action for approved runs and keeps approve/cancel
 
   const approveBranch = pagesSource.match(/\{status === "awaiting_approval" && \(([\s\S]*?)\)\}/);
   assert.ok(approveBranch, "approve/cancel branch must be gated on status === 'awaiting_approval'");
-  assert.match(approveBranch[1], />Approve</, "approve branch must contain Approve button");
-  assert.match(approveBranch[1], />Cancel</, "approve branch must contain Cancel button");
+  assert.match(approveBranch[1], />\s*Approve\s*</, "approve branch must contain Approve button");
+  assert.match(approveBranch[1], />\s*Cancel\s*</, "approve branch must contain Cancel button");
   assert.ok(
-    !/>Approve</.test(applyBranch[1] ?? "") && !/>Cancel</.test(applyBranch[1] ?? ""),
+    !/>\s*Approve\s*</.test(applyBranch[1] ?? "") && !/>\s*Cancel\s*</.test(applyBranch[1] ?? ""),
     "Approve/Cancel must not appear inside the approved branch"
   );
 

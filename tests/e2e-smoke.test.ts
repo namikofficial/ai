@@ -6,7 +6,6 @@ import test from "node:test";
 import { startWorkbenchServer } from "../apps/api/src/server.ts";
 import { resolveConfig } from "../packages/config/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
-import { createModelRuntime } from "../packages/model-runtime/src/index.ts";
 
 test("e2e smoke: full dev run creates session, dev_run, workspace, edits, and model call rows", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-e2e-smoke-"));
@@ -14,9 +13,10 @@ test("e2e smoke: full dev run creates session, dev_run, workspace, edits, and mo
   // 1. Create a tiny project with one source file
   const repo = join(workspace, "repo");
   await mkdir(join(repo, "src"), { recursive: true });
+  const templatePlaceholder = ["$", "{name}"].join("");
   await writeFile(
     join(repo, "src", "hello.ts"),
-    "export function greet(name: string): string { return `Hello, ${name}!`; }\n"
+    `export function greet(name: string): string { return \`Hello, ${templatePlaceholder}!\`; }\n`
   );
 
   // 2. Bootstrap store and index the project

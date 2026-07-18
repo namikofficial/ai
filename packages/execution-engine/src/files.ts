@@ -4,7 +4,7 @@
 // outside the project root or its workspace. This module provides path
 // normalization, secret/path blocking, and safe file read/write.
 
-import { mkdir, readFile, readdir, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 export const IGNORED_DIRECTORIES: ReadonlyArray<string> = [
@@ -475,7 +475,7 @@ export function buildSimpleUnifiedDiff(input: SimpleUnifiedDiffInput): string {
   }
   flushHunk();
   if (hunks.length === 0) {
-    return header + "(no textual changes)\n";
+    return `${header}(no textual changes)\n`;
   }
-  return header + hunks.join("\n") + "\n";
+  return `${header + hunks.join("\n")}\n`;
 }

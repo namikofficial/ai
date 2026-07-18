@@ -95,8 +95,7 @@ export function buildRetrievalPipelineInput(
   }
   // Derive budgetTokens from depth to match selectTopByTokenBudget() item counts.
   // avgChunkTokens ≈ 150; use 200 as a safe upper estimate per chunk.
-  const budgetTokens =
-    args.depth === "deep" ? 12 * 200 : args.depth === "shallow" ? 4 * 200 : 8 * 200;
+  const budgetTokens = args.depth === "deep" ? 12 * 200 : args.depth === "shallow" ? 4 * 200 : 8 * 200;
 
   return {
     query: args.query,

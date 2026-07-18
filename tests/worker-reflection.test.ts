@@ -53,7 +53,7 @@ test("worker session.reflect creates memory candidates from conversation", async
 
   const reflectedEvent = store.listEvents(session.id, 50).find((e) => e.type === "session.reflected");
   assert.ok(reflectedEvent, "session.reflected event should be appended");
-  const reflectedPayload = reflectedEvent!.payload as {
+  const reflectedPayload = reflectedEvent?.payload as {
     compiledId?: string;
     modelCallId?: string | null;
   };
@@ -66,7 +66,7 @@ test("worker session.reflect creates memory candidates from conversation", async
     1,
     "session.reflect should record exactly one runtime-backed reflection model call"
   );
-  const reflectionRequest = reflectionCalls[0]!.request as {
+  const reflectionRequest = reflectionCalls[0]?.request as {
     metadata?: {
       compiledPrompt?: { mode?: string; messages?: Array<{ role: string; content: string }> };
       responseTrace?: { deterministicReflection?: boolean };
@@ -136,10 +136,10 @@ test("worker session.reflect creates a retrieval_miss memory candidate for misse
   const candidates = store.memory.listCandidates(undefined, project.id, 20);
   const missCandidate = candidates.find((c) => c.kind === "retrieval_miss");
   assert.ok(missCandidate, "a retrieval_miss memory candidate should be created");
-  assert.match(missCandidate!.title, /src\/missing\.ts/);
+  assert.match(missCandidate?.title, /src\/missing\.ts/);
   // retrieval_miss proposals have confidence 0.7, which meets the auto-promote
   // threshold; the candidate should be immediately accepted into a memory entry.
-  assert.equal(missCandidate!.status, "accepted");
+  assert.equal(missCandidate?.status, "accepted");
   const entries = store.memory.listEntries(project.id, undefined, 20);
   assert.ok(entries.some((e) => e.title.includes("src/missing.ts")));
 
@@ -270,8 +270,8 @@ test("worker session.reflect is atomic: a mid-flight failure rolls back all cand
 
   const failedJob = store.listJobs(10).find((entry) => entry.type === "session.reflect");
   assert.ok(failedJob, "session.reflect job should still be tracked");
-  assert.equal(failedJob!.status, "failed", "job should be marked failed after the simulated mid-flight failure");
-  const failurePayload = JSON.parse(failedJob!.payloadJson) as { error?: string };
+  assert.equal(failedJob?.status, "failed", "job should be marked failed after the simulated mid-flight failure");
+  const failurePayload = JSON.parse(failedJob?.payloadJson) as { error?: string };
   assert.ok(
     failurePayload.error?.includes("simulated mid-flight failure"),
     `job payload should include the failure reason (got: ${failurePayload.error})`
@@ -367,7 +367,7 @@ test("worker session.reflect parses valid model JSON and records parseStatus", a
     assert.equal(await processNextJob(store), true);
     const reflectedEvent = store.listEvents(session.id, 50).find((e) => e.type === "session.reflected");
     assert.ok(reflectedEvent);
-    assert.equal((reflectedEvent!.payload as { parseStatus?: string }).parseStatus, "parsed");
+    assert.equal((reflectedEvent?.payload as { parseStatus?: string }).parseStatus, "parsed");
     const candidates = store.memory.listCandidates("pending", project.id, 20);
     assert.ok(candidates.some((c) => c.title.includes("explicit small functions")));
   } finally {
@@ -404,10 +404,9 @@ test("worker session.reflect auto-promotes high-confidence candidates and marks 
     sources: [{ kind: "session", ref: "old", excerpt: "old usage" }],
   });
   // Backdate lastVerifiedAt so detectStaleFacts picks it up.
-  store.db.prepare("UPDATE facts SET last_verified_at = ? WHERE id = ?").run(
-    new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(),
-    staleFact.id
-  );
+  store.db
+    .prepare("UPDATE facts SET last_verified_at = ? WHERE id = ?")
+    .run(new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString(), staleFact.id);
 
   store.enqueueJob({
     type: "session.reflect",
@@ -462,7 +461,7 @@ test("worker session.reflect auto-promotes high-confidence candidates and marks 
     assert.equal(await processNextJob(store), true);
     const entries = store.memory.listEntries(project.id, undefined, 20);
     assert.equal(entries.length, 1, "high-confidence candidate should be auto-promoted to entry");
-    assert.match(entries[0]!.title, /Strong preference/);
+    assert.match(entries[0]?.title, /Strong preference/);
     const refreshed = store.memory.listFacts(project.id, 20);
     const updated = refreshed.find((f) => f.id === staleFact.id);
     assert.equal(updated?.status, "stale", "stale fact should be marked as stale");

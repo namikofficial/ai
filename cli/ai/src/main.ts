@@ -9,7 +9,6 @@ import { createApiClient } from "../../../packages/api-client/src/index.ts";
 import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
 import { runRetrievalExplain } from "../../../packages/db/src/retrieval-explain.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
-import type { EmbeddingCacheRepo } from "../../../packages/db/src/repositories/embedding-cache.ts";
 import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
 import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
@@ -83,12 +82,14 @@ function parseArgs(argv: string[]) {
   const positionals: string[] = [];
 
   while (args.length > 0) {
-    const value = args.shift()!;
+    const value = args.shift();
+    if (value === undefined) break;
     if (value.startsWith("--")) {
       const key = value.slice(2);
       const next = args[0];
       if (next && !next.startsWith("--")) {
-        options[key] = args.shift()!;
+        const optionValue = args.shift();
+        if (optionValue !== undefined) options[key] = optionValue;
       } else {
         options[key] = "true";
       }
@@ -578,8 +579,11 @@ async function run(): Promise<void> {
   }
 
   if (command === "trace") {
+    const requestedSubcommand = positionals[0];
     const subcommand =
-      positionals[0] === "timeline" || positionals[0] === "conversation" ? positionals.shift()! : "conversation";
+      requestedSubcommand === "timeline" || requestedSubcommand === "conversation"
+        ? (positionals.shift() ?? "conversation")
+        : "conversation";
     const sessionId = positionals[0] ?? (subcommand === "conversation" ? positionals.shift() : null);
     if (!sessionId) {
       throw new Error("trace requires a session id");
@@ -767,10 +771,15 @@ async function run(): Promise<void> {
     // ai dev "<goal>" — start a new dev run
     if (subcommand) {
       const project = options.project;
-      if (!project) throw new Error("ai dev \"<goal>\" --project <project> [...]");
+      if (!project) throw new Error('ai dev "<goal>" --project <project> [...]');
       const mode = options.mode === "cloud" || options.mode === "hybrid" ? options.mode : "local";
       const approveEdits = options["approve-edits"] === "true" || options["approve-edits"] === "1";
-      const checks = options.checks ? options.checks.split(",").map((c: string) => c.trim()).filter(Boolean) : undefined;
+      const checks = options.checks
+        ? options.checks
+            .split(",")
+            .map((c: string) => c.trim())
+            .filter(Boolean)
+        : undefined;
       const maxRepairs = Number(options["max-repairs"] ?? 1) || 1;
       printJson(
         await client.devRun({
@@ -852,7 +861,8 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
   const options: Record<string, string> = {};
   const positionals: string[] = [];
   for (let i = 0; i < explainArgs.length; i++) {
-    const value = explainArgs[i]!;
+    const value = explainArgs[i];
+    if (value === undefined) continue;
     if (value === "--project" || value === "--mode" || value === "--depth" || value === "--limit") {
       const next = explainArgs[i + 1];
       if (next) {
@@ -1029,9 +1039,7 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
       const profileArg = readCliArg(process.argv.slice(4), "profile");
       const promptArg = readCliArg(process.argv.slice(4), "prompt") ?? "Reply with the single word PONG.";
       const profiles = store.models.listProfiles();
-      const targets = profileArg
-        ? profiles.filter((profile) => profile.id === profileArg)
-        : profiles;
+      const targets = profileArg ? profiles.filter((profile) => profile.id === profileArg) : profiles;
       const results: Array<Record<string, unknown>> = [];
       for (const profile of targets) {
         const started = Date.now();

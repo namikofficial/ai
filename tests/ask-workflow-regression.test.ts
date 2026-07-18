@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { type AskWorkflowStore, runAskWorkflow } from "../packages/ask-engine/src/index.ts";
-import { createId, type EventEnvelope, type RetrievalChunk } from "../packages/shared/src/index.ts";
+import { createId, type EventEnvelope } from "../packages/shared/src/index.ts";
 
 function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
   const events: EventEnvelope[] = [];
@@ -34,7 +34,7 @@ function createMockStore(): AskWorkflowStore & { events: EventEnvelope[] } {
       framework: "node",
     }),
     getSession: (id) => sessions.get(id) ?? null,
-    searchChunks: (projectId: string, query: string) => {
+    searchChunks: (_projectId: string, query: string) => {
       if (query.includes("missing?") || (query === "" && messages[messages.length - 1]?.content === "missing?")) {
         return [];
       }
@@ -285,7 +285,7 @@ test("runAskWorkflow: handles retrieval miss (no chunks)", async () => {
 test("runAskWorkflow: handles answer model failure", async () => {
   const store = createMockStore();
   // Override searchChunks to return something so we don't hit fallback
-  store.searchChunks = (projectId: string, query: string) => [
+  store.searchChunks = (_projectId: string, _query: string) => [
     {
       id: "c1",
       path: "f1.ts",
@@ -312,7 +312,7 @@ test("runAskWorkflow: handles answer model failure", async () => {
   };
 
   // Mock model failure for answer
-  store.invokeModel = async (profileId, request) => {
+  store.invokeModel = async (_profileId, request) => {
     if (request.role === "answer") {
       throw new Error("model timeout");
     }
@@ -353,7 +353,7 @@ test("runAskWorkflow: handles query rewrite failure", async () => {
     embed: async () => ({ embeddings: [[0.1, 0.2]], usage: { promptTokens: 1, totalTokens: 1 } }),
   };
 
-  store.invokeModel = async (profileId, request) => {
+  store.invokeModel = async (_profileId, request) => {
     if (request.role === "query_rewrite") {
       throw new Error("rewrite fail");
     }
@@ -393,7 +393,7 @@ test("runAskWorkflow: handles retrieval judge failure", async () => {
     embed: async () => ({ embeddings: [[0.1, 0.2]], usage: { promptTokens: 1, totalTokens: 1 } }),
   };
 
-  store.invokeModel = async (profileId, request) => {
+  store.invokeModel = async (_profileId, request) => {
     if (request.role === "retrieval_judge") {
       throw new Error("judge fail");
     }

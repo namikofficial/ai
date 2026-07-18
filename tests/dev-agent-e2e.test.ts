@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { createId } from "../packages/shared/src/index.ts";
 import type { DevEdit } from "../packages/shared/src/index.ts";
+import { createId } from "../packages/shared/src/index.ts";
 
 // ---------------------------------------------------------------------------
 // End-to-end test: approve → apply flow
@@ -14,7 +14,7 @@ import type { DevEdit } from "../packages/shared/src/index.ts";
 // 2. applyApprovedDevRun copies workspace files back to the original project
 // ---------------------------------------------------------------------------
 
-import { approveDevRun, applyApprovedDevRun } from "../packages/dev-agent/src/index.ts";
+import { applyApprovedDevRun, approveDevRun } from "../packages/dev-agent/src/index.ts";
 import { createTaskWorkspace } from "../packages/execution-engine/src/index.ts";
 
 test("approveDevRun: transitions awaiting_approval run to approved", async () => {
@@ -24,7 +24,12 @@ test("approveDevRun: transitions awaiting_approval run to approved", async () =>
   await writeFile(join(projectPath, "src", "index.ts"), "export const x = 1;\n");
 
   const runs: Array<{ id: string; status: string; sessionId: string; projectId: string; goal: string }> = [];
-  const approvals: Array<{ id: string; runId: string; status: "pending" | "approved" | "rejected"; decidedBy: string | null }> = [];
+  const approvals: Array<{
+    id: string;
+    runId: string;
+    status: "pending" | "approved" | "rejected";
+    decidedBy: string | null;
+  }> = [];
 
   const devRuns: any = {
     createRun: (input: any) => {
@@ -73,7 +78,14 @@ test("approveDevRun: transitions awaiting_approval run to approved", async () =>
     approvalPolicy: "manual",
   });
 
-  execution.createApproval({ runId: run.id, projectId: "proj_1", policy: "manual", risk: "low", requiresExplicit: false, reason: "test" });
+  execution.createApproval({
+    runId: run.id,
+    projectId: "proj_1",
+    policy: "manual",
+    risk: "low",
+    requiresExplicit: false,
+    reason: "test",
+  });
 
   const result = await approveDevRun({ runId: run.id, runtime, decidedBy: "test-user" });
 
@@ -123,8 +135,28 @@ test("applyApprovedDevRun: copies workspace files back to original", async () =>
     getRun: (id: string) => runs.find((r) => r.id === id) ?? null,
     addEdit: () => createId("ed"),
     listEdits: () => [
-      { id: createId("e1"), path: "src/index.ts", reason: "x", newText: "", changeType: "replace" as const, status: "applied", risk: "low" as const, blockedReason: null, errorMessage: null },
-      { id: createId("e2"), path: "src/new.ts", reason: "x", newText: "export const y = 3;", changeType: "create" as const, status: "applied", risk: "low" as const, blockedReason: null, errorMessage: null },
+      {
+        id: createId("e1"),
+        path: "src/index.ts",
+        reason: "x",
+        newText: "",
+        changeType: "replace" as const,
+        status: "applied",
+        risk: "low" as const,
+        blockedReason: null,
+        errorMessage: null,
+      },
+      {
+        id: createId("e2"),
+        path: "src/new.ts",
+        reason: "x",
+        newText: "export const y = 3;",
+        changeType: "create" as const,
+        status: "applied",
+        risk: "low" as const,
+        blockedReason: null,
+        errorMessage: null,
+      },
     ],
     listRuns: () => runs,
     getRunWithEdits: () => null,
@@ -144,7 +176,12 @@ test("applyApprovedDevRun: copies workspace files back to original", async () =>
 
   const runtime = { devRuns, execution };
 
-  const run = devRuns.createRun({ id: "run_apply_test", sessionId: "sess_apply", projectId: "proj_1", goal: "apply test" });
+  const run = devRuns.createRun({
+    id: "run_apply_test",
+    sessionId: "sess_apply",
+    projectId: "proj_1",
+    goal: "apply test",
+  });
   execution.createWorkspace({
     runId: run.id,
     projectId: "proj_1",
@@ -159,7 +196,10 @@ test("applyApprovedDevRun: copies workspace files back to original", async () =>
   const result = await applyApprovedDevRun({ runId: run.id, projectPath, runtime });
 
   assert.equal(result.ok, true);
-  assert.ok(result.applied.length >= 1, `expected at least 1 applied file, got ${result.applied.length}: ${JSON.stringify(result.applied)}`);
+  assert.ok(
+    result.applied.length >= 1,
+    `expected at least 1 applied file, got ${result.applied.length}: ${JSON.stringify(result.applied)}`
+  );
 
   // Verify original file was mutated.
   const content = await readFile(join(projectPath, "src", "index.ts"), "utf8");

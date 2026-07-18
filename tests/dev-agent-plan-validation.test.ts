@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import test from "node:test";
 import { riskForPath } from "../packages/execution-engine/src/index.ts";
-import { createId } from "../packages/shared/src/index.ts";
 
 // ---------------------------------------------------------------------------
 // Helper: in-memory parse of validatePlan without importing internals.
@@ -81,7 +77,12 @@ function shouldRequireApproval(input: {
 // ---------------------------------------------------------------------------
 
 test("validatePlan: rejects plan with empty summary", () => {
-  const plan: DevPlan = { summary: "", edits: [{ path: "src/a.ts", reason: "x", newText: "", changeType: "create" }], checks: [], risk: "low" };
+  const plan: DevPlan = {
+    summary: "",
+    edits: [{ path: "src/a.ts", reason: "x", newText: "", changeType: "create" }],
+    checks: [],
+    risk: "low",
+  };
   const result = validatePlan(plan);
   assert.equal(result.valid, false);
   assert.match(result.reason ?? "", /summary/);
@@ -95,7 +96,12 @@ test("validatePlan: rejects plan with no edits", () => {
 });
 
 test("validatePlan: accepts valid plan", () => {
-  const plan: DevPlan = { summary: "add feature", edits: [{ path: "src/a.ts", reason: "x", newText: "", changeType: "create" }], checks: ["typecheck"], risk: "low" };
+  const plan: DevPlan = {
+    summary: "add feature",
+    edits: [{ path: "src/a.ts", reason: "x", newText: "", changeType: "create" }],
+    checks: ["typecheck"],
+    risk: "low",
+  };
   const result = validatePlan(plan);
   assert.equal(result.valid, true);
   assert.equal(result.correctedRisk, undefined);
@@ -103,7 +109,12 @@ test("validatePlan: accepts valid plan", () => {
 
 test("validatePlan: upgrades risk when model downgraded to low but edits include high-risk paths", () => {
   // .env is high-risk
-  const plan: DevPlan = { summary: "update env", edits: [{ path: ".env", reason: "x", newText: "KEY=value", changeType: "create" }], checks: [], risk: "low" };
+  const plan: DevPlan = {
+    summary: "update env",
+    edits: [{ path: ".env", reason: "x", newText: "KEY=value", changeType: "create" }],
+    checks: [],
+    risk: "low",
+  };
   const result = validatePlan(plan);
   assert.equal(result.valid, true);
   assert.equal(result.correctedRisk, "high");
@@ -111,7 +122,12 @@ test("validatePlan: upgrades risk when model downgraded to low but edits include
 
 test("validatePlan: upgrades risk when model says low but edits are medium-risk", () => {
   // package.json is medium-risk
-  const plan: DevPlan = { summary: "update scripts", edits: [{ path: "package.json", reason: "x", newText: "", changeType: "replace" }], checks: [], risk: "low" };
+  const plan: DevPlan = {
+    summary: "update scripts",
+    edits: [{ path: "package.json", reason: "x", newText: "", changeType: "replace" }],
+    checks: [],
+    risk: "low",
+  };
   const result = validatePlan(plan);
   assert.equal(result.valid, true);
   assert.equal(result.correctedRisk, "medium");

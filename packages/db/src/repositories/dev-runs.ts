@@ -1,7 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import type {
   ApprovalPolicy,
-  ApprovalStatus,
   DevCheckResult,
   DevEdit,
   DevPlan,

@@ -420,7 +420,9 @@ export class AgentExecutor {
   }
 
   descriptor(): AgentDescriptor {
-    return AGENT_REGISTRY.get(this.id)!;
+    const descriptor = AGENT_REGISTRY.get(this.id);
+    if (!descriptor) throw new Error(`unknown agent: ${this.id}`);
+    return descriptor;
   }
 
   validateTool(tool: AgentToolName): boolean {

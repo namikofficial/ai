@@ -8,8 +8,14 @@ import { createDefaultToolRegistry } from "../packages/tools/src/index.ts";
 async function makeRepo(): Promise<{ root: string; cleanup: () => Promise<void> }> {
   const dir = await mkdtemp(join(tmpdir(), "ai-tools-"));
   await mkdir(join(dir, "src"), { recursive: true });
-  await writeFile(join(dir, "src", "auth.ts"), "export function login() { return 'ok'; }\nexport const SESSION = 'local';\n");
-  await writeFile(join(dir, "src", "user.ts"), "import { login } from './auth';\nexport function getUser() { return login(); }\n");
+  await writeFile(
+    join(dir, "src", "auth.ts"),
+    "export function login() { return 'ok'; }\nexport const SESSION = 'local';\n"
+  );
+  await writeFile(
+    join(dir, "src", "user.ts"),
+    "import { login } from './auth';\nexport function getUser() { return login(); }\n"
+  );
   await writeFile(join(dir, "README.md"), "# sample\n");
   await writeFile(join(dir, ".env"), "API_KEY=secret\n");
   return {
@@ -41,12 +47,16 @@ test("tools: file_read returns the file content with metadata", async () => {
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("file_read", { path: "src/auth.ts" }, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: false,
-    });
+    const result = await registry.call(
+      "file_read",
+      { path: "src/auth.ts" },
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: false,
+      }
+    );
     assert.equal(result.ok, true);
     const output = result.output as { content: string; lines: number; bytes: number };
     assert.ok(output.content.includes("login"));
@@ -62,12 +72,16 @@ test("tools: file_read refuses to escape the project root", async () => {
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("file_read", { path: "../../../etc/passwd" }, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: true,
-    });
+    const result = await registry.call(
+      "file_read",
+      { path: "../../../etc/passwd" },
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: true,
+      }
+    );
     assert.equal(result.ok, false);
     assert.match(result.error ?? "", /escape|root|relative/);
   } finally {
@@ -79,12 +93,16 @@ test("tools: file_read refuses secret files and reports redaction", async () => 
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("file_read", { path: ".env" }, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: false,
-    });
+    const result = await registry.call(
+      "file_read",
+      { path: ".env" },
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: false,
+      }
+    );
     assert.equal(result.ok, false);
     assert.equal(result.redacted, true);
     assert.match(result.error ?? "", /secret/);
@@ -161,12 +179,16 @@ test("tools: project_list returns project files and skips ignored directories", 
     await mkdir(join(repo.root, "node_modules", "x"), { recursive: true });
     await writeFile(join(repo.root, "node_modules", "x", "x.js"), "noise");
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("project_list", { maxDepth: 3 }, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: false,
-    });
+    const result = await registry.call(
+      "project_list",
+      { maxDepth: 3 },
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: false,
+      }
+    );
     assert.equal(result.ok, true);
     const output = result.output as { files: string[]; count: number };
     assert.ok(output.files.includes("src/auth.ts"));
@@ -180,12 +202,16 @@ test("tools: project_grep returns matches with file:line:context", async () => {
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("project_grep", { pattern: "login" }, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: false,
-    });
+    const result = await registry.call(
+      "project_grep",
+      { pattern: "login" },
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: false,
+      }
+    );
     assert.equal(result.ok, true);
     const output = result.output as { count: number; matches: Array<{ path: string; line: number }> };
     assert.ok(output.count >= 2);
@@ -200,12 +226,16 @@ test("tools: project_grep returns an error on invalid regex", async () => {
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("project_grep", { pattern: "[invalid(" }, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: false,
-    });
+    const result = await registry.call(
+      "project_grep",
+      { pattern: "[invalid(" },
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: false,
+      }
+    );
     assert.equal(result.ok, false);
     assert.match(result.error ?? "", /invalid regex/);
   } finally {
@@ -217,12 +247,16 @@ test("tools: registry rejects unknown tool names", async () => {
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("does_not_exist", {}, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: true,
-    });
+    const result = await registry.call(
+      "does_not_exist",
+      {},
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: true,
+      }
+    );
     assert.equal(result.ok, false);
     assert.match(result.error ?? "", /unknown tool/);
   } finally {
@@ -234,12 +268,16 @@ test("tools: registry validates required args", async () => {
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("file_read", {}, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: true,
-    });
+    const result = await registry.call(
+      "file_read",
+      {},
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: true,
+      }
+    );
     assert.equal(result.ok, false);
     assert.match(result.error ?? "", /path|required/);
   } finally {
@@ -251,12 +289,16 @@ test("tools: file_summary reports language and symbol count when code-intel is p
   const repo = await makeRepo();
   try {
     const registry = createDefaultToolRegistry();
-    const result = await registry.call("file_summary", { path: "src/auth.ts" }, {
-      projectPath: repo.root,
-      projectId: "p",
-      sessionId: "s",
-      allowHighRisk: false,
-    });
+    const result = await registry.call(
+      "file_summary",
+      { path: "src/auth.ts" },
+      {
+        projectPath: repo.root,
+        projectId: "p",
+        sessionId: "s",
+        allowHighRisk: false,
+      }
+    );
     assert.equal(result.ok, true);
     const output = result.output as { language: string; lines: number; symbolCount: number };
     assert.equal(output.language, "typescript");

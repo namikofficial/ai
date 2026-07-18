@@ -1,10 +1,10 @@
 import type { Router } from "express";
-import { createStore } from "../../../../../packages/db/src/store.ts";
+import type { createStore } from "../../../../../packages/db/src/store.ts";
 import { createEvent } from "../../../../../packages/shared/src/index.ts";
 import { asyncRoute, isHtmlRequest, readJsonBody, readTextBody, safeParseList } from "../http.ts";
-import { json, sendHtml, sendJson } from "../response.ts";
+import { buildPaginatedResponse, parsePagination } from "../pagination.ts";
 import { renderTaskDetailPage, renderTasksPage } from "../render-pages.ts";
-import { parsePagination, buildPaginatedResponse } from "../pagination.ts";
+import { json, sendHtml, sendJson } from "../response.ts";
 
 type Store = ReturnType<typeof createStore>;
 
@@ -57,7 +57,13 @@ export function registerTaskRoutes(router: Router, deps: { store: Store }) {
     if (action === "start") {
       nextTask = deps.store.updateTask(task.id, { status: "running" });
       if (session) deps.store.updateSession(session.id, { activeTaskId: task.id });
-      deps.store.appendEvent(createEvent("task.started", { title: task.title }, { sessionId: task.sessionId, projectId, taskId: task.id, agent: "orchestrator" }));
+      deps.store.appendEvent(
+        createEvent(
+          "task.started",
+          { title: task.title },
+          { sessionId: task.sessionId, projectId, taskId: task.id, agent: "orchestrator" }
+        )
+      );
     } else if (action === "complete") {
       const result = String(body.result ?? body.note ?? "");
       nextTask = deps.store.updateTask(task.id, {
@@ -66,7 +72,13 @@ export function registerTaskRoutes(router: Router, deps: { store: Store }) {
         resultJson: JSON.stringify({ result, completedAt: new Date().toISOString() }),
       });
       if (session?.activeTaskId === task.id) deps.store.updateSession(session.id, { activeTaskId: null });
-      deps.store.appendEvent(createEvent("task.completed", { title: task.title, result }, { sessionId: task.sessionId, projectId, taskId: task.id, agent: "orchestrator" }));
+      deps.store.appendEvent(
+        createEvent(
+          "task.completed",
+          { title: task.title, result },
+          { sessionId: task.sessionId, projectId, taskId: task.id, agent: "orchestrator" }
+        )
+      );
     } else {
       const error = String(body.error ?? body.note ?? "");
       nextTask = deps.store.updateTask(task.id, {
@@ -74,7 +86,13 @@ export function registerTaskRoutes(router: Router, deps: { store: Store }) {
         resultJson: JSON.stringify({ error, failedAt: new Date().toISOString() }),
       });
       if (session?.activeTaskId === task.id) deps.store.updateSession(session.id, { activeTaskId: null });
-      deps.store.appendEvent(createEvent("task.failed", { title: task.title, error }, { sessionId: task.sessionId, projectId, taskId: task.id, agent: "orchestrator" }));
+      deps.store.appendEvent(
+        createEvent(
+          "task.failed",
+          { title: task.title, error },
+          { sessionId: task.sessionId, projectId, taskId: task.id, agent: "orchestrator" }
+        )
+      );
     }
     if (isHtmlRequest(req)) {
       sendHtml(res, renderTaskDetailPage(deps.store, nextTask.id));

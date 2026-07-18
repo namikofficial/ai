@@ -340,8 +340,8 @@ test("retrieval-pipeline: pathBoosts re-rank chunks when feedback is sparse", ()
   const alphaBase = baseOutput.ranked.find((r) => r.chunk.id === "chunk_alpha");
   const betaBase = baseOutput.ranked.find((r) => r.chunk.id === "chunk_beta");
   assert.ok(alphaBase && betaBase);
-  const alphaBaseScore = alphaBase!.finalScore;
-  const betaBaseScore = betaBase!.finalScore;
+  const alphaBaseScore = alphaBase?.finalScore;
+  const betaBaseScore = betaBase?.finalScore;
   assert.equal(alphaBaseScore, betaBaseScore);
   const boostedOutput = runRetrievalPipeline({
     query: "alpha",
@@ -364,8 +364,8 @@ test("retrieval-pipeline: pathBoosts re-rank chunks when feedback is sparse", ()
     priorSessionPaths: [],
     budgetTokens: 4096,
   });
-  const alphaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_alpha")!;
-  const betaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_beta")!;
+  const alphaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_alpha");
+  const betaBoosted = boostedOutput.ranked.find((r) => r.chunk.id === "chunk_beta");
   assert.ok(alphaBoosted && betaBoosted);
   const alphaScore = alphaBoosted.finalScore;
   const betaScore = betaBoosted.finalScore;

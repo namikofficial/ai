@@ -64,9 +64,7 @@ export function buildCacheKey(input: {
   };
 }
 
-export interface Embedder {
-  (input: string[]): Promise<EmbeddingBatchResult>;
-}
+export type Embedder = (input: string[]) => Promise<EmbeddingBatchResult>;
 
 export async function embedWithCache(
   inputs: string[],

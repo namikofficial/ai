@@ -1,4 +1,4 @@
-import type { ProjectRecord, ProjectSummary, SessionRecord, TaskRecord } from "../../shared/src/index.ts";
+import type { ProjectSummary, SessionRecord, TaskRecord } from "../../shared/src/index.ts";
 
 export interface ShellOptions {
   title: string;

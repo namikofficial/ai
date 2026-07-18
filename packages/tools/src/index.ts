@@ -17,12 +17,19 @@
 // shell, or the database without going through a registered,
 // allowlisted, path-guarded implementation.
 
-import { readFile, readdir, stat, type Dirent } from "node:fs/promises";
+import { type Dirent, readdir, readFile, stat } from "node:fs/promises";
 import { join, relative, resolve } from "node:path";
-import { createId } from "../../shared/src/index.ts";
-import type { ModelRole } from "../../shared/src/index.ts";
-import { guardPath, isHighRiskPath, isSecretFile, readProjectFile, writeProjectFile, applyEdit } from "../../execution-engine/src/index.ts";
 import { createCodeIntelligenceRepo } from "../../db/src/repositories/code-intelligence.ts";
+import {
+  applyEdit,
+  guardPath,
+  isHighRiskPath,
+  isSecretFile,
+  readProjectFile,
+  writeProjectFile,
+} from "../../execution-engine/src/index.ts";
+import type { ModelRole } from "../../shared/src/index.ts";
+import { createId } from "../../shared/src/index.ts";
 
 export type ToolCategory = "read" | "search" | "write" | "analyze";
 export type ToolRisk = "low" | "medium" | "high";
@@ -166,7 +173,7 @@ function validateArgs(
 const RELATIVE_PATH_SCHEMA = { type: "string", description: "Path relative to the project root." } as const;
 const POSITIVE_INTEGER_SCHEMA = { type: "number", description: "Positive integer." } as const;
 const STRING_SCHEMA = { type: "string" } as const;
-const BOOLEAN_SCHEMA = { type: "boolean" } as const;
+const _BOOLEAN_SCHEMA = { type: "boolean" } as const;
 
 const fileReadDescriptor: ToolDescriptor = {
   name: "file_read",
@@ -313,8 +320,7 @@ async function fileEditImpl(args: Record<string, unknown>, ctx: ToolContext): Pr
       path,
       oldText: typeof args.oldText === "string" ? args.oldText : undefined,
       newText: String(args.newText ?? ""),
-      changeType:
-        args.changeType === "create" || args.changeType === "append" ? args.changeType : "replace",
+      changeType: args.changeType === "create" || args.changeType === "append" ? args.changeType : "replace",
     },
   });
   if (!result.ok) {
@@ -358,7 +364,19 @@ async function projectListImpl(args: Record<string, unknown>, ctx: ToolContext):
   const prefix = typeof args.prefix === "string" ? args.prefix : "";
   const maxDepth = typeof args.maxDepth === "number" ? args.maxDepth : 4;
   const limit = typeof args.limit === "number" ? args.limit : 200;
-  const IGNORED = new Set([".git", "node_modules", "dist", "build", "coverage", ".turbo", ".next", "runtime", ".cache", "out", ".pnpm-store"]);
+  const IGNORED = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".turbo",
+    ".next",
+    "runtime",
+    ".cache",
+    "out",
+    ".pnpm-store",
+  ]);
   const root = resolve(ctx.projectPath);
   const out: string[] = [];
   async function walk(dir: string, depth: number): Promise<void> {
@@ -423,7 +441,18 @@ async function projectGrepImpl(args: Record<string, unknown>, ctx: ToolContext):
   const limit = typeof args.limit === "number" ? args.limit : 50;
   const matches: Array<{ path: string; line: number; text: string }> = [];
   const root = resolve(ctx.projectPath);
-  const IGNORED = new Set([".git", "node_modules", "dist", "build", "coverage", ".turbo", ".next", "runtime", ".cache", "out"]);
+  const IGNORED = new Set([
+    ".git",
+    "node_modules",
+    "dist",
+    "build",
+    "coverage",
+    ".turbo",
+    ".next",
+    "runtime",
+    ".cache",
+    "out",
+  ]);
   async function walk(dir: string): Promise<void> {
     if (matches.length >= limit) return;
     let entries: Dirent[];
@@ -573,21 +602,30 @@ async function fileSummaryImpl(args: Record<string, unknown>, ctx: ToolContext):
     return { ok: false, output: null, error: guard.reason, redacted: false, touchedPath: guard.relative };
   }
   if (isSecretFile(guard.relative)) {
-    return { ok: false, output: null, error: "refuses to summarize secret file", redacted: true, touchedPath: guard.relative };
+    return {
+      ok: false,
+      output: null,
+      error: "refuses to summarize secret file",
+      redacted: true,
+      touchedPath: guard.relative,
+    };
   }
   const content = await readProjectFile(ctx.projectPath, guard.relative);
   const lines = content.split("\n");
   const ext = guard.relative.match(/\.[^.]+$/)?.[0]?.toLowerCase() ?? "";
-  const language = ({
-    ".ts": "typescript",
-    ".tsx": "typescript",
-    ".js": "javascript",
-    ".jsx": "javascript",
-    ".py": "python",
-    ".rs": "rust",
-    ".go": "go",
-    ".sql": "sql",
-  } as Record<string, string>)[ext] ?? "text";
+  const language =
+    (
+      {
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".py": "python",
+        ".rs": "rust",
+        ".go": "go",
+        ".sql": "sql",
+      } as Record<string, string>
+    )[ext] ?? "text";
   let symbols: Array<{ name: string; kind: string; startLine: number; endLine: number }> = [];
   if (ctx.db && (language === "typescript" || language === "javascript" || language === "python")) {
     const repo = createCodeIntelligenceRepo(ctx.db);

@@ -1,18 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { rm } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { runMigrations } from "../packages/db/src/migrate.ts";
-import {
-  createEmbeddingCacheRepo,
-  type EmbeddingCacheRepo,
-} from "../packages/db/src/repositories/embedding-cache.ts";
+import { createEmbeddingCacheRepo, type EmbeddingCacheRepo } from "../packages/db/src/repositories/embedding-cache.ts";
 import { embedWithCache, hashEmbeddingInput } from "../packages/embeddings-cache/src/index.ts";
 
 function openTestDb(): { db: DatabaseSync; cleanup: () => Promise<void> } {
-  let dir = "";
+  const dir = "";
   // We intentionally keep the DB in memory for these tests so each test
   // gets a fresh schema and a fresh cache.
   const db = new DatabaseSync(":memory:");

@@ -7,7 +7,6 @@ import type {
 } from "../../model-runtime/src/index.ts";
 import {
   buildAnswerFromCompiledPrompt,
-  type CompiledPrompt,
   type CompilePromptInput,
   type ContextPackItemForPrompt,
   compilePrompt,
@@ -15,10 +14,6 @@ import {
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import { analyzeQuery, classifyIntent, rewriteQuery, runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
 import { buildRetrievalPipelineInput, type RetrievalPipelineSource } from "../../retrieval-engine/src/pipeline.ts";
-import {
-  PROFILE_QUERY_REWRITE,
-  PROFILE_RETRIEVAL_JUDGE,
-} from "../../shared/src/model-profiles.ts";
 import type {
   AskRequest,
   AskResponse,
@@ -42,10 +37,10 @@ import type {
   RetrievalSelectedContextRecord,
   SessionRecord,
   SkillRecord,
-  TaskRecord,
 } from "../../shared/src/index.ts";
-import { createEvent, createId } from "../../shared/src/index.ts";
+import { createEvent } from "../../shared/src/index.ts";
 import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
+import { PROFILE_QUERY_REWRITE, PROFILE_RETRIEVAL_JUDGE } from "../../shared/src/model-profiles.ts";
 
 export interface BuildAskQueryRewritePromptInput {
   question: string;
@@ -1132,8 +1127,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         ),
       ];
       const augmentedChunks = augmentedSelected.map((entry) => entry.chunk);
-      const retryJudgeProfileId =
-        input.store.models.getProfile(PROFILE_RETRIEVAL_JUDGE)?.id ?? PROFILE_RETRIEVAL_JUDGE;
+      const retryJudgeProfileId = input.store.models.getProfile(PROFILE_RETRIEVAL_JUDGE)?.id ?? PROFILE_RETRIEVAL_JUDGE;
       const retryJudgePrompt = compilePrompt({
         ...buildAskRetrievalJudgePrompt({
           question: input.input.question,

@@ -1,6 +1,6 @@
 import type { Router } from "express";
-import { redirect, sendHtml } from "../response.ts";
 import { escapeHtml, pageShell } from "../render-pages.ts";
+import { redirect, sendHtml } from "../response.ts";
 
 export { escapeHtml, pageShell };
 
