@@ -23,6 +23,12 @@ import {
   SecretResolutionError,
 } from "../../../../../packages/execution-engine/src/index.ts";
 import {
+  collectWorkflowPlanApprovalContext,
+  type PreparedWorkflowPlan,
+  prepareWorkflowPlan,
+  workflowPlanApprovalContextHash,
+} from "../../../../../packages/execution-engine/src/workflow-plans.ts";
+import {
   collectWorkflowApprovalContext,
   prepareManifestWorkflow,
   runPreparedManifestWorkflowWithRetry,
@@ -168,6 +174,271 @@ export function registerWorkflowRoutes(
     deps.store.appendEvent(event);
     deps.publish(event);
     return { ...saved, backgroundJob: deps.store.workflows.getBackgroundJob(execution.id) };
+  }
+
+  async function executePreparedPlan(
+    plan: PreparedWorkflowPlan,
+    existing: WorkflowExecution,
+    causationId: string | null = null
+  ) {
+    const project = deps.store.getProject(existing.projectId);
+    const manifest = deps.store.projectRegistry.getManifest(existing.projectId);
+    if (!project || !manifest || project.path !== manifest.path) {
+      throw new Error("canonical project or approved manifest changed before workflow plan execution");
+    }
+    let workspacePath: string | null = null;
+    if (plan.isolationRequired) {
+      const created = await createTaskWorkspace({
+        projectPath: project.path,
+        runtimeDir: deps.config.runtimeDir,
+        runId: existing.id,
+        sessionId: existing.sessionId ?? existing.id,
+      });
+      workspacePath = created.workspace.path;
+    }
+    const startedAt = new Date().toISOString();
+    let execution: WorkflowExecution = {
+      ...existing,
+      state: "running",
+      updatedAt: startedAt,
+      startedAt,
+      currentStepId: plan.steps[0]?.step.id ?? null,
+      stepStates: Object.fromEntries(plan.steps.map((entry) => [entry.step.id, "waiting"])),
+      artifacts: workspacePath ? [workspacePath] : [],
+      errorCode: null,
+      errorSummary: null,
+    };
+    let record = deps.store.workflows.save({
+      execution,
+      command: { executable: "workflow-plan", arguments: plan.steps.map((entry) => entry.step.id), workingDirectory: project.path },
+      stdout: "",
+      stderr: "",
+      durationMs: 0,
+    });
+    const controller = new AbortController();
+    activeWorkflowControllers.set(execution.id, controller);
+    const allArtifacts = new Set(execution.artifacts);
+    const satisfiedArtifacts = new Set<string>();
+    let combinedStdout = "";
+    let combinedStderr = "";
+    let durationMs = 0;
+    let failedStep: string | null = null;
+    try {
+      for (const entry of plan.steps) {
+        if (controller.signal.aborted) {
+          failedStep = entry.step.id;
+          execution = {
+            ...execution,
+            state: "cancelled",
+            stepStates: { ...execution.stepStates, [entry.step.id]: "cancelled" },
+            errorCode: "command_cancelled",
+            errorSummary: "Workflow plan was cancelled",
+          };
+          break;
+        }
+        const stepStartedAt = new Date().toISOString();
+        execution = {
+          ...execution,
+          updatedAt: stepStartedAt,
+          currentStepId: entry.step.id,
+          stepStates: { ...execution.stepStates, [entry.step.id]: "running" },
+        };
+        record = deps.store.workflows.save({ ...record, execution });
+        const startedEvent = createEvent(
+          "workflow.step_started",
+          { workflowId: plan.definition.id, executionId: execution.id, stepId: entry.step.id },
+          {
+            projectId: execution.projectId,
+            sessionId: execution.sessionId,
+            taskId: execution.taskId,
+            agent: "workflow-executor",
+            sourceService: "workbench-api",
+            summary: `${plan.definition.name}: ${entry.step.name} started`,
+            correlationId: execution.id,
+            causationId,
+          }
+        );
+        deps.store.appendEvent(startedEvent);
+        deps.publish(startedEvent);
+        if (!entry.workflow) {
+          const finishedAt = new Date().toISOString();
+          deps.store.workflows.saveStepExecution({
+            executionId: execution.id,
+            stepId: entry.step.id,
+            workflowId: null,
+            state: "completed",
+            command: null,
+            attempts: [],
+            artifacts: [],
+            stdout: "",
+            stderr: "",
+            durationMs: 0,
+            startedAt: stepStartedAt,
+            finishedAt,
+            errorCode: null,
+            errorSummary: null,
+          });
+          execution = {
+            ...execution,
+            updatedAt: finishedAt,
+            stepStates: { ...execution.stepStates, [entry.step.id]: "completed" },
+          };
+          record = deps.store.workflows.save({ ...record, execution });
+          continue;
+        }
+        let runnable = entry.workflow;
+        if (workspacePath) {
+          const relativeCwd = path.relative(project.path, runnable.cwd);
+          if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
+            throw new Error(`workflow step ${entry.step.id} working directory escapes the canonical project`);
+          }
+          runnable = { ...runnable, cwd: path.resolve(workspacePath, relativeCwd) };
+        }
+        const environment = await resolveManifestWorkflowEnvironment({
+          requestedRefs: runnable.command.environmentRefs,
+          approvedRefs: manifest.secretRefs,
+        });
+        const attemptStates: Record<string, WorkflowExecution["state"]> = {};
+        const run = await runPreparedManifestWorkflowWithRetry(runnable, {
+          signal: controller.signal,
+          env: environment,
+          redactValues: Object.values(environment),
+          onAttempt(attemptResult, attempt) {
+            attemptStates[`${entry.step.id}.attempt.${attempt}`] = attemptResult.status;
+          },
+        });
+        let result = run.result;
+        const validation = result.status === "completed" ? await validateExpectedArtifacts(runnable) : null;
+        for (const artifact of validation?.artifacts ?? []) allArtifacts.add(artifact);
+        for (const artifactId of validation?.satisfied ?? []) satisfiedArtifacts.add(artifactId);
+        if (validation && !validation.valid) {
+          const detail = [
+            validation.missing.length > 0 ? `missing: ${validation.missing.join(", ")}` : "",
+            ...validation.invalid.map((item) => `${item.id}: ${item.reason}`),
+          ]
+            .filter(Boolean)
+            .join("; ");
+          result = { ...result, status: "failed", blockedReason: `expected artifact validation failed: ${detail}` };
+        }
+        const stepState = result.status;
+        const stepDuration = run.attempts.reduce((total, attempt) => total + attempt.durationMs, 0);
+        durationMs += stepDuration;
+        combinedStdout += result.stdout ? `\n[${entry.step.id}]\n${result.stdout}` : "";
+        combinedStderr += result.stderr ? `\n[${entry.step.id}]\n${result.stderr}` : "";
+        deps.store.workflows.saveStepExecution({
+          executionId: execution.id,
+          stepId: entry.step.id,
+          workflowId: entry.step.workflowId,
+          state: stepState,
+          command: commandRecord(runnable),
+          attempts: run.attempts.map((attempt, index) => ({
+            attempt: index + 1,
+            status: attempt.status,
+            exitCode: attempt.exitCode,
+            durationMs: attempt.durationMs,
+          })),
+          artifacts: validation?.artifacts ?? [],
+          stdout: result.stdout,
+          stderr: result.stderr,
+          durationMs: stepDuration,
+          startedAt: stepStartedAt,
+          finishedAt: result.finishedAt,
+          errorCode:
+            stepState === "completed"
+              ? null
+              : validation && !validation.valid
+                ? "expected_artifact_failed"
+                : stepState === "cancelled"
+                  ? "command_cancelled"
+                  : "command_failed",
+          errorSummary: stepState === "completed" ? null : (result.blockedReason ?? result.stderr.slice(0, 1_000)),
+        });
+        execution = {
+          ...execution,
+          updatedAt: result.finishedAt,
+          stepStates: { ...execution.stepStates, ...attemptStates, [entry.step.id]: stepState },
+          artifacts: [...allArtifacts],
+        };
+        record = deps.store.workflows.save({
+          ...record,
+          execution,
+          stdout: combinedStdout.trimStart(),
+          stderr: combinedStderr.trimStart(),
+          durationMs,
+        });
+        const stepEvent = createEvent(
+          "workflow.step_completed",
+          { workflowId: plan.definition.id, executionId: execution.id, stepId: entry.step.id, state: stepState },
+          {
+            projectId: execution.projectId,
+            sessionId: execution.sessionId,
+            taskId: execution.taskId,
+            agent: "workflow-executor",
+            sourceService: "workbench-api",
+            level: stepState === "completed" ? "info" : "error",
+            summary: `${plan.definition.name}: ${entry.step.name} ${stepState}`,
+            correlationId: execution.id,
+            causationId: startedEvent.id,
+          }
+        );
+        deps.store.appendEvent(stepEvent);
+        deps.publish(stepEvent);
+        if (stepState !== "completed") {
+          failedStep = entry.step.id;
+          execution = {
+            ...execution,
+            state: stepState === "cancelled" ? "cancelled" : stepState === "blocked" ? "blocked" : "failed",
+            errorCode: stepState === "cancelled" ? "command_cancelled" : "workflow_step_failed",
+            errorSummary: `Workflow step ${entry.step.name} ${stepState}`,
+          };
+          break;
+        }
+      }
+    } finally {
+      activeWorkflowControllers.delete(execution.id);
+    }
+    const missingPlanArtifacts = plan.definition.expectedArtifacts.filter((id) => !satisfiedArtifacts.has(id));
+    if (!failedStep && missingPlanArtifacts.length > 0) {
+      execution = {
+        ...execution,
+        state: "failed",
+        errorCode: "expected_artifact_failed",
+        errorSummary: `Workflow plan is missing expected artifacts: ${missingPlanArtifacts.join(", ")}`,
+      };
+    } else if (!failedStep) {
+      execution = { ...execution, state: "completed", errorCode: null, errorSummary: null };
+    }
+    const finishedAt = new Date().toISOString();
+    execution = { ...execution, updatedAt: finishedAt, finishedAt, currentStepId: null, artifacts: [...allArtifacts] };
+    record = deps.store.workflows.save({
+      ...record,
+      execution,
+      stdout: combinedStdout.trimStart(),
+      stderr: combinedStderr.trimStart(),
+      durationMs,
+    });
+    const event = createEvent(
+      execution.state === "completed"
+        ? "workflow.completed"
+        : execution.state === "cancelled"
+          ? "workflow.cancelled"
+          : "workflow.failed",
+      { workflowId: plan.definition.id, executionId: execution.id, failedStep },
+      {
+        projectId: execution.projectId,
+        sessionId: execution.sessionId,
+        taskId: execution.taskId,
+        agent: "workflow-executor",
+        sourceService: "workbench-api",
+        level: execution.state === "completed" ? "info" : "error",
+        summary: `${plan.definition.name} ${execution.state}`,
+        correlationId: execution.id,
+        causationId,
+      }
+    );
+    deps.store.appendEvent(event);
+    deps.publish(event);
+    return record;
   }
 
   function createWorkflowLaunch(input: {
