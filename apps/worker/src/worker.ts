@@ -1,9 +1,15 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
+import * as path from "node:path";
 import { resolveConfig } from "../../../packages/config/src/index.ts";
-import type { WorkflowExecution } from "../../../packages/contracts/src/index.ts";
+import type { ProjectManifest, WorkflowExecution } from "../../../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
 import { resolveManifestWorkflowEnvironment } from "../../../packages/execution-engine/src/secrets.ts";
+import { createTaskWorkspace } from "../../../packages/execution-engine/src/worktree.ts";
+import {
+  type PreparedWorkflowPlan,
+  prepareWorkflowPlan,
+} from "../../../packages/execution-engine/src/workflow-plans.ts";
 import {
   prepareManifestWorkflow,
   runPreparedManifestWorkflowWithRetry,
@@ -19,6 +25,12 @@ import { isLikelyJsonOutput, parseJsonFragment } from "../../../packages/shared/
 interface WorkerOptions {
   config?: Partial<ConfigSnapshot>;
   pollIntervalMs?: number;
+}
+
+interface JobExecutionOptions {
+  workerInstanceId?: string;
+  runtimeDir?: string;
+  signal?: AbortSignal;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -591,7 +603,7 @@ function applyReflectionOutput(
 
 export async function processNextJob(
   store: ReturnType<typeof createStore>,
-  options: { workerInstanceId?: string; signal?: AbortSignal } = {}
+  options: JobExecutionOptions = {}
 ): Promise<boolean> {
   const job = store.claimNextJob();
   if (!job) {
@@ -1169,7 +1181,11 @@ export async function startWorkbenchWorker(options: WorkerOptions = {}): Promise
   while (!stopped) {
     await writeFile(`${config.runtimeDir}/worker-heartbeat`, new Date().toISOString(), "utf8");
     activeController = new AbortController();
-    const processed = await processNextJob(store, { workerInstanceId, signal: activeController.signal });
+    const processed = await processNextJob(store, {
+      workerInstanceId,
+      runtimeDir: config.runtimeDir,
+      signal: activeController.signal,
+    });
     activeController = null;
     if (!processed) {
       await sleep(pollIntervalMs);
