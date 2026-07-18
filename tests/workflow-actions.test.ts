@@ -719,12 +719,24 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
   const outside = await mkdtemp(join(tmpdir(), "ai-workflow-artifact-outside-"));
   await writeFile(join(outside, "result.json"), "{}\n");
   await symlink(join(outside, "result.json"), join(workspace, "escaped-result.json"));
+  await execFileAsync("git", ["init", "-q", workspace]);
+  await execFileAsync("git", ["-C", workspace, "config", "user.email", "workflow-policy@example.test"]);
+  await execFileAsync("git", ["-C", workspace, "config", "user.name", "Workflow Policy Test"]);
+  await execFileAsync("git", ["-C", workspace, "commit", "--allow-empty", "-qm", "initial"]);
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
   const project = store.createProject({ path: workspace, name: "Workflow Policy Project" });
   const retry = command("retry", "false", []);
   retry.retryLimit = 2;
   retry.recoveryWorkflowIds = ["recover"];
   const recover = command("recover", "true", []);
+  const failedForMutation = command("failed-for-mutation", "false", []);
+  failedForMutation.recoveryWorkflowIds = ["recover-mutating"];
+  const recoverMutating = command(
+    "recover-mutating",
+    "git",
+    ["tag", "--no-sign", "workflow-recovered"],
+    "project_write"
+  );
   const missingArtifact = command("missing-artifact", "true", []);
   missingArtifact.expectedArtifacts = [{ id: "report", path: "report.json", kind: "file", required: true }];
   const unsafeRetry = command("unsafe-retry", "git", ["tag", "unsafe-retry"], "project_write");
@@ -740,7 +752,15 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    commands: { retry, recover, missingArtifact, unsafeRetry, escapingArtifact },
+    commands: {
+      retry,
+      recover,
+      failedForMutation,
+      recoverMutating,
+      missingArtifact,
+      unsafeRetry,
+      escapingArtifact,
+    },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
   const handle = await startWorkbenchServer({
@@ -792,6 +812,27 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     };
     assert.deepEqual(originalStatusData.recoveryOptions, ["recover"]);
     assert.equal(originalStatusData.recoveries[0]?.recoveryExecutionId, recoveryExecution.id);
+
+    const mutationFailure = await request("failed-for-mutation");
+    assert.equal(mutationFailure.statusCode, 422, mutationFailure.body);
+    const mutationFailureId = (JSON.parse(mutationFailure.body).data as { execution: { id: string } }).execution.id;
+    const pendingRecovery = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${mutationFailureId}/recover`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { workflowId: "recover-mutating" },
+    });
+    assert.equal(pendingRecovery.statusCode, 202, pendingRecovery.body);
+    const pendingRecoveryId = (JSON.parse(pendingRecovery.body).data as { execution: { id: string } }).execution.id;
+    const approvedRecovery = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${pendingRecoveryId}/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { decidedBy: "workflow-policy-test" },
+    });
+    assert.equal(approvedRecovery.statusCode, 200, approvedRecovery.body);
+    assert.equal(JSON.parse(approvedRecovery.body).data.execution.recoveryOfExecutionId, mutationFailureId);
+    assert.match((await execFileAsync("git", ["-C", workspace, "tag", "--list"])).stdout, /workflow-recovered/);
 
     const artifact = await request("missing-artifact");
     assert.equal(artifact.statusCode, 422, artifact.body);
