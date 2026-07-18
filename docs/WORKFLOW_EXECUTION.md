@@ -184,6 +184,19 @@ exclusion. A missing or escaping artifact changes the execution to `failed` with
 canonical paths are appended to `WorkflowExecution.artifacts`. In isolated mode this validation runs inside the
 retained workspace.
 
+Artifact inspection is metadata-only through
+`GET /actions/executions/:executionId/artifacts` or `ai action artifacts <execution-id>`. Existing files are resolved
+canonically on every read. Paths outside the approved project or Workbench runtime roots, and secret-like files, are
+reported as unsafe without returning their path or contents.
+
+## Recovery workflows
+
+Failed, blocked, and cancelled executions may start only the recovery workflow IDs snapshotted on the original
+execution. `POST /actions/executions/:executionId/recover` and `ai action recover <execution-id> <workflow-id>` create
+a linked execution and preserve recovery history on the original. The recovery definition is loaded from the
+canonical registry and passes through the same path, command, isolation, mutation, and approval policy as a normal
+run. A recovery cannot bypass approval merely because the failed execution was previously approved.
+
 ## Dependency DAGs
 
 A canonical `WorkflowDefinition` can contain either one command or a validated step DAG. Step IDs must be unique,
@@ -212,7 +225,7 @@ a protected secret-delivery channel is required before enabling them.
 
 ## Remaining adapters
 
-- explicit recovery workflow execution;
+- visual recovery and artifact metadata controls in run review and Rofi;
 - protected secret delivery for terminal/tmux workflows;
 - isolated artifact diff presentation and explicit cleanup controls;
 - platform capability discovery and `visibleWhen` evaluation.

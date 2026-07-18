@@ -31,14 +31,17 @@ lists concrete remaining gates rather than treating compatibility slices as fini
   precedence, action execution consumes them, and structural validation rejects ambiguous or cyclic DAGs.
 - Workflow DAGs execute in topological order with aggregate approval binding, durable per-step evidence, shared
   isolation, background supervision, check projection, downstream blocking, and cancellation without retry.
+- Failed, blocked, and cancelled workflow executions expose only their snapshotted recovery allowlist. Recovery runs
+  preserve causation, reapply canonical policy and approvals, and are available through API and CLI. Workflow
+  artifacts have a metadata-only inspection endpoint that redacts paths outside approved project/runtime roots.
 
 ## Priority 1 — Complete workflow modes
 
 Build on `workflow_executions` rather than adding another runner:
 
-1. Implement explicit recovery workflow execution and expose recovery choices in run review.
+1. Expose canonical recovery choices and artifact metadata in the visual run review and Rofi cockpit.
 2. Add a protected desktop secret-delivery channel without returning values to APIs, logs, or caches.
-3. Add recovery workflows and artifact inspection to workflow reviews.
+3. Add approval-gated artifact cleanup without allowing arbitrary path deletion.
 
 Acceptance evidence: API/CLI/Rofi integration tests for success, denial, approval replay, cancellation, timeout,
 wrong-project invocation, secret redaction, process-tree cleanup, and restart recovery.
