@@ -182,7 +182,7 @@ export function registerWorkflowRoutes(
       updatedAt: timestamp,
       state: "cancelled",
       currentStepId: null,
-      stepStates: { approval: "cancelled", command: "cancelled" },
+      stepStates: { ...(record.execution.approvalId ? { approval: "cancelled" } : {}), command: "cancelled" },
       finishedAt: timestamp,
       errorCode,
       errorSummary,
@@ -771,7 +771,10 @@ export function registerWorkflowRoutes(
       );
       deps.store.appendEvent(event);
       deps.publish(event);
-      sendJson(res, json("ok", { ...saved, launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)) }));
+      sendJson(
+        res,
+        json("ok", { ...saved, launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)) })
+      );
       return;
     }
     sendJson(

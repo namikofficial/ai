@@ -7,8 +7,9 @@ execution state, logs, check projection, and events; Rofi and CLI are clients an
 
 Non-interactive read-only commands run directly under supervision. Project-write, destructive, and external commands
 create a durable, expiring approval first. The approval is bound to the canonical project, complete structured command,
-working directory, mutation class, branch, and base commit; changed review context invalidates it. Interactive terminals,
-unresolved environment references, and unavailable platform capabilities still fail closed until their adapters exist.
+working directory, mutation class, branch, and base commit; changed review context invalidates it. Interactive commands
+use a durable terminal/tmux launch handoff. Unresolved environment references and unavailable platform capabilities
+still fail closed until their adapters exist.
 
 ```mermaid
 flowchart LR
@@ -26,6 +27,9 @@ flowchart LR
   Approval -->|approved and context unchanged| Exec
   Approval -->|rejected / expired / stale| Cancelled[Cancelled execution]
   Policy -->|read-only direct| Exec[Allowlisted subprocess]
+  Policy -->|interactive| Launch[(workflow_launches)]
+  Launch --> Desktop[Desktop launcher: Kitty or tmux]
+  Desktop --> Lifecycle[Token-bound start / complete callbacks]
   Exec --> DB[(workflow_executions)]
   Exec --> Check[Check result when category=check]
   DB --> Events[workflow started/completed/failed events]
@@ -47,6 +51,9 @@ GET  /actions/executions/<execution-id>
 POST /actions/executions/<execution-id>/approve
 POST /actions/executions/<execution-id>/reject
 POST /actions/executions/<execution-id>/cancel
+POST /actions/executions/<execution-id>/launch/authorize
+POST /actions/executions/<execution-id>/launch/start
+POST /actions/executions/<execution-id>/launch/complete
 GET  /approvals/<approval-id>
 
 ai action list [--project <id>]
@@ -71,6 +78,23 @@ Calls fail clearly when the API is unavailable, and every request remains in the
 There is intentionally no `ai_approve_action` tool. An agent may request a mutating workflow and receive its pending
 approval/deep link, but it cannot approve its own request. Approval remains an independent user decision in Workbench
 or through the explicit human-operated CLI.
+
+## Interactive terminal and tmux handoff
+
+An interactive manifest command never runs inside the API process. Workbench validates the same approved command,
+working directory, mutation policy, project/session/task scope, and approval context, then persists a versioned
+`WorkflowLaunch`. The execution becomes `ready` and emits `workflow.launch_ready`.
+
+The desktop helper requests a two-minute, single-launch capability. SQLite stores only its SHA-256 hash. The helper
+writes the capability to a mode-0600 file under the user runtime directory, launches Kitty or the manifest tmux
+session with structured arguments, deletes the capability file when consumed, and executes the command without a
+shell. It reports the child process group and final exit code through token-bound lifecycle callbacks. Replayed,
+expired, wrong-state, and wrong-token callbacks are rejected. Canonical project/session/task identifiers are supplied
+as environment variables; secret references and values are never part of the launch contract.
+
+Rofi launches read-only interactive actions immediately. For an approved mutating interactive action, the event bridge
+offers a `Launch` notification action after approval. Cancelling a ready launch closes it durably; cancelling a running
+launch signals the reported process group and the helper records its terminal state.
 
 ## Adding a workflow
 
@@ -112,7 +136,6 @@ workflow adapter is complete.
 
 ## Remaining adapters
 
-- floating Kitty and tmux execution with canonical context variables;
 - background supervision, retry/dependency steps, restart recovery, and recovery workflows;
 - safe secret-reference resolution without logging values;
 - isolated generic workflows and artifact collection;

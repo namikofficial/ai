@@ -7,6 +7,7 @@ import type {
   RecommendedAction,
   RuntimeHealth,
   WorkflowExecution,
+  WorkflowLaunch,
 } from "../../contracts/src/index.ts";
 import type {
   ActiveProjectSelection,
@@ -194,7 +195,7 @@ export function createApiClient(options: ApiClientOptions) {
     },
     runAction(
       workflowId: string,
-      input: { projectId?: string; sessionId?: string; taskId?: string } = {}
+      input: { projectId?: string; sessionId?: string; taskId?: string; executionMode?: "terminal" | "tmux" } = {}
     ): Promise<{
       status: "ok";
       data: {
@@ -204,6 +205,7 @@ export function createApiClient(options: ApiClientOptions) {
         stderr: string;
         durationMs: number;
         approval?: Record<string, unknown> | null;
+        launch?: WorkflowLaunch | null;
         deepLink?: string;
       };
     }> {

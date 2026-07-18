@@ -57,7 +57,7 @@ function printUsage(): void {
   ai context status [--json] [--compact]
   ai context explain
   ai action list [--project <project-id>]
-  ai action run <workflow-id> [--project <project-id>] [--session <session-id>] [--task <task-id>]
+  ai action run <workflow-id> [--project <project-id>] [--session <session-id>] [--task <task-id>] [--execution-mode terminal|tmux]
   ai action show <execution-id>
   ai action approve <execution-id> [--notes <text>]
   ai action reject <execution-id> [--notes <text>]
@@ -725,6 +725,9 @@ async function run(): Promise<void> {
           ...(options.project ? { projectId: options.project } : {}),
           ...(options.session ? { sessionId: options.session } : {}),
           ...(options.task ? { taskId: options.task } : {}),
+          ...(options["execution-mode"] === "terminal" || options["execution-mode"] === "tmux"
+            ? { executionMode: options["execution-mode"] }
+            : {}),
         })
       );
       return;
