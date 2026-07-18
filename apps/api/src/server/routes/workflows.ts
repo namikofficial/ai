@@ -828,20 +828,52 @@ export function registerWorkflowRoutes(
     return saved;
   }
 
-  router.get("/actions", (req, res) => {
+  router.get(
+    "/actions",
+    asyncRoute(async (req, res) => {
     const explicitProjectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
     const projectId = explicitProjectId ?? deps.store.projectRegistry.getSelection()?.projectId ?? null;
     if (!projectId) {
       sendJson(res, json("error", undefined, { message: "no active project; select a project first" }), 409);
-      return;
+        return;
     }
     const manifest = deps.store.projectRegistry.getManifest(projectId);
     if (!manifest) {
       sendJson(res, json("error", undefined, { message: `project ${projectId} has no approved manifest` }), 404);
-      return;
+        return;
     }
-    sendJson(res, json("ok", recommendedActionsFromManifest(withCanonicalWorkflowDefinitions(manifest))));
-  });
+      const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
+      const actions = recommendedActionsFromManifest(canonicalManifest);
+      const definitions = deps.store.workflows.listDefinitions(projectId).filter((definition) => definition.steps.length > 0);
+      for (const [index, definition] of definitions.entries()) {
+        const prepared = await prepareWorkflowPlan(canonicalManifest, definition, {
+          allowMutating: true,
+          allowInteractive: true,
+        });
+        const timestamp = new Date().toISOString();
+        actions.push({
+          schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
+          id: `action:${projectId}:${definition.id}`,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          origin: { source: "workbench", instanceId: null, legacyRef: definition.id },
+          capabilities: definition.capabilities,
+          projectId,
+          label: definition.name,
+          description: definition.description,
+          category: definition.category,
+          state: prepared.ok ? "ready" : "blocked",
+          workflowId: definition.id,
+          deepLink: null,
+          disabledReason: prepared.ok ? null : prepared.rejection.summary,
+          priority: actions.length + index,
+          mutation: prepared.ok ? prepared.plan.mutation : "read_only",
+          approvalRequired: prepared.ok ? prepared.plan.approvalRequired : definition.approvalRequired,
+        });
+      }
+      sendJson(res, json("ok", actions));
+    })
+  );
 
   router.get("/projects/:projectId/workflows", (req, res) => {
     const projectId = decodeURIComponent(String(req.params.projectId ?? ""));
