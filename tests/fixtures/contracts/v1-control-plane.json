@@ -264,7 +264,9 @@
     "exitCode": null,
     "artifacts": [],
     "errorCode": null,
-    "errorSummary": null
+    "errorSummary": null,
+    "recoveryWorkflowIds": ["show-failed-checks"],
+    "recoveryOfExecutionId": null
   },
   "WorkflowLaunch": {
     "schemaVersion": 1,
