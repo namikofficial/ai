@@ -32,7 +32,13 @@ function step(id: string, workflowId: string, dependsOn: string[] = []): Workflo
 
 test("workflow plans topologically order canonical command references and bind complete approval context", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-plan-"));
-  const first = { ...fixture.ProjectManifest.commands.verify, id: "first", executable: "true", arguments: [] };
+  const first = {
+    ...fixture.ProjectManifest.commands.verify,
+    id: "first",
+    executable: "true",
+    arguments: [],
+    requiresCapabilities: [],
+  };
   const second = { ...first, id: "second" };
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
