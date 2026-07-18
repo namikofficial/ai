@@ -649,6 +649,19 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
+    explainRetrieval(input: {
+      project: string;
+      query: string;
+      mode?: "local" | "cloud" | "hybrid";
+      depth?: "shallow" | "standard" | "deep";
+      limit?: number;
+    }): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, "/retrieval/explain", {
+        method: "POST",
+        body: JSON.stringify(input),
+        headers: { "content-type": "application/json" },
+      });
+    },
     explainContext(input: {
       project: string;
       query: string;

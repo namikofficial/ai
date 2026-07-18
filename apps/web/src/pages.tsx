@@ -420,6 +420,9 @@ function ProjectDetailPage(): ReactNode {
           <button type="button" onClick={reindex} disabled={indexing}>
             {indexing ? "Reindexing..." : "Reindex project"}
           </button>
+          <a className="button-link" href={`/projects/${project.id}/retrieval`}>
+            Explain retrieval
+          </a>
         </div>
       </Panel>
       <Panel title="Recent Chunks" span={8}>
@@ -2135,6 +2138,12 @@ function HandoffDetailPage(): ReactNode {
   const { handoffId = "" } = useParams();
   const resource = useResource(() => api.getHandoff(handoffId), [handoffId]);
   const handoff = resource.data?.data;
+  const setSelectedProjectId = useWorkbenchStore((state) => state.setSelectedProjectId);
+  useEffect(() => {
+    if (!handoff?.projectId) return;
+    setSelectedProjectId(handoff.projectId);
+    void api.selectProject(handoff.projectId, null, "workbench_route").catch(() => undefined);
+  }, [handoff?.projectId, setSelectedProjectId]);
   if (!handoff) {
     return (
       <PageShell title="Handoff" subtitle={handoffId}>
@@ -2156,6 +2165,9 @@ function HandoffDetailPage(): ReactNode {
         />
         <a className="button-link" href={`/sessions/${handoff.sessionId}`}>
           Open shared session
+        </a>
+        <a className="button-link" href={`/projects/${handoff.projectId}/work`}>
+          Open project work
         </a>
       </Panel>
       <Panel title="Prompt" span={8}>
@@ -2437,22 +2449,30 @@ function MemoryPage(): ReactNode {
 }
 
 function RetrievalPage(): ReactNode {
+  const { projectId: routeProjectId } = useParams();
+  const [searchParams] = useSearchParams();
+  const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const resource = useResource(() =>
     Promise.all([api.listProjects(), api.listSessions(), api.listMemoryCandidates({ status: "pending" })])
   );
   const projects = (resource.data?.[0].data ?? []) as ProjectSummary[];
   const sessions = (resource.data?.[1].data ?? []) as SessionRecord[];
   const misses = (resource.data?.[2].data ?? []).filter((c: MemoryCandidateRecord) => c.kind === "retrieval_miss");
-  const [project, setProject] = useState(projects[0]?.id ?? "");
-  const [sessionId, setSessionId] = useState(sessions[0]?.id ?? "");
-  const [query, setQuery] = useState("");
+  const [project, setProject] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
+  const [sessionId, setSessionId] = useState(searchParams.get("session") ?? sessions[0]?.id ?? "");
+  const [query, setQuery] = useState(searchParams.get("query") ?? "");
   const [results, setResults] = useState<Array<Record<string, unknown>>>([]);
   const [queries, setQueries] = useState<RetrievalQueryRecord[]>([]);
+  const [explanation, setExplanation] = useState<Record<string, unknown> | null>(null);
+  const [explainError, setExplainError] = useState<string | null>(null);
+  const [explaining, setExplaining] = useState(false);
 
   useEffect(() => {
-    if (!project && projects[0]?.id) setProject(projects[0].id);
+    if (routeProjectId && project !== routeProjectId) setProject(routeProjectId);
+    else if (!project && selectedProjectId) setProject(selectedProjectId);
+    else if (!project && projects[0]?.id) setProject(projects[0].id);
     if (!sessionId && sessions[0]?.id) setSessionId(sessions[0].id);
-  }, [project, projects, sessionId, sessions]);
+  }, [project, projects, routeProjectId, selectedProjectId, sessionId, sessions]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -2467,6 +2487,30 @@ function RetrievalPage(): ReactNode {
     const response = await api.searchRetrieval({ project, query, limit: 8 });
     setResults(response.data as Array<Record<string, unknown>>);
   };
+
+  const explain = async () => {
+    if (!project || !query.trim()) return;
+    setExplaining(true);
+    setExplainError(null);
+    try {
+      const response = await api.explainRetrieval({ project, query: query.trim(), mode: "local", depth: "standard" });
+      setExplanation(response.data);
+    } catch (cause) {
+      setExplainError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setExplaining(false);
+    }
+  };
+
+  const ranked = Array.isArray(explanation?.ranked)
+    ? (explanation.ranked as Array<Record<string, unknown>>)
+    : [];
+  const selected = Array.isArray(explanation?.selected)
+    ? (explanation.selected as Array<Record<string, unknown>>)
+    : [];
+  const dropped = Array.isArray(explanation?.dropped)
+    ? (explanation.dropped as Array<Record<string, unknown>>)
+    : [];
 
   return (
     <PageShell title="Retrieval" subtitle="Search, recent queries, and misses">
@@ -2484,7 +2528,13 @@ function RetrievalPage(): ReactNode {
             )}
           </select>
           <input value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="auth router" />
-          <button type="submit">Search</button>
+          <div className="row">
+            <button type="submit">Search</button>
+            <button type="button" onClick={() => void explain()} disabled={explaining || !project || !query.trim()}>
+              {explaining ? "Explaining..." : "Why these sources?"}
+            </button>
+          </div>
+          {explainError ? <div className="error">{explainError}</div> : null}
         </form>
       </Panel>
       <Panel title="Results" span={6}>
@@ -2494,6 +2544,7 @@ function RetrievalPage(): ReactNode {
               <div className="list-item" key={String(chunk.id ?? `${chunk.path}-${chunk.startLine}`)}>
                 <div className="row">
                   <strong>{String(chunk.path ?? "")}</strong>
+                  <Badge tone="warn">untrusted evidence</Badge>
                   <Badge>score {Number(chunk.score ?? 0).toFixed(1)}</Badge>
                 </div>
                 <pre>{String(chunk.content ?? chunk.excerpt ?? "").slice(0, 260)}</pre>
@@ -2503,6 +2554,57 @@ function RetrievalPage(): ReactNode {
             <EmptyState title="No results" body="Run a retrieval search against a project." />
           )}
         </div>
+      </Panel>
+      <Panel title="Retrieval explanation" span={12}>
+        {explanation ? (
+          <div className="stack">
+            <div className="row">
+              <Badge tone={Number(explanation.confidence ?? 0) >= 0.65 ? "good" : "warn"}>
+                confidence {Number(explanation.confidence ?? 0).toFixed(2)}
+              </Badge>
+              <span className="tiny">
+                {selected.length} selected · {ranked.length} ranked · {dropped.length} dropped · {" "}
+                {Number(explanation.usedTokens ?? 0)} tokens
+              </span>
+            </div>
+            <div className="list">
+              {ranked.map((entry) => (
+                <div className="list-item" key={String(entry.chunkId ?? entry.path)}>
+                  <div className="row">
+                    <strong>{String(entry.path ?? "unknown")}</strong>
+                    <Badge tone={selected.some((item) => item.chunkId === entry.chunkId) ? "good" : "neutral"}>
+                      {selected.some((item) => item.chunkId === entry.chunkId) ? "selected" : "ranked"}
+                    </Badge>
+                    <Badge>score {Number(entry.finalScore ?? 0).toFixed(2)}</Badge>
+                    <Badge tone="warn">untrusted evidence</Badge>
+                  </div>
+                  <div className="tiny">{String(entry.rerankReason ?? "No ranking explanation")}</div>
+                  <div className="tiny">
+                    boosters: {Array.isArray(entry.boosters) ? (entry.boosters as string[]).join(", ") || "none" : "none"}
+                  </div>
+                </div>
+              ))}
+            </div>
+            {dropped.length > 0 ? (
+              <details>
+                <summary>{dropped.length} dropped source(s)</summary>
+                <div className="list">
+                  {dropped.map((entry) => (
+                    <div className="list-item" key={String(entry.chunkId ?? entry.path)}>
+                      <strong>{String(entry.path ?? "unknown")}</strong>
+                      <div className="tiny">{String(entry.reason ?? "not selected")}</div>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
+          </div>
+        ) : (
+          <EmptyState
+            title="No explanation yet"
+            body="Enter a query and choose Why these sources? to inspect ranking, selection, drops, boosts and token use."
+          />
+        )}
       </Panel>
       <Panel title="Recent Retrieval Queries" span={8}>
         <div className="stack">
@@ -2570,6 +2672,13 @@ function RetrievalQueryDetailPage(): ReactNode {
         feedback: Array<Record<string, unknown>>;
       }
     | undefined;
+  const setSelectedProjectId = useWorkbenchStore((state) => state.setSelectedProjectId);
+  const detailProjectId = detail ? String(detail.query.projectId ?? "") : "";
+  useEffect(() => {
+    if (!detailProjectId) return;
+    setSelectedProjectId(detailProjectId);
+    void api.selectProject(detailProjectId, null, "workbench_route").catch(() => undefined);
+  }, [detailProjectId, setSelectedProjectId]);
   if (!detail) {
     return (
       <PageShell title="Retrieval Query" subtitle={queryId}>
@@ -2580,7 +2689,7 @@ function RetrievalQueryDetailPage(): ReactNode {
     );
   }
   return (
-    <PageShell title="Retrieval Query" subtitle={String(detail.query.originalQuery ?? queryId)}>
+    <PageShell title="Retrieval explanation" subtitle={String(detail.query.originalQuery ?? queryId)}>
       <Panel title="Query" span={6}>
         <KeyValueList
           items={[

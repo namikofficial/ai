@@ -373,7 +373,9 @@ export function App() {
           <Route path="/checks" element={<ChecksPage />} />
           <Route path="/memory" element={<MemoryPage />} />
           <Route path="/retrieval" element={<RetrievalPage />} />
+          <Route path="/projects/:projectId/retrieval" element={<RetrievalPage />} />
           <Route path="/retrieval/queries/:queryId" element={<RetrievalQueryDetailPage />} />
+          <Route path="/retrieval/explanations/:queryId" element={<RetrievalQueryDetailPage />} />
           <Route path="/skills" element={<SkillsPage />} />
           <Route path="/eval" element={<EvalPage />} />
           <Route path="/reviews" element={<ReviewsPage />} />
