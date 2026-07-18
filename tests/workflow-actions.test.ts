@@ -245,6 +245,7 @@ test("background workflows use the durable queue and recover abandoned supervisi
   const backgroundRetry = command("background-retry", "false", []);
   backgroundRetry.executionMode = "background";
   backgroundRetry.retryLimit = 1;
+  const prepare = command("background-prepare", "true", []);
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -252,9 +253,31 @@ test("background workflows use the durable queue and recover abandoned supervisi
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    commands: { background, backgroundRetry },
+    commands: { background, backgroundRetry, prepare },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const planTimestamp = new Date().toISOString();
+  store.workflows.saveDefinition(
+    {
+      ...fixture.WorkflowDefinition,
+      id: "background-pipeline",
+      projectId: project.id,
+      name: "Background pipeline",
+      command: null,
+      steps: [
+        workflowStep("prepare-step", "background-prepare"),
+        {
+          ...workflowStep("background-step", "background-version", ["prepare-step"]),
+          executionMode: "background",
+        },
+      ],
+      expectedArtifacts: [],
+      approvalRequired: false,
+      createdAt: planTimestamp,
+      updatedAt: planTimestamp,
+    },
+    "manual"
+  );
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
@@ -280,6 +303,20 @@ test("background workflows use the durable queue and recover abandoned supervisi
     assert.equal(store.workflows.get(queuedData.execution.id)?.execution.state, "completed");
     assert.equal(store.workflows.getBackgroundJob(queuedData.execution.id)?.state, "completed");
     assert.equal(store.listCheckRuns(10, project.id)[0]?.status, "completed");
+
+    const planData = JSON.parse((await request("background-pipeline")).body).data as {
+      execution: { id: string; state: string };
+    };
+    assert.equal(planData.execution.state, "starting");
+    assert.equal(
+      await processNextJob(store, { workerInstanceId: "test-worker", runtimeDir: join(workspace, "runtime") }),
+      true
+    );
+    assert.equal(store.workflows.get(planData.execution.id)?.execution.state, "completed");
+    assert.deepEqual(
+      store.workflows.listStepExecutions(planData.execution.id).map((step) => step.state),
+      ["completed", "completed"]
+    );
 
     const retryData = JSON.parse((await request("background-retry")).body).data as {
       execution: { id: string };
