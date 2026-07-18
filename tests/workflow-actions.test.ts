@@ -12,7 +12,10 @@ import { runAllowedCommand } from "../packages/execution-engine/src/index.ts";
 
 const fixture = JSON.parse(
   await readFile(new URL("./fixtures/contracts/v1-control-plane.json", import.meta.url), "utf8")
-) as { ProjectManifest: ProjectManifest; WorkflowDefinition: WorkflowDefinition };
+) as {
+  ProjectManifest: ProjectManifest;
+  WorkflowDefinition: WorkflowDefinition;
+};
 function execFileAsync(file: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     execFile(file, args, { encoding: "utf8" }, (error, stdout, stderr) => {
@@ -70,7 +73,10 @@ function workflowStep(id: string, workflowId: string, dependsOn: string[] = []):
 test("workflow actions list approved commands, execute read-only work, and persist audit state", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-actions-"));
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Workflow Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Workflow Project",
+  });
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -128,23 +134,41 @@ test("workflow actions list approved commands, execute read-only work, and persi
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   try {
-    const listed = await handle.inject({ method: "GET", url: "/actions", headers: { accept: "application/json" } });
+    const listed = await handle.inject({
+      method: "GET",
+      url: "/actions",
+      headers: { accept: "application/json" },
+    });
     assert.equal(listed.statusCode, 200);
-    const actions = JSON.parse(listed.body).data as Array<{ workflowId: string }>;
+    const actions = JSON.parse(listed.body).data as Array<{
+      workflowId: string;
+    }>;
     assert.deepEqual(actions.map((action) => action.workflowId).sort(), ["unsafe-reset", "version"]);
 
     const run = await handle.inject({
       method: "POST",
       url: "/actions/version/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
     assert.equal(run.statusCode, 200);
     const record = JSON.parse(run.body).data as {
-      execution: { id: string; state: string; projectId: string; workflowId: string };
+      execution: {
+        id: string;
+        state: string;
+        projectId: string;
+        workflowId: string;
+      };
       stdout: string;
     };
     assert.equal(record.execution.state, "completed");
@@ -166,20 +190,30 @@ test("workflow actions list approved commands, execute read-only work, and persi
     const manualDefinition = {
       ...canonicalDefinition,
       name: "Manual version policy",
-      command: { ...canonicalDefinition.command, executable: "false", arguments: [] },
+      command: {
+        ...canonicalDefinition.command,
+        executable: "false",
+        arguments: [],
+      },
       updatedAt: new Date().toISOString(),
     };
     const savedDefinition = await handle.inject({
       method: "PUT",
       url: `/projects/${project.id}/workflows/version`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: manualDefinition,
     });
     assert.equal(savedDefinition.statusCode, 200, savedDefinition.body);
     const manualRun = await handle.inject({
       method: "POST",
       url: "/actions/version/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
     assert.equal(manualRun.statusCode, 422, manualRun.body);
@@ -189,7 +223,10 @@ test("workflow actions list approved commands, execute read-only work, and persi
     const rejected = await handle.inject({
       method: "POST",
       url: "/actions/unsafe-reset/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
     assert.equal(rejected.statusCode, 409);
@@ -198,7 +235,10 @@ test("workflow actions list approved commands, execute read-only work, and persi
 
     const otherPath = join(workspace, "other-project");
     await mkdir(otherPath);
-    const otherProject = store.createProject({ path: otherPath, name: "Other Project" });
+    const otherProject = store.createProject({
+      path: otherPath,
+      name: "Other Project",
+    });
     const otherSession = store.createSession({
       projectId: otherProject.id,
       title: "Other project session",
@@ -209,7 +249,10 @@ test("workflow actions list approved commands, execute read-only work, and persi
     const confused = await handle.inject({
       method: "POST",
       url: "/actions/version/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id, sessionId: otherSession.id },
     });
     assert.equal(confused.statusCode, 409);
@@ -224,7 +267,10 @@ test("workflow actions list approved commands, execute read-only work, and persi
     const confusedTask = await handle.inject({
       method: "POST",
       url: "/actions/version/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id, taskId: otherTask.id },
     });
     assert.equal(confusedTask.statusCode, 409);
@@ -238,7 +284,10 @@ test("workflow actions list approved commands, execute read-only work, and persi
 test("background workflows use the durable queue and recover abandoned supervision", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-background-"));
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Background Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Background Project",
+  });
   const background = command("background-version", "git", ["--version"]);
   background.executionMode = "background";
   background.category = "check";
@@ -281,13 +330,20 @@ test("background workflows use the durable queue and recover abandoned supervisi
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   const request = (workflowId = "background-version") =>
     handle.inject({
       method: "POST",
       url: `/actions/${workflowId}/run`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
   try {
@@ -309,7 +365,10 @@ test("background workflows use the durable queue and recover abandoned supervisi
     };
     assert.equal(planData.execution.state, "starting");
     assert.equal(
-      await processNextJob(store, { workerInstanceId: "test-worker", runtimeDir: join(workspace, "runtime") }),
+      await processNextJob(store, {
+        workerInstanceId: "test-worker",
+        runtimeDir: join(workspace, "runtime"),
+      }),
       true
     );
     assert.equal(store.workflows.get(planData.execution.id)?.execution.state, "completed");
@@ -327,7 +386,9 @@ test("background workflows use the durable queue and recover abandoned supervisi
     assert.equal(retried?.stepStates["command.attempt.1"], "failed");
     assert.equal(retried?.stepStates["command.attempt.2"], "failed");
 
-    const cancelled = JSON.parse((await request()).body).data as { execution: { id: string } };
+    const cancelled = JSON.parse((await request()).body).data as {
+      execution: { id: string };
+    };
     const cancel = await handle.inject({
       method: "POST",
       url: `/actions/executions/${cancelled.execution.id}/cancel`,
@@ -337,10 +398,15 @@ test("background workflows use the durable queue and recover abandoned supervisi
     assert.equal(store.workflows.get(cancelled.execution.id)?.execution.state, "cancelled");
     assert.equal(store.workflows.getBackgroundJob(cancelled.execution.id)?.state, "cancelled");
 
-    const changed = JSON.parse((await request()).body).data as { execution: { id: string } };
+    const changed = JSON.parse((await request()).body).data as {
+      execution: { id: string };
+    };
     store.projectRegistry.saveApprovedManifest(
       project.id,
-      { ...manifest, commands: { background: { ...background, executionMode: "direct" } } },
+      {
+        ...manifest,
+        commands: { background: { ...background, executionMode: "direct" } },
+      },
       "test"
     );
     assert.equal(await processNextJob(store, { workerInstanceId: "test-worker" }), true);
@@ -349,7 +415,9 @@ test("background workflows use the durable queue and recover abandoned supervisi
     assert.equal(store.workflows.getBackgroundJob(changed.execution.id)?.state, "failed");
     store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
 
-    const abandoned = JSON.parse((await request()).body).data as { execution: { id: string } };
+    const abandoned = JSON.parse((await request()).body).data as {
+      execution: { id: string };
+    };
     const claimed = store.claimNextJob();
     assert.ok(claimed);
     const abandonedRecord = store.workflows.get(abandoned.execution.id);
@@ -386,7 +454,10 @@ test("background workflows use the durable queue and recover abandoned supervisi
 test("running background worker processes are cancelled by process group without retry", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-background-cancel-"));
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Background Cancellation Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Background Cancellation Project",
+  });
   const server = command("background-server", "python3", ["-m", "http.server", "0"]);
   server.executionMode = "background";
   server.retryLimit = 1;
@@ -403,13 +474,20 @@ test("running background worker processes are cancelled by process group without
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   try {
     const queued = await handle.inject({
       method: "POST",
       url: "/actions/background-server/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
     const executionId = (JSON.parse(queued.body).data as { execution: { id: string } }).execution.id;
@@ -481,16 +559,26 @@ test("approved secret references reach commands without entering responses or au
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-secrets-"));
   const secretFile = join(workspace, "workflow-secrets.env");
   const secretValue = "workflow-secret-value-should-never-persist";
-  await writeFile(secretFile, `WORKBENCH_TEST_TOKEN=${secretValue}\n`, { mode: 0o600 });
+  await writeFile(secretFile, `WORKBENCH_TEST_TOKEN=${secretValue}\n`, {
+    mode: 0o600,
+  });
   const previousProvider = process.env.AI_WORKBENCH_SECRET_FILE;
   process.env.AI_WORKBENCH_SECRET_FILE = secretFile;
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Secret Workflow Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Secret Workflow Project",
+  });
   const approved = command("approved-secret", "printenv", ["WORKBENCH_TEST_TOKEN"]);
   approved.environmentRefs = ["WORKBENCH_TEST_TOKEN"];
   const unapproved = command("unapproved-secret", "printenv", ["OTHER_TOKEN"]);
   unapproved.environmentRefs = ["OTHER_TOKEN"];
-  const desktop = { ...approved, id: "desktop-secret", name: "desktop-secret", executionMode: "terminal" as const };
+  const desktop = {
+    ...approved,
+    id: "desktop-secret",
+    name: "desktop-secret",
+    executionMode: "terminal" as const,
+  };
   const background = {
     ...approved,
     id: "background-secret",
@@ -511,13 +599,20 @@ test("approved secret references reach commands without entering responses or au
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   const request = (workflowId: string) =>
     handle.inject({
       method: "POST",
       url: `/actions/${workflowId}/run`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
   try {
@@ -564,7 +659,10 @@ test("mutating workflow approvals bind context, reject replay, and support rejec
   await execFileAsync("git", ["-C", workspace, "config", "user.name", "Workflow Test"]);
   await execFileAsync("git", ["-C", workspace, "commit", "--allow-empty", "-qm", "initial"]);
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Approval Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Approval Project",
+  });
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -582,13 +680,20 @@ test("mutating workflow approvals bind context, reject replay, and support rejec
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   const request = (workflowId: string) =>
     handle.inject({
       method: "POST",
       url: `/actions/${workflowId}/run`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
   try {
@@ -616,7 +721,10 @@ test("mutating workflow approvals bind context, reject replay, and support rejec
     const approved = await handle.inject({
       method: "POST",
       url: `/actions/executions/${pendingData.execution.id}/approve`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { decidedBy: "test" },
     });
     assert.equal(approved.statusCode, 200, approved.body);
@@ -626,7 +734,10 @@ test("mutating workflow approvals bind context, reject replay, and support rejec
     const replay = await handle.inject({
       method: "POST",
       url: `/actions/executions/${pendingData.execution.id}/approve`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: {},
     });
     assert.equal(replay.statusCode, 409);
@@ -637,7 +748,10 @@ test("mutating workflow approvals bind context, reject replay, and support rejec
     const rejected = await handle.inject({
       method: "POST",
       url: `/actions/executions/${rejectedPending.execution.id}/reject`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { notes: "not now" },
     });
     assert.equal(rejected.statusCode, 200);
@@ -651,7 +765,10 @@ test("mutating workflow approvals bind context, reject replay, and support rejec
     const stale = await handle.inject({
       method: "POST",
       url: `/actions/executions/${stalePending.execution.id}/approve`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: {},
     });
     assert.equal(stale.statusCode, 409);
@@ -667,7 +784,10 @@ test("mutating workflow approvals bind context, reject replay, and support rejec
 test("running workflow cancellation terminates execution and persists cancelled state", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-cancel-"));
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Cancellation Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Cancellation Project",
+  });
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -675,19 +795,28 @@ test("running workflow cancellation terminates execution and persists cancelled 
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    commands: { server: command("server", "python3", ["-m", "http.server", "0"]) },
+    commands: {
+      server: command("server", "python3", ["-m", "http.server", "0"]),
+    },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   try {
     const runningRequest = handle.inject({
       method: "POST",
       url: "/actions/server/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
     let executionId: string | null = null;
@@ -724,7 +853,10 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
   await execFileAsync("git", ["-C", workspace, "config", "user.name", "Workflow Policy Test"]);
   await execFileAsync("git", ["-C", workspace, "commit", "--allow-empty", "-qm", "initial"]);
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Workflow Policy Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Workflow Policy Project",
+  });
   const retry = command("retry", "false", []);
   retry.retryLimit = 2;
   retry.recoveryWorkflowIds = ["recover"];
@@ -743,7 +875,12 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
   unsafeRetry.retryLimit = 1;
   const escapingArtifact = command("escaping-artifact", "true", []);
   escapingArtifact.expectedArtifacts = [
-    { id: "escaped-report", path: "escaped-result.json", kind: "file", required: true },
+    {
+      id: "escaped-report",
+      path: "escaped-result.json",
+      kind: "file",
+      required: true,
+    },
   ];
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
@@ -766,13 +903,20 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   const request = (workflowId: string) =>
     handle.inject({
       method: "POST",
       url: `/actions/${workflowId}/run`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
   try {
@@ -790,7 +934,10 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     const recovered = await handle.inject({
       method: "POST",
       url: `/actions/executions/${retriedExecution.id}/recover`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { workflowId: "recover", requestedBy: "workflow-policy-test" },
     });
     assert.equal(recovered.statusCode, 200, recovered.body);
@@ -819,7 +966,10 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     const pendingRecovery = await handle.inject({
       method: "POST",
       url: `/actions/executions/${mutationFailureId}/recover`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { workflowId: "recover-mutating" },
     });
     assert.equal(pendingRecovery.statusCode, 202, pendingRecovery.body);
@@ -827,7 +977,10 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
     const approvedRecovery = await handle.inject({
       method: "POST",
       url: `/actions/executions/${pendingRecoveryId}/approve`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { decidedBy: "workflow-policy-test" },
     });
     assert.equal(approvedRecovery.statusCode, 200, approvedRecovery.body);
@@ -836,7 +989,10 @@ test("workflow retries are audited, required artifacts are enforced, and mutatin
 
     const artifact = await request("missing-artifact");
     assert.equal(artifact.statusCode, 422, artifact.body);
-    const artifactExecution = JSON.parse(artifact.body).data.execution as { errorCode: string; errorSummary: string };
+    const artifactExecution = JSON.parse(artifact.body).data.execution as {
+      errorCode: string;
+      errorSummary: string;
+    };
     assert.equal(artifactExecution.errorCode, "expected_artifact_failed");
     assert.match(artifactExecution.errorSummary, /missing: report/);
 
@@ -861,7 +1017,10 @@ test("workflow definition DAGs execute in dependency order and block downstream 
   await execFileAsync("git", ["-C", workspace, "config", "user.name", "Workflow DAG Test"]);
   await execFileAsync("git", ["-C", workspace, "commit", "--allow-empty", "-qm", "initial"]);
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Workflow DAG Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Workflow DAG Project",
+  });
   const first = command("first", "true", []);
   const second = command("second", "true", []);
   const failing = command("failing", "false", []);
@@ -920,13 +1079,20 @@ test("workflow definition DAGs execute in dependency order and block downstream 
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   const request = (workflowId: string) =>
     handle.inject({
       method: "POST",
       url: `/actions/${workflowId}/run`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
   try {
@@ -943,7 +1109,9 @@ test("workflow definition DAGs execute in dependency order and block downstream 
 
     const succeeded = await request("success-pipeline");
     assert.equal(succeeded.statusCode, 200, succeeded.body);
-    const succeededData = JSON.parse(succeeded.body).data as { execution: { id: string; state: string } };
+    const succeededData = JSON.parse(succeeded.body).data as {
+      execution: { id: string; state: string };
+    };
     assert.equal(succeededData.execution.state, "completed");
     assert.deepEqual(
       store.workflows.listStepExecutions(succeededData.execution.id).map((step) => [step.stepId, step.state]),
@@ -962,7 +1130,11 @@ test("workflow definition DAGs execute in dependency order and block downstream 
     const failed = await request("failure-pipeline");
     assert.equal(failed.statusCode, 422, failed.body);
     const failedData = JSON.parse(failed.body).data as {
-      execution: { id: string; state: string; stepStates: Record<string, string> };
+      execution: {
+        id: string;
+        state: string;
+        stepStates: Record<string, string>;
+      };
     };
     assert.equal(failedData.execution.state, "failed");
     assert.equal(failedData.execution.stepStates["failure-step"], "failed");
@@ -975,12 +1147,17 @@ test("workflow definition DAGs execute in dependency order and block downstream 
 
     const pending = await request("approval-pipeline");
     assert.equal(pending.statusCode, 202, pending.body);
-    const pendingData = JSON.parse(pending.body).data as { execution: { id: string; state: string } };
+    const pendingData = JSON.parse(pending.body).data as {
+      execution: { id: string; state: string };
+    };
     assert.equal(pendingData.execution.state, "waiting");
     const approved = await handle.inject({
       method: "POST",
       url: `/actions/executions/${pendingData.execution.id}/approve`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { decidedBy: "workflow-dag-test" },
     });
     assert.equal(approved.statusCode, 200, approved.body);
@@ -995,7 +1172,10 @@ test("workflow definition DAGs execute in dependency order and block downstream 
 test("interactive workflows use token-bound terminal and tmux launch handoffs", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-launch-"));
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Interactive Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Interactive Project",
+  });
   const interactive = command("interactive", "git", ["--version"]);
   interactive.interactive = true;
   interactive.executionMode = "terminal";
@@ -1009,7 +1189,10 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
     path: project.path,
     repositoryRoot: project.path,
     approvedRoots: [project.path],
-    desktop: { ...fixture.ProjectManifest.desktop, tmuxSession: "interactive-project" },
+    desktop: {
+      ...fixture.ProjectManifest.desktop,
+      tmuxSession: "interactive-project",
+    },
     commands: { interactive, mutating },
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
@@ -1023,19 +1206,34 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   try {
     const requested = await handle.inject({
       method: "POST",
       url: "/actions/interactive/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: { projectId: project.id, sessionId: session.id, executionMode: "terminal" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: {
+        projectId: project.id,
+        sessionId: session.id,
+        executionMode: "terminal",
+      },
     });
     assert.equal(requested.statusCode, 202, requested.body);
     const ready = JSON.parse(requested.body).data as {
       execution: { id: string; state: string };
-      launch: { state: string; mode: string; environment: Record<string, string> };
+      launch: {
+        state: string;
+        mode: string;
+        environment: Record<string, string>;
+      };
     };
     assert.equal(ready.execution.state, "ready");
     assert.equal(ready.launch.state, "ready");
@@ -1047,7 +1245,10 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
     const authorized = await handle.inject({
       method: "POST",
       url: `/actions/executions/${ready.execution.id}/launch/authorize`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: {},
     });
     assert.equal(authorized.statusCode, 200);
@@ -1064,31 +1265,55 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
     const invalid = await handle.inject({
       method: "POST",
       url: `/actions/executions/${ready.execution.id}/launch/start`,
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: { token: "wrong", launcherInstanceId: "test-launcher", pid: process.pid },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: {
+        token: "wrong",
+        launcherInstanceId: "test-launcher",
+        pid: process.pid,
+      },
     });
     assert.equal(invalid.statusCode, 409);
 
     const started = await handle.inject({
       method: "POST",
       url: `/actions/executions/${ready.execution.id}/launch/start`,
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: { token: capability.token, launcherInstanceId: "test-launcher", pid: process.pid },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: {
+        token: capability.token,
+        launcherInstanceId: "test-launcher",
+        pid: process.pid,
+      },
     });
     assert.equal(started.statusCode, 200, started.body);
     assert.equal(JSON.parse(started.body).data.execution.state, "running");
     const replayStart = await handle.inject({
       method: "POST",
       url: `/actions/executions/${ready.execution.id}/launch/start`,
-      headers: { accept: "application/json", "content-type": "application/json" },
-      body: { token: capability.token, launcherInstanceId: "replay", pid: process.pid },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: {
+        token: capability.token,
+        launcherInstanceId: "replay",
+        pid: process.pid,
+      },
     });
     assert.equal(replayStart.statusCode, 409);
 
     const completed = await handle.inject({
       method: "POST",
       url: `/actions/executions/${ready.execution.id}/launch/complete`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { token: capability.token, exitCode: 0 },
     });
     assert.equal(completed.statusCode, 200, completed.body);
@@ -1096,7 +1321,10 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
     const replayComplete = await handle.inject({
       method: "POST",
       url: `/actions/executions/${ready.execution.id}/launch/complete`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { token: capability.token, exitCode: 0 },
     });
     assert.equal(replayComplete.statusCode, 409);
@@ -1104,16 +1332,25 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
     const pending = await handle.inject({
       method: "POST",
       url: "/actions/interactive-mutate/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id, executionMode: "tmux" },
     });
     assert.equal(pending.statusCode, 202);
-    const pendingData = JSON.parse(pending.body).data as { execution: { id: string }; launch?: unknown };
+    const pendingData = JSON.parse(pending.body).data as {
+      execution: { id: string };
+      launch?: unknown;
+    };
     assert.equal(store.workflows.getLaunchForExecution(pendingData.execution.id)?.launch.state, "waiting");
     const approved = await handle.inject({
       method: "POST",
       url: `/actions/executions/${pendingData.execution.id}/approve`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { decidedBy: "test" },
     });
     assert.equal(approved.statusCode, 202, approved.body);
@@ -1136,7 +1373,10 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
     const authorizeCancelled = await handle.inject({
       method: "POST",
       url: `/actions/executions/${pendingData.execution.id}/launch/authorize`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: {},
     });
     assert.equal(authorizeCancelled.statusCode, 409);
@@ -1150,7 +1390,10 @@ test("isolated workflows retain review artifacts without mutating the canonical 
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-isolated-"));
   await writeFile(join(workspace, "app.py"), "value = 1\n");
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
-  const project = store.createProject({ path: workspace, name: "Isolated Project" });
+  const project = store.createProject({
+    path: workspace,
+    name: "Isolated Project",
+  });
   const isolated = command("compile", "python3", ["-m", "compileall", "app.py"], "workspace_write");
   isolated.executionMode = "isolated";
   isolated.expectedArtifacts = [{ id: "bytecode", path: "__pycache__", kind: "directory", required: true }];
@@ -1167,13 +1410,20 @@ test("isolated workflows retain review artifacts without mutating the canonical 
   const handle = await startWorkbenchServer({
     store,
     inProcess: true,
-    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+    config: {
+      databasePath: join(workspace, "workbench.db"),
+      runtimeDir: join(workspace, "runtime"),
+      apiPort: 0,
+    },
   });
   try {
     const downgrade = await handle.inject({
       method: "POST",
       url: "/actions/compile/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id, executionMode: "terminal" },
     });
     assert.equal(downgrade.statusCode, 409);
@@ -1181,7 +1431,10 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     const pending = await handle.inject({
       method: "POST",
       url: "/actions/compile/run",
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { projectId: project.id },
     });
     assert.equal(pending.statusCode, 202);
@@ -1191,7 +1444,10 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     const approved = await handle.inject({
       method: "POST",
       url: `/actions/executions/${executionId}/approve`,
-      headers: { accept: "application/json", "content-type": "application/json" },
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
       body: { decidedBy: "test" },
     });
     assert.equal(approved.statusCode, 200, approved.body);
@@ -1205,6 +1461,26 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     assert.equal(completed.execution.artifacts[1], join(completed.execution.artifacts[0] ?? "", "__pycache__"));
     await access(completed.execution.artifacts[1] ?? "");
     await assert.rejects(access(join(workspace, "__pycache__")));
+
+    const artifactsResponse = await handle.inject({
+      method: "GET",
+      url: `/actions/executions/${executionId}/artifacts`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(artifactsResponse.statusCode, 200, artifactsResponse.body);
+    const artifacts = JSON.parse(artifactsResponse.body).data.artifacts as Array<{
+      path: string | null;
+      exists: boolean;
+      safe: boolean;
+      kind: string;
+    }>;
+    assert.equal(artifacts.length, 2);
+    assert.ok(artifacts.every((artifact) => artifact.exists && artifact.safe));
+    assert.deepEqual(
+      artifacts.map((artifact) => artifact.kind),
+      ["directory", "directory"]
+    );
+    assert.ok(artifacts.every((artifact) => artifact.path?.startsWith(join(workspace, "runtime"))));
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });

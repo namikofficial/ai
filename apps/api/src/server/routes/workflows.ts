@@ -1,4 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { realpath, stat } from "node:fs/promises";
 import * as path from "node:path";
 import type { Router } from "express";
 import { parseDevRequest } from "../../../../../packages/agent-protocol/src/dev.ts";
@@ -17,6 +18,7 @@ import {
 } from "../../../../../packages/dev-agent/src/index.ts";
 import {
   createTaskWorkspace,
+  isSecretFile,
   readProjectChecksConfig,
   resolveManifestWorkflowEnvironment,
   runAllowedChecks,
@@ -110,7 +112,11 @@ export function registerWorkflowRoutes(
       id: createId("workflow_execution"),
       createdAt: timestamp,
       updatedAt: timestamp,
-      origin: { source: "workbench", instanceId: "workbench-api", legacyRef: null },
+      origin: {
+        source: "workbench",
+        instanceId: "workbench-api",
+        legacyRef: null,
+      },
       capabilities: [],
       workflowId: input.workflowId,
       projectId: input.projectId,
@@ -149,7 +155,10 @@ export function registerWorkflowRoutes(
       state: "starting",
       updatedAt: timestamp,
       currentStepId: "command",
-      stepStates: { ...(record.execution.approvalId ? { approval: "completed" } : {}), command: "starting" },
+      stepStates: {
+        ...(record.execution.approvalId ? { approval: "completed" } : {}),
+        command: "starting",
+      },
       startedAt: null,
       finishedAt: null,
       errorCode: null,
@@ -160,10 +169,17 @@ export function registerWorkflowRoutes(
       type: "workflow.execute",
       payload: { executionId: execution.id },
     });
-    deps.store.workflows.createBackgroundJob({ executionId: execution.id, jobId: job.id });
+    deps.store.workflows.createBackgroundJob({
+      executionId: execution.id,
+      jobId: job.id,
+    });
     const event = createEvent(
       "workflow.queued",
-      { workflowId: execution.workflowId, executionId: execution.id, jobId: job.id },
+      {
+        workflowId: execution.workflowId,
+        executionId: execution.id,
+        jobId: job.id,
+      },
       {
         projectId: execution.projectId,
         sessionId: execution.sessionId,
@@ -177,7 +193,10 @@ export function registerWorkflowRoutes(
     );
     deps.store.appendEvent(event);
     deps.publish(event);
-    return { ...saved, backgroundJob: deps.store.workflows.getBackgroundJob(execution.id) };
+    return {
+      ...saved,
+      backgroundJob: deps.store.workflows.getBackgroundJob(execution.id),
+    };
   }
 
   async function executePreparedPlan(
@@ -241,7 +260,10 @@ export function registerWorkflowRoutes(
           execution = {
             ...execution,
             state: "cancelled",
-            stepStates: { ...execution.stepStates, [entry.step.id]: "cancelled" },
+            stepStates: {
+              ...execution.stepStates,
+              [entry.step.id]: "cancelled",
+            },
             errorCode: "command_cancelled",
             errorSummary: "Workflow plan was cancelled",
           };
@@ -257,7 +279,11 @@ export function registerWorkflowRoutes(
         record = deps.store.workflows.save({ ...record, execution });
         const startedEvent = createEvent(
           "workflow.step_started",
-          { workflowId: plan.definition.id, executionId: execution.id, stepId: entry.step.id },
+          {
+            workflowId: plan.definition.id,
+            executionId: execution.id,
+            stepId: entry.step.id,
+          },
           {
             projectId: execution.projectId,
             sessionId: execution.sessionId,
@@ -292,7 +318,10 @@ export function registerWorkflowRoutes(
           execution = {
             ...execution,
             updatedAt: finishedAt,
-            stepStates: { ...execution.stepStates, [entry.step.id]: "completed" },
+            stepStates: {
+              ...execution.stepStates,
+              [entry.step.id]: "completed",
+            },
           };
           record = deps.store.workflows.save({ ...record, execution });
           continue;
@@ -303,7 +332,10 @@ export function registerWorkflowRoutes(
           if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
             throw new Error(`workflow step ${entry.step.id} working directory escapes the canonical project`);
           }
-          runnable = { ...runnable, cwd: path.resolve(workspacePath, relativeCwd) };
+          runnable = {
+            ...runnable,
+            cwd: path.resolve(workspacePath, relativeCwd),
+          };
         }
         const environment = await resolveManifestWorkflowEnvironment({
           requestedRefs: runnable.command.environmentRefs,
@@ -329,7 +361,11 @@ export function registerWorkflowRoutes(
           ]
             .filter(Boolean)
             .join("; ");
-          result = { ...result, status: "failed", blockedReason: `expected artifact validation failed: ${detail}` };
+          result = {
+            ...result,
+            status: "failed",
+            blockedReason: `expected artifact validation failed: ${detail}`,
+          };
         }
         const stepState = result.status;
         const stepDuration = run.attempts.reduce((total, attempt) => total + attempt.durationMs, 0);
@@ -383,7 +419,11 @@ export function registerWorkflowRoutes(
         execution = {
           ...execution,
           updatedAt: result.finishedAt,
-          stepStates: { ...execution.stepStates, ...attemptStates, [entry.step.id]: stepState },
+          stepStates: {
+            ...execution.stepStates,
+            ...attemptStates,
+            [entry.step.id]: stepState,
+          },
           artifacts: [...allArtifacts],
         };
         record = deps.store.workflows.save({
@@ -395,7 +435,12 @@ export function registerWorkflowRoutes(
         });
         const stepEvent = createEvent(
           "workflow.step_completed",
-          { workflowId: plan.definition.id, executionId: execution.id, stepId: entry.step.id, state: stepState },
+          {
+            workflowId: plan.definition.id,
+            executionId: execution.id,
+            stepId: entry.step.id,
+            state: stepState,
+          },
           {
             projectId: execution.projectId,
             sessionId: execution.sessionId,
@@ -458,10 +503,21 @@ export function registerWorkflowRoutes(
         errorSummary: `Workflow plan is missing expected artifacts: ${missingPlanArtifacts.join(", ")}`,
       };
     } else if (!failedStep) {
-      execution = { ...execution, state: "completed", errorCode: null, errorSummary: null };
+      execution = {
+        ...execution,
+        state: "completed",
+        errorCode: null,
+        errorSummary: null,
+      };
     }
     const finishedAt = new Date().toISOString();
-    execution = { ...execution, updatedAt: finishedAt, finishedAt, currentStepId: null, artifacts: [...allArtifacts] };
+    execution = {
+      ...execution,
+      updatedAt: finishedAt,
+      finishedAt,
+      currentStepId: null,
+      artifacts: [...allArtifacts],
+    };
     record = deps.store.workflows.save({
       ...record,
       execution,
@@ -495,7 +551,11 @@ export function registerWorkflowRoutes(
 
   function createWorkflowLaunch(input: {
     execution: WorkflowExecution;
-    command: { executable: string; arguments: string[]; workingDirectory: string };
+    command: {
+      executable: string;
+      arguments: string[];
+      workingDirectory: string;
+    };
     mode: "terminal" | "tmux";
     tmuxSession: string | null;
     state: "waiting" | "ready";
@@ -514,7 +574,11 @@ export function registerWorkflowRoutes(
       id: createId("workflow_launch"),
       createdAt: timestamp,
       updatedAt: timestamp,
-      origin: { source: "workbench", instanceId: "workbench-api", legacyRef: null },
+      origin: {
+        source: "workbench",
+        instanceId: "workbench-api",
+        legacyRef: null,
+      },
       capabilities: [input.mode],
       executionId: input.execution.id,
       projectId: input.execution.projectId,
@@ -541,7 +605,10 @@ export function registerWorkflowRoutes(
     const updatedAt = new Date().toISOString();
     return deps.store.workflows.transitionLaunch({
       expectedState: "waiting",
-      record: { ...record, launch: { ...record.launch, state: "ready", updatedAt } },
+      record: {
+        ...record,
+        launch: { ...record.launch, state: "ready", updatedAt },
+      },
     });
   }
 
@@ -607,7 +674,10 @@ export function registerWorkflowRoutes(
       updatedAt: timestamp,
       state: "ready",
       currentStepId: "command",
-      stepStates: { ...(record.execution.approvalId ? { approval: "completed" } : {}), command: "ready" },
+      stepStates: {
+        ...(record.execution.approvalId ? { approval: "completed" } : {}),
+        command: "ready",
+      },
       startedAt: null,
       finishedAt: null,
       errorCode: null,
@@ -618,7 +688,11 @@ export function registerWorkflowRoutes(
     if (launch?.launch.state !== "ready") throw new Error("interactive workflow launch is unavailable");
     const event = createEvent(
       "workflow.launch_ready",
-      { workflowId: execution.workflowId, executionId: execution.id, launchId: launch.launch.id },
+      {
+        workflowId: execution.workflowId,
+        executionId: execution.id,
+        launchId: launch.launch.id,
+      },
       {
         projectId: execution.projectId,
         sessionId: execution.sessionId,
@@ -636,7 +710,9 @@ export function registerWorkflowRoutes(
   }
 
   async function executePreparedWorkflow(
-    prepared: Awaited<ReturnType<typeof prepareManifestWorkflow>> & { ok: true },
+    prepared: Awaited<ReturnType<typeof prepareManifestWorkflow>> & {
+      ok: true;
+    },
     existing: WorkflowExecution,
     causationId: string | null = null
   ) {
@@ -663,7 +739,10 @@ export function registerWorkflowRoutes(
           runId: existing.id,
           sessionId: existing.sessionId ?? existing.id,
         });
-        runnable = { ...prepared.workflow, cwd: path.resolve(created.workspace.path, relativeCwd) };
+        runnable = {
+          ...prepared.workflow,
+          cwd: path.resolve(created.workspace.path, relativeCwd),
+        };
         artifacts = [created.workspace.path];
       }
     } catch (error) {
@@ -673,7 +752,10 @@ export function registerWorkflowRoutes(
         state: "failed",
         updatedAt: timestamp,
         currentStepId: null,
-        stepStates: { ...(existing.approvalId ? { approval: "completed" } : {}), command: "failed" },
+        stepStates: {
+          ...(existing.approvalId ? { approval: "completed" } : {}),
+          command: "failed",
+        },
         finishedAt: timestamp,
         errorCode: error instanceof SecretResolutionError ? `secret_${error.code}` : "workspace_setup_failed",
         errorSummary: error instanceof Error ? error.message : String(error),
@@ -687,7 +769,11 @@ export function registerWorkflowRoutes(
       });
       const event = createEvent(
         "workflow.failed",
-        { workflowId: execution.workflowId, executionId: execution.id, code: execution.errorCode },
+        {
+          workflowId: execution.workflowId,
+          executionId: execution.id,
+          code: execution.errorCode,
+        },
         {
           projectId: execution.projectId,
           sessionId: execution.sessionId,
@@ -710,7 +796,10 @@ export function registerWorkflowRoutes(
       updatedAt: startedAt,
       state: "running",
       currentStepId: "command",
-      stepStates: { ...(existing.approvalId ? { approval: "completed" } : {}), command: "running" },
+      stepStates: {
+        ...(existing.approvalId ? { approval: "completed" } : {}),
+        command: "running",
+      },
       startedAt,
       finishedAt: null,
       artifacts,
@@ -814,7 +903,11 @@ export function registerWorkflowRoutes(
       updatedAt: result.finishedAt,
       state,
       currentStepId: null,
-      stepStates: { ...(running.approvalId ? { approval: "completed" } : {}), ...attemptStates, command: state },
+      stepStates: {
+        ...(running.approvalId ? { approval: "completed" } : {}),
+        ...attemptStates,
+        command: state,
+      },
       finishedAt: result.finishedAt,
       exitCode: result.exitCode,
       artifacts,
@@ -862,7 +955,11 @@ export function registerWorkflowRoutes(
           : state === "cancelled"
             ? "workflow.cancelled"
             : "workflow.failed",
-      { workflowId: prepared.workflow.workflowId, executionId: running.id, exitCode: result.exitCode },
+      {
+        workflowId: prepared.workflow.workflowId,
+        executionId: running.id,
+        exitCode: result.exitCode,
+      },
       {
         projectId: running.projectId,
         sessionId: running.sessionId,
@@ -886,12 +983,24 @@ export function registerWorkflowRoutes(
       const explicitProjectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
       const projectId = explicitProjectId ?? deps.store.projectRegistry.getSelection()?.projectId ?? null;
       if (!projectId) {
-        sendJson(res, json("error", undefined, { message: "no active project; select a project first" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "no active project; select a project first",
+          }),
+          409
+        );
         return;
       }
       const manifest = deps.store.projectRegistry.getManifest(projectId);
       if (!manifest) {
-        sendJson(res, json("error", undefined, { message: `project ${projectId} has no approved manifest` }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: `project ${projectId} has no approved manifest`,
+          }),
+          404
+        );
         return;
       }
       const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
@@ -910,7 +1019,11 @@ export function registerWorkflowRoutes(
           id: `action:${projectId}:${definition.id}`,
           createdAt: timestamp,
           updatedAt: timestamp,
-          origin: { source: "workbench", instanceId: null, legacyRef: definition.id },
+          origin: {
+            source: "workbench",
+            instanceId: null,
+            legacyRef: definition.id,
+          },
           capabilities: definition.capabilities,
           projectId,
           label: definition.name,
@@ -943,7 +1056,13 @@ export function registerWorkflowRoutes(
     const workflowId = decodeURIComponent(String(req.params.workflowId ?? ""));
     const definition = deps.store.workflows.getDefinition(projectId, workflowId);
     if (!definition) {
-      sendJson(res, json("error", undefined, { message: `workflow definition ${workflowId} not found` }), 404);
+      sendJson(
+        res,
+        json("error", undefined, {
+          message: `workflow definition ${workflowId} not found`,
+        }),
+        404
+      );
       return;
     }
     sendJson(res, json("ok", definition));
@@ -955,7 +1074,13 @@ export function registerWorkflowRoutes(
       const projectId = decodeURIComponent(String(req.params.projectId ?? ""));
       const workflowId = decodeURIComponent(String(req.params.workflowId ?? ""));
       if (!deps.store.getProject(projectId)) {
-        sendJson(res, json("error", undefined, { message: `project ${projectId} not found` }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: `project ${projectId} not found`,
+          }),
+          404
+        );
         return;
       }
       const body = await readJsonBody(req);
@@ -968,7 +1093,9 @@ export function registerWorkflowRoutes(
       ) {
         sendJson(
           res,
-          json("error", undefined, { message: "workflow body must match route project and workflow IDs" }),
+          json("error", undefined, {
+            message: "workflow body must match route project and workflow IDs",
+          }),
           409
         );
         return;
@@ -979,7 +1106,9 @@ export function registerWorkflowRoutes(
       } catch (error) {
         sendJson(
           res,
-          json("error", undefined, { message: error instanceof Error ? error.message : String(error) }),
+          json("error", undefined, {
+            message: error instanceof Error ? error.message : String(error),
+          }),
           400
         );
         return;
@@ -1005,7 +1134,13 @@ export function registerWorkflowRoutes(
     const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
     const execution = deps.store.workflows.get(executionId);
     if (!execution) {
-      sendJson(res, json("error", undefined, { message: `workflow execution ${executionId} not found` }), 404);
+      sendJson(
+        res,
+        json("error", undefined, {
+          message: `workflow execution ${executionId} not found`,
+        }),
+        404
+      );
       return;
     }
     sendJson(
@@ -1021,6 +1156,54 @@ export function registerWorkflowRoutes(
     );
   });
 
+  router.get(
+    "/actions/executions/:executionId/artifacts",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const record = deps.store.workflows.get(executionId);
+      if (!record) {
+        sendJson(res, json("error", undefined, { message: "workflow execution not found" }), 404);
+        return;
+      }
+      const project = deps.store.getProject(record.execution.projectId);
+      if (!project) {
+        sendJson(res, json("error", undefined, { message: "canonical project not found" }), 409);
+        return;
+      }
+      const canonicalProject = await realpath(project.path).catch(() => path.resolve(project.path));
+      const canonicalRuntime = await realpath(deps.config.runtimeDir).catch(() => path.resolve(deps.config.runtimeDir));
+      const within = (root: string, candidate: string): boolean => {
+        const relative = path.relative(root, candidate);
+        return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+      };
+      const artifacts = await Promise.all(
+        record.execution.artifacts.map(async (artifactPath, index) => {
+          const info = await stat(artifactPath).catch(() => null);
+          const canonical = info ? await realpath(artifactPath).catch(() => null) : null;
+          const safe =
+            canonical !== null &&
+            (within(canonicalProject, canonical) || within(canonicalRuntime, canonical)) &&
+            !isSecretFile(path.basename(canonical));
+          return {
+            id: `artifact:${executionId}:${index}`,
+            path: safe ? canonical : null,
+            exists: info !== null,
+            safe,
+            kind: info?.isFile() ? "file" : info?.isDirectory() ? "directory" : info ? "other" : "missing",
+            size: info?.isFile() ? info.size : null,
+            modifiedAt: info ? new Date(info.mtimeMs).toISOString() : null,
+            reason: safe
+              ? null
+              : canonical
+                ? "artifact is outside approved roots or secret-like"
+                : "artifact is unavailable",
+          };
+        })
+      );
+      sendJson(res, json("ok", { executionId, artifacts }));
+    })
+  );
+
   router.post(
     "/actions/executions/:executionId/recover",
     asyncRoute(async (req, res) => {
@@ -1033,17 +1216,24 @@ export function registerWorkflowRoutes(
       if (!["failed", "blocked", "cancelled"].includes(original.execution.state)) {
         sendJson(
           res,
-          json("error", undefined, { message: "only terminal unsuccessful workflows can be recovered" }),
+          json("error", undefined, {
+            message: "only terminal unsuccessful workflows can be recovered",
+          }),
           409
         );
         return;
       }
-      const body = (await readJsonBody(req)) as { workflowId?: unknown; requestedBy?: unknown };
+      const body = (await readJsonBody(req)) as {
+        workflowId?: unknown;
+        requestedBy?: unknown;
+      };
       const workflowId = typeof body.workflowId === "string" ? body.workflowId.trim() : "";
       if (!workflowId || !original.execution.recoveryWorkflowIds.includes(workflowId)) {
         sendJson(
           res,
-          json("error", undefined, { message: "recovery workflow is not allowed by the failed execution" }),
+          json("error", undefined, {
+            message: "recovery workflow is not allowed by the failed execution",
+          }),
           409
         );
         return;
@@ -1052,7 +1242,13 @@ export function registerWorkflowRoutes(
       const manifest = deps.store.projectRegistry.getManifest(original.execution.projectId);
       const definition = deps.store.workflows.getDefinition(original.execution.projectId, workflowId);
       if (!project || !manifest || !definition || manifest.path !== project.path) {
-        sendJson(res, json("error", undefined, { message: "canonical recovery workflow is unavailable" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "canonical recovery workflow is unavailable",
+          }),
+          409
+        );
         return;
       }
       const prepared = await prepareWorkflowPlan(withCanonicalWorkflowDefinitions(manifest), definition, {
@@ -1070,7 +1266,9 @@ export function registerWorkflowRoutes(
       ) {
         sendJson(
           res,
-          json("error", undefined, { message: "interactive recovery requires a resumable desktop handoff" }),
+          json("error", undefined, {
+            message: "interactive recovery requires a resumable desktop handoff",
+          }),
           409
         );
         return;
@@ -1138,12 +1336,22 @@ export function registerWorkflowRoutes(
           baseCommit: firstCommandContext?.baseCommit ?? null,
           reason: `${definition.name} recovery requires approval`,
         });
-        saved = deps.store.workflows.save({ ...saved, execution: { ...initial, approvalId: approval.id } });
+        saved = deps.store.workflows.save({
+          ...saved,
+          execution: { ...initial, approvalId: approval.id },
+        });
         sendJson(res, json("ok", { ...saved, recovery, approval }), 202);
         return;
       }
       if (prepared.plan.backgroundRequired) {
-        sendJson(res, json("ok", { ...enqueueBackgroundWorkflow(saved, recoveryEvent.id), recovery }), 202);
+        sendJson(
+          res,
+          json("ok", {
+            ...enqueueBackgroundWorkflow(saved, recoveryEvent.id),
+            recovery,
+          }),
+          202
+        );
         return;
       }
       saved = await executePreparedPlan(prepared.plan, initial, recoveryEvent.id);
@@ -1158,17 +1366,37 @@ export function registerWorkflowRoutes(
       const record = deps.store.workflows.get(executionId);
       const approval = deps.store.workflows.getApprovalForExecution(executionId);
       if (!record || !approval) {
-        sendJson(res, json("error", undefined, { message: "workflow execution or approval not found" }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "workflow execution or approval not found",
+          }),
+          404
+        );
         return;
       }
       if (record.execution.state !== "waiting" || approval.status !== "pending") {
-        sendJson(res, json("error", undefined, { message: "workflow approval is not pending" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "workflow approval is not pending",
+          }),
+          409
+        );
         return;
       }
-      const body = (await readJsonBody(req)) as { decidedBy?: unknown; notes?: unknown };
+      const body = (await readJsonBody(req)) as {
+        decidedBy?: unknown;
+        notes?: unknown;
+      };
       const decidedBy = typeof body.decidedBy === "string" && body.decidedBy.trim() ? body.decidedBy.trim() : "api";
       if (Date.parse(approval.expiresAt) <= Date.now()) {
-        deps.store.workflows.decideApproval({ id: approval.id, status: "expired", decidedBy, notes: "expired" });
+        deps.store.workflows.decideApproval({
+          id: approval.id,
+          status: "expired",
+          decidedBy,
+          notes: "expired",
+        });
         cancelWaitingWorkflow(record, "approval_expired", "Workflow approval expired");
         sendJson(res, json("error", undefined, { message: "workflow approval expired" }), 409);
         return;
@@ -1176,14 +1404,23 @@ export function registerWorkflowRoutes(
       const project = deps.store.getProject(record.execution.projectId);
       const manifest = deps.store.projectRegistry.getManifest(record.execution.projectId);
       if (!project || !manifest || manifest.path !== project.path) {
-        sendJson(res, json("error", undefined, { message: "canonical project or approved manifest changed" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "canonical project or approved manifest changed",
+          }),
+          409
+        );
         return;
       }
       const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
       const definition = deps.store.workflows.getDefinition(record.execution.projectId, record.execution.workflowId);
       const preparedPlan =
         definition && (definition.steps.length > 0 || record.execution.recoveryOfExecutionId !== null)
-          ? await prepareWorkflowPlan(canonicalManifest, definition, { allowMutating: true, allowInteractive: true })
+          ? await prepareWorkflowPlan(canonicalManifest, definition, {
+              allowMutating: true,
+              allowInteractive: true,
+            })
           : null;
       const prepared = preparedPlan
         ? null
@@ -1214,7 +1451,9 @@ export function registerWorkflowRoutes(
         cancelWaitingWorkflow(record, "approval_stale", "Workflow approval context changed");
         sendJson(
           res,
-          json("error", undefined, { message: "workflow approval is stale because its context changed" }),
+          json("error", undefined, {
+            message: "workflow approval is stale because its context changed",
+          }),
           409
         );
         return;
@@ -1273,11 +1512,23 @@ export function registerWorkflowRoutes(
       const execution = deps.store.workflows.get(executionId);
       const launchRecord = deps.store.workflows.getLaunchForExecution(executionId);
       if (!execution || !launchRecord) {
-        sendJson(res, json("error", undefined, { message: "interactive workflow execution not found" }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "interactive workflow execution not found",
+          }),
+          404
+        );
         return;
       }
       if (execution.execution.state !== "ready" || launchRecord.launch.state !== "ready") {
-        sendJson(res, json("error", undefined, { message: "interactive workflow is not ready to launch" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "interactive workflow is not ready to launch",
+          }),
+          409
+        );
         return;
       }
       const token = `${randomUUID()}${randomUUID()}`;
@@ -1286,7 +1537,11 @@ export function registerWorkflowRoutes(
       const authorized = deps.store.workflows.transitionLaunch({
         expectedState: "ready",
         record: {
-          launch: { ...launchRecord.launch, updatedAt: timestamp, authorizationExpiresAt },
+          launch: {
+            ...launchRecord.launch,
+            updatedAt: timestamp,
+            authorizationExpiresAt,
+          },
           tokenHash: launchTokenHash(token),
         },
       });
@@ -1301,10 +1556,20 @@ export function registerWorkflowRoutes(
       const executionRecord = deps.store.workflows.get(executionId);
       const launchRecord = deps.store.workflows.getLaunchForExecution(executionId);
       if (!executionRecord || !launchRecord) {
-        sendJson(res, json("error", undefined, { message: "interactive workflow execution not found" }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "interactive workflow execution not found",
+          }),
+          404
+        );
         return;
       }
-      const body = (await readJsonBody(req)) as { token?: unknown; launcherInstanceId?: unknown; pid?: unknown };
+      const body = (await readJsonBody(req)) as {
+        token?: unknown;
+        launcherInstanceId?: unknown;
+        pid?: unknown;
+      };
       const token = typeof body.token === "string" ? body.token : "";
       const launcherInstanceId =
         typeof body.launcherInstanceId === "string" && body.launcherInstanceId.trim()
@@ -1312,7 +1577,13 @@ export function registerWorkflowRoutes(
           : null;
       const pid = typeof body.pid === "number" && Number.isInteger(body.pid) && body.pid > 0 ? body.pid : null;
       if (!launcherInstanceId || !pid) {
-        sendJson(res, json("error", undefined, { message: "launcherInstanceId and positive pid are required" }), 400);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "launcherInstanceId and positive pid are required",
+          }),
+          400
+        );
         return;
       }
       if (
@@ -1324,7 +1595,9 @@ export function registerWorkflowRoutes(
       ) {
         sendJson(
           res,
-          json("error", undefined, { message: "launch authorization is invalid, expired, or replayed" }),
+          json("error", undefined, {
+            message: "launch authorization is invalid, expired, or replayed",
+          }),
           409
         );
         return;
@@ -1356,10 +1629,18 @@ export function registerWorkflowRoutes(
         },
         startedAt: timestamp,
       };
-      const saved = deps.store.workflows.save({ ...executionRecord, execution });
+      const saved = deps.store.workflows.save({
+        ...executionRecord,
+        execution,
+      });
       const event = createEvent(
         "workflow.started",
-        { workflowId: execution.workflowId, executionId, launchId: launch.launch.id, mode: launch.launch.mode },
+        {
+          workflowId: execution.workflowId,
+          executionId,
+          launchId: launch.launch.id,
+          mode: launch.launch.mode,
+        },
         {
           projectId: execution.projectId,
           sessionId: execution.sessionId,
@@ -1383,16 +1664,28 @@ export function registerWorkflowRoutes(
       const executionRecord = deps.store.workflows.get(executionId);
       const launchRecord = deps.store.workflows.getLaunchForExecution(executionId);
       if (!executionRecord || !launchRecord) {
-        sendJson(res, json("error", undefined, { message: "interactive workflow execution not found" }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "interactive workflow execution not found",
+          }),
+          404
+        );
         return;
       }
-      const body = (await readJsonBody(req)) as { token?: unknown; exitCode?: unknown; cancelled?: unknown };
+      const body = (await readJsonBody(req)) as {
+        token?: unknown;
+        exitCode?: unknown;
+        cancelled?: unknown;
+      };
       const token = typeof body.token === "string" ? body.token : "";
       const exitCode = typeof body.exitCode === "number" && Number.isInteger(body.exitCode) ? body.exitCode : null;
       if (launchRecord.launch.state !== "running" || !launchTokenMatches(launchRecord.tokenHash, token)) {
         sendJson(
           res,
-          json("error", undefined, { message: "launch completion authorization is invalid or replayed" }),
+          json("error", undefined, {
+            message: "launch completion authorization is invalid or replayed",
+          }),
           409
         );
         return;
@@ -1434,10 +1727,18 @@ export function registerWorkflowRoutes(
               ? "Interactive command was cancelled"
               : null,
       };
-      const saved = deps.store.workflows.save({ ...executionRecord, execution });
+      const saved = deps.store.workflows.save({
+        ...executionRecord,
+        execution,
+      });
       const event = createEvent(
         state === "completed" ? "workflow.completed" : state === "cancelled" ? "workflow.cancelled" : "workflow.failed",
-        { workflowId: execution.workflowId, executionId, launchId: launch.launch.id, exitCode },
+        {
+          workflowId: execution.workflowId,
+          executionId,
+          launchId: launch.launch.id,
+          exitCode,
+        },
         {
           projectId: execution.projectId,
           sessionId: execution.sessionId,
@@ -1462,14 +1763,29 @@ export function registerWorkflowRoutes(
       const record = deps.store.workflows.get(executionId);
       const approval = deps.store.workflows.getApprovalForExecution(executionId);
       if (!record || !approval) {
-        sendJson(res, json("error", undefined, { message: "workflow execution or approval not found" }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "workflow execution or approval not found",
+          }),
+          404
+        );
         return;
       }
       if (record.execution.state !== "waiting" || approval.status !== "pending") {
-        sendJson(res, json("error", undefined, { message: "workflow approval is not pending" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "workflow approval is not pending",
+          }),
+          409
+        );
         return;
       }
-      const body = (await readJsonBody(req)) as { decidedBy?: unknown; notes?: unknown };
+      const body = (await readJsonBody(req)) as {
+        decidedBy?: unknown;
+        notes?: unknown;
+      };
       const decided = deps.store.workflows.decideApproval({
         id: approval.id,
         status: "rejected",
@@ -1520,7 +1836,13 @@ export function registerWorkflowRoutes(
           "command_cancelled",
           "Background workflow was cancelled before start"
         );
-        sendJson(res, json("ok", { ...saved, backgroundJob: deps.store.workflows.getBackgroundJob(executionId) }));
+        sendJson(
+          res,
+          json("ok", {
+            ...saved,
+            backgroundJob: deps.store.workflows.getBackgroundJob(executionId),
+          })
+        );
         return;
       }
     }
@@ -1547,7 +1869,13 @@ export function registerWorkflowRoutes(
           sendJson(res, json("ok", { executionId, state: "cancelling" }), 202);
           return;
         } catch {
-          sendJson(res, json("error", undefined, { message: "desktop workflow process is no longer available" }), 409);
+          sendJson(
+            res,
+            json("error", undefined, {
+              message: "desktop workflow process is no longer available",
+            }),
+            409
+          );
           return;
         }
       }
@@ -1574,7 +1902,9 @@ export function registerWorkflowRoutes(
         } catch {
           sendJson(
             res,
-            json("error", undefined, { message: "background workflow process is no longer available" }),
+            json("error", undefined, {
+              message: "background workflow process is no longer available",
+            }),
             409
           );
           return;
@@ -1585,7 +1915,11 @@ export function registerWorkflowRoutes(
       const saved = cancelWaitingWorkflow(record, "launch_cancelled", "Interactive workflow launch was cancelled");
       const event = createEvent(
         "workflow.cancelled",
-        { workflowId: saved.execution.workflowId, executionId, beforeLaunch: true },
+        {
+          workflowId: saved.execution.workflowId,
+          executionId,
+          beforeLaunch: true,
+        },
         {
           projectId: saved.execution.projectId,
           sessionId: saved.execution.sessionId,
@@ -1601,13 +1935,18 @@ export function registerWorkflowRoutes(
       deps.publish(event);
       sendJson(
         res,
-        json("ok", { ...saved, launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)) })
+        json("ok", {
+          ...saved,
+          launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)),
+        })
       );
       return;
     }
     sendJson(
       res,
-      json("error", undefined, { message: `workflow cannot be cancelled from ${record.execution.state}` }),
+      json("error", undefined, {
+        message: `workflow cannot be cancelled from ${record.execution.state}`,
+      }),
       409
     );
   });
@@ -1629,16 +1968,34 @@ export function registerWorkflowRoutes(
           ? body.projectId.trim()
           : deps.store.projectRegistry.getSelection()?.projectId;
       if (!projectId) {
-        sendJson(res, json("error", undefined, { message: "no active project; select a project first" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "no active project; select a project first",
+          }),
+          409
+        );
         return;
       }
       const session = sessionId ? deps.store.getSession(sessionId) : null;
       if (sessionId && !session) {
-        sendJson(res, json("error", undefined, { message: `session ${sessionId} not found` }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: `session ${sessionId} not found`,
+          }),
+          404
+        );
         return;
       }
       if (session?.projectId !== undefined && session.projectId !== projectId) {
-        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "session belongs to a different project",
+          }),
+          409
+        );
         return;
       }
       const task = taskId ? deps.store.getTask(taskId) : null;
@@ -1647,19 +2004,33 @@ export function registerWorkflowRoutes(
         return;
       }
       if (task && (!session || task.sessionId !== session.id)) {
-        sendJson(res, json("error", undefined, { message: "task does not belong to the requested session" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "task does not belong to the requested session",
+          }),
+          409
+        );
         return;
       }
       const project = deps.store.getProject(projectId);
       const manifest = deps.store.projectRegistry.getManifest(projectId);
       if (!project || !manifest) {
-        sendJson(res, json("error", undefined, { message: `project ${projectId} has no approved manifest` }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: `project ${projectId} has no approved manifest`,
+          }),
+          404
+        );
         return;
       }
       if (manifest.path !== project.path) {
         sendJson(
           res,
-          json("error", undefined, { message: "approved manifest path does not match canonical project" }),
+          json("error", undefined, {
+            message: "approved manifest path does not match canonical project",
+          }),
           409
         );
         return;
@@ -1667,7 +2038,13 @@ export function registerWorkflowRoutes(
       const requestedMode =
         body.executionMode === "terminal" || body.executionMode === "tmux" ? body.executionMode : null;
       if (body.executionMode !== undefined && !requestedMode) {
-        sendJson(res, json("error", undefined, { message: "executionMode must be terminal or tmux" }), 400);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "executionMode must be terminal or tmux",
+          }),
+          400
+        );
         return;
       }
       const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
@@ -1676,7 +2053,9 @@ export function registerWorkflowRoutes(
         if (requestedMode) {
           sendJson(
             res,
-            json("error", undefined, { message: "executionMode override is unavailable for workflow plans" }),
+            json("error", undefined, {
+              message: "executionMode override is unavailable for workflow plans",
+            }),
             409
           );
           return;
@@ -1686,7 +2065,13 @@ export function registerWorkflowRoutes(
           allowInteractive: true,
         });
         if (!preparedPlan.ok) {
-          sendJson(res, json("error", undefined, { message: preparedPlan.rejection.summary }), 409);
+          sendJson(
+            res,
+            json("error", undefined, {
+              message: preparedPlan.rejection.summary,
+            }),
+            409
+          );
           return;
         }
         const initialBase = createWorkflowExecution({
@@ -1741,7 +2126,12 @@ export function registerWorkflowRoutes(
           });
           const event = createEvent(
             "approval.required",
-            { approvalId: approval.id, executionId: initial.id, workflowId, kind: "workflow-plan" },
+            {
+              approvalId: approval.id,
+              executionId: initial.id,
+              workflowId,
+              kind: "workflow-plan",
+            },
             {
               projectId,
               sessionId,
@@ -1757,7 +2147,11 @@ export function registerWorkflowRoutes(
           deps.publish(event);
           sendJson(
             res,
-            json("ok", { ...saved, approval, deepLink: `/approvals/${encodeURIComponent(approval.id)}` }),
+            json("ok", {
+              ...saved,
+              approval,
+              deepLink: `/approvals/${encodeURIComponent(approval.id)}`,
+            }),
             202
           );
           return;
@@ -1798,7 +2192,9 @@ export function registerWorkflowRoutes(
       if (desktopLaunch && launchMode === "tmux" && !manifest.desktop.tmuxSession) {
         sendJson(
           res,
-          json("error", undefined, { message: "workflow requested tmux but the manifest has no tmux session" }),
+          json("error", undefined, {
+            message: "workflow requested tmux but the manifest has no tmux session",
+          }),
           409
         );
         return;
@@ -1806,7 +2202,9 @@ export function registerWorkflowRoutes(
       if (!desktopLaunch && requestedMode) {
         sendJson(
           res,
-          json("error", undefined, { message: "executionMode override is valid only for terminal/tmux workflows" }),
+          json("error", undefined, {
+            message: "executionMode override is valid only for terminal/tmux workflows",
+          }),
           409
         );
         return;
@@ -1854,7 +2252,10 @@ export function registerWorkflowRoutes(
           baseCommit: context.baseCommit,
           reason: `${prepared.workflow.command.name} requests ${prepared.workflow.command.mutation} access`,
         });
-        const waiting: WorkflowExecution = { ...initial, approvalId: approval.id };
+        const waiting: WorkflowExecution = {
+          ...initial,
+          approvalId: approval.id,
+        };
         const saved = deps.store.workflows.save({
           execution: waiting,
           command: commandRecord(prepared.workflow),
@@ -1864,7 +2265,12 @@ export function registerWorkflowRoutes(
         });
         const event = createEvent(
           "approval.required",
-          { approvalId: approval.id, executionId: waiting.id, workflowId: waiting.workflowId, kind: "workflow" },
+          {
+            approvalId: approval.id,
+            executionId: waiting.id,
+            workflowId: waiting.workflowId,
+            kind: "workflow",
+          },
           {
             projectId,
             sessionId: waiting.sessionId,
@@ -1931,7 +2337,13 @@ export function registerWorkflowRoutes(
         return;
       }
       if (askSession && askSession.projectId !== normalized.project) {
-        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "session belongs to a different project",
+          }),
+          409
+        );
         return;
       }
       const result = await deps.store.ask(normalized);
@@ -1969,7 +2381,9 @@ export function registerWorkflowRoutes(
       const projectId = String(body.project ?? body.projectId ?? "");
       const topic = String(body.topic ?? "");
       const mode = body.mode === "web" || body.mode === "hybrid" ? body.mode : "local";
-      const chunks = deps.store.searchChunks(projectId, topic, { limit: mode === "local" ? 6 : 10 });
+      const chunks = deps.store.searchChunks(projectId, topic, {
+        limit: mode === "local" ? 6 : 10,
+      });
       const lessons = deps.store.listProjectLessons(projectId, 5);
       const sources = chunks.map((chunk) => ({
         path: chunk.path,
@@ -2052,7 +2466,13 @@ export function registerWorkflowRoutes(
         return;
       }
       if (planSession && planSession.projectId !== normalized.project) {
-        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "session belongs to a different project",
+          }),
+          409
+        );
         return;
       }
       const result = await deps.store.createPlan(normalized);
@@ -2173,13 +2593,25 @@ export function registerWorkflowRoutes(
       const projectId = body.projectId ? String(body.projectId) : null;
 
       if (!projectId) {
-        sendJson(res, json("error", undefined, { message: "projectId is required for /checks/execute" }), 400);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "projectId is required for /checks/execute",
+          }),
+          400
+        );
         return;
       }
 
       const project = deps.store.listProjects().find((p) => p.id === projectId);
       if (!project) {
-        sendJson(res, json("error", undefined, { message: `project ${projectId} not found` }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: `project ${projectId} not found`,
+          }),
+          404
+        );
         return;
       }
 
@@ -2278,7 +2710,10 @@ export function registerWorkflowRoutes(
           .filter(Boolean),
         notes: body.notes ? String(body.notes) : undefined,
       });
-      const job = deps.store.enqueueJob({ type: "review.reflect", payload: { reviewId: result.id, source: "api" } });
+      const job = deps.store.enqueueJob({
+        type: "review.reflect",
+        payload: { reviewId: result.id, source: "api" },
+      });
       if (isHtmlRequest(req)) {
         sendHtml(res, renderReviewsPage(deps.store, { result }));
         return;
@@ -2317,7 +2752,13 @@ export function registerWorkflowRoutes(
       const projectId = String(body.projectId ?? devRequest.project);
       const project = deps.store.getProject(projectId);
       if (!project) {
-        sendJson(res, json("error", undefined, { message: `unknown project: ${projectId}` }), 404);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: `unknown project: ${projectId}`,
+          }),
+          404
+        );
         return;
       }
       const requestedSessionId =
@@ -2328,7 +2769,13 @@ export function registerWorkflowRoutes(
         return;
       }
       if (existingSession && existingSession.projectId !== project.id) {
-        sendJson(res, json("error", undefined, { message: "session belongs to a different project" }), 409);
+        sendJson(
+          res,
+          json("error", undefined, {
+            message: "session belongs to a different project",
+          }),
+          409
+        );
         return;
       }
       const session = existingSession
@@ -2405,7 +2852,12 @@ export function registerWorkflowRoutes(
   router.get("/dev/runs", (req, res) => {
     const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
     const limit = Number(req.query.limit ?? "50") || 50;
-    sendJson(res, json("ok", { runs: deps.store.dev.listRuns(projectId ? { projectId, limit } : { limit }) }));
+    sendJson(
+      res,
+      json("ok", {
+        runs: deps.store.dev.listRuns(projectId ? { projectId, limit } : { limit }),
+      })
+    );
   });
 
   router.get("/dev/runs/:runId", (req, res) => {
@@ -2510,7 +2962,9 @@ export function registerWorkflowRoutes(
         res,
         approval.ok
           ? json("ok", approval.run)
-          : json("error", undefined, { message: approval.error ?? "approval failed" }),
+          : json("error", undefined, {
+              message: approval.error ?? "approval failed",
+            }),
         approval.ok ? 200 : 400
       );
     })
@@ -2556,7 +3010,9 @@ export function registerWorkflowRoutes(
         res,
         outcome.ok
           ? json("ok", { run: outcome.run, applied: outcome.applied })
-          : json("error", undefined, { message: outcome.error ?? "apply failed" }),
+          : json("error", undefined, {
+              message: outcome.error ?? "apply failed",
+            }),
         outcome.ok ? 200 : 400
       );
     })
@@ -2593,7 +3049,11 @@ export function registerWorkflowRoutes(
       }
       sendJson(
         res,
-        outcome.ok ? json("ok", outcome.run) : json("error", undefined, { message: outcome.error ?? "cancel failed" }),
+        outcome.ok
+          ? json("ok", outcome.run)
+          : json("error", undefined, {
+              message: outcome.error ?? "cancel failed",
+            }),
         outcome.ok ? 200 : 400
       );
     })

@@ -59,9 +59,11 @@ function printUsage(): void {
   ai action list [--project <project-id>]
   ai action run <workflow-id> [--project <project-id>] [--session <session-id>] [--task <task-id>] [--execution-mode terminal|tmux]
   ai action show <execution-id>
+  ai action artifacts <execution-id>
   ai action approve <execution-id> [--notes <text>]
   ai action reject <execution-id> [--notes <text>]
   ai action cancel <execution-id>
+  ai action recover <execution-id> <workflow-id>
   ai config show --project <project>
   ai config init --project <project>
   ai config validate --project <project>
@@ -333,7 +335,11 @@ async function run(): Promise<void> {
     const apiOnlyPort = Number(options.port ?? options["api-port"] ?? apiPort);
     const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
     const handle = await startWorkbenchServer({
-      config: { apiUrl: apiOnlyUrl, webPort: apiOnlyPort, apiPort: apiOnlyPort },
+      config: {
+        apiUrl: apiOnlyUrl,
+        webPort: apiOnlyPort,
+        apiPort: apiOnlyPort,
+      },
     });
     console.log(`AI Workbench api listening at ${handle.url}`);
     process.on?.("SIGINT", async () => {
@@ -348,7 +354,11 @@ async function run(): Promise<void> {
     const apiOnlyPort = Number(options["api-port"] ?? 4417);
     const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
     const apiHandle = await startWorkbenchServer({
-      config: { apiUrl: apiOnlyUrl, webPort: apiOnlyPort, apiPort: apiOnlyPort },
+      config: {
+        apiUrl: apiOnlyUrl,
+        webPort: apiOnlyPort,
+        apiPort: apiOnlyPort,
+      },
     });
     const webHandle = await startWorkbenchWeb({
       config: { apiUrl: apiOnlyUrl, webPort, apiPort: apiOnlyPort },
@@ -733,11 +743,15 @@ async function run(): Promise<void> {
       return;
     }
     const executionId = positionals.shift();
-    if (["show", "approve", "reject", "cancel"].includes(subcommand ?? "") && !executionId) {
+    if (["show", "artifacts", "approve", "reject", "cancel", "recover"].includes(subcommand ?? "") && !executionId) {
       throw new Error(`action ${subcommand} requires an execution id`);
     }
     if (subcommand === "show") {
       printJson(await client.getActionExecution(executionId as string));
+      return;
+    }
+    if (subcommand === "artifacts") {
+      printJson(await client.getActionExecutionArtifacts(executionId as string));
       return;
     }
     if (subcommand === "approve") {
@@ -752,7 +766,13 @@ async function run(): Promise<void> {
       printJson(await client.cancelActionExecution(executionId as string));
       return;
     }
-    throw new Error("action requires list, run, show, approve, reject, or cancel");
+    if (subcommand === "recover") {
+      const workflowId = positionals.shift();
+      if (!workflowId) throw new Error("action recover requires a workflow id");
+      printJson(await client.recoverActionExecution(executionId as string, workflowId));
+      return;
+    }
+    throw new Error("action requires list, run, show, artifacts, approve, reject, cancel, or recover");
   }
 
   if (command === "config") {
@@ -812,7 +832,9 @@ async function run(): Promise<void> {
         existed = false;
       }
       if (!existed) {
-        await writeFile(target, `${JSON.stringify(template, null, 2)}\n`, { encoding: "utf8" });
+        await writeFile(target, `${JSON.stringify(template, null, 2)}\n`, {
+          encoding: "utf8",
+        });
       }
       printJson({
         project,
@@ -910,7 +932,13 @@ async function run(): Promise<void> {
       const content = positionals.join(" ").trim();
       const role = options.role === "assistant" || options.role === "agent" ? options.role : "user";
       if (!content) throw new Error("sessions append requires a message");
-      printJson(await client.appendSessionMessage(sessionId, { role, content, agent: "cli" }));
+      printJson(
+        await client.appendSessionMessage(sessionId, {
+          role,
+          content,
+          agent: "cli",
+        })
+      );
       return;
     }
     if (subcommand === "context") {
@@ -1034,9 +1062,11 @@ async function run(): Promise<void> {
     }
     const store = openLocalStore();
     try {
-      const projects = store
-        .listProjects()
-        .map((project) => ({ id: project.id, name: project.name, path: project.path }));
+      const projects = store.listProjects().map((project) => ({
+        id: project.id,
+        name: project.name,
+        path: project.path,
+      }));
       const report =
         options.apply === "true"
           ? await applyPythonRagMigration({
@@ -1139,7 +1169,13 @@ async function run(): Promise<void> {
     if (!project) {
       throw new Error("retrieval requires --project <name>");
     }
-    printJson(await client.searchRetrieval({ project, query, limit: Number(options.limit ?? 8) || 8 }));
+    printJson(
+      await client.searchRetrieval({
+        project,
+        query,
+        limit: Number(options.limit ?? 8) || 8,
+      })
+    );
     return;
   }
 
@@ -1829,7 +1865,11 @@ if (process.argv[2] === "retrieval" && process.argv[3] === "explain") {
           contradiction: 0,
           notes: `auto-graded on case ${c.id}`,
         });
-        evaluations.push({ caseId: c.id, evalRecord, confidence: groundedness });
+        evaluations.push({
+          caseId: c.id,
+          evalRecord,
+          confidence: groundedness,
+        });
       }
       printJson({ evaluations });
       return;

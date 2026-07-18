@@ -90,7 +90,10 @@ async function requestJson<T>(baseUrl: string, path: string, init?: RequestInit)
   if (!response.ok) {
     let detail = "";
     try {
-      const payload = (await response.clone().json()) as { error?: { message?: string }; message?: string };
+      const payload = (await response.clone().json()) as {
+        error?: { message?: string };
+        message?: string;
+      };
       detail = payload.error?.message ?? payload.message ?? "";
     } catch {
       // Keep the HTTP status when the server returned non-JSON diagnostics.
@@ -108,10 +111,16 @@ export function createApiClient(options: ApiClientOptions) {
     health(): Promise<{ status: "ok"; data: { uptime: number } }> {
       return requestJson(options.baseUrl, "/health");
     },
-    healthDeep(): Promise<{ status: "ok" | "degraded"; data: Record<string, unknown> }> {
+    healthDeep(): Promise<{
+      status: "ok" | "degraded";
+      data: Record<string, unknown>;
+    }> {
       return requestJson(options.baseUrl, "/health/deep");
     },
-    ready(): Promise<{ status: "ok" | "error"; data: { ready: boolean; databaseReachable: boolean } }> {
+    ready(): Promise<{
+      status: "ok" | "error";
+      data: { ready: boolean; databaseReachable: boolean };
+    }> {
       return requestJson(options.baseUrl, "/ready");
     },
     runtimeHealth(): Promise<{ status: "ok" | "error"; data: RuntimeHealth }> {
@@ -140,7 +149,10 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getRegistry(): Promise<{
       status: "ok";
-      data: { manifests: ProjectManifest[]; selection: ActiveProjectSelection | null };
+      data: {
+        manifests: ProjectManifest[];
+        selection: ActiveProjectSelection | null;
+      };
     }> {
       return requestJson(options.baseUrl, "/registry");
     },
@@ -148,7 +160,10 @@ export function createApiClient(options: ApiClientOptions) {
       projectId: string,
       manifest: ProjectManifest,
       sourceRef?: string | null
-    ): Promise<{ status: "ok"; data: { proposal: ManifestProposal; diff: unknown[] } }> {
+    ): Promise<{
+      status: "ok";
+      data: { proposal: ManifestProposal; diff: unknown[] };
+    }> {
       return requestJson(options.baseUrl, `/projects/${encodeURIComponent(projectId)}/manifest/proposals`, {
         method: "POST",
         body: JSON.stringify({ manifest, sourceRef: sourceRef ?? null }),
@@ -175,8 +190,13 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    clearProjectSelection(): Promise<{ status: "ok"; data: ActiveProjectSelection }> {
-      return requestJson(options.baseUrl, "/context/selection?source=cli", { method: "DELETE" });
+    clearProjectSelection(): Promise<{
+      status: "ok";
+      data: ActiveProjectSelection;
+    }> {
+      return requestJson(options.baseUrl, "/context/selection?source=cli", {
+        method: "DELETE",
+      });
     },
     getActiveContext(): Promise<{ status: "ok"; data: ActiveContext | null }> {
       return requestJson(options.baseUrl, "/context/status");
@@ -195,12 +215,21 @@ export function createApiClient(options: ApiClientOptions) {
     },
     runAction(
       workflowId: string,
-      input: { projectId?: string; sessionId?: string; taskId?: string; executionMode?: "terminal" | "tmux" } = {}
+      input: {
+        projectId?: string;
+        sessionId?: string;
+        taskId?: string;
+        executionMode?: "terminal" | "tmux";
+      } = {}
     ): Promise<{
       status: "ok";
       data: {
         execution: WorkflowExecution;
-        command: { executable: string; arguments: string[]; workingDirectory: string };
+        command: {
+          executable: string;
+          arguments: string[];
+          workingDirectory: string;
+        };
         stdout: string;
         stderr: string;
         durationMs: number;
@@ -217,6 +246,9 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getActionExecution(executionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}`);
+    },
+    getActionExecutionArtifacts(executionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/artifacts`);
     },
     approveActionExecution(
       executionId: string,
@@ -243,7 +275,20 @@ export function createApiClient(options: ApiClientOptions) {
         method: "POST",
       });
     },
-    explainActiveContext(): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+    recoverActionExecution(
+      executionId: string,
+      workflowId: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/recover`, {
+        method: "POST",
+        body: JSON.stringify({ workflowId, requestedBy: "cli" }),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    explainActiveContext(): Promise<{
+      status: "ok";
+      data: Record<string, unknown>;
+    }> {
       return requestJson(options.baseUrl, "/context/explain");
     },
     sendDesktopObservation(observation: DesktopObservation): Promise<{ status: "ok"; data: ActiveContext }> {
@@ -320,10 +365,13 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    indexProject(
-      projectId: string
-    ): Promise<{ status: "ok"; data: { session: SessionRecord; events: EventEnvelope[] } }> {
-      return requestJson(options.baseUrl, `/projects/${projectId}/index`, { method: "POST" });
+    indexProject(projectId: string): Promise<{
+      status: "ok";
+      data: { session: SessionRecord; events: EventEnvelope[] };
+    }> {
+      return requestJson(options.baseUrl, `/projects/${projectId}/index`, {
+        method: "POST",
+      });
     },
     getProjectMemory(projectId: string): Promise<{
       status: "ok";
@@ -338,7 +386,10 @@ export function createApiClient(options: ApiClientOptions) {
     getProjectRetrieval(
       projectId: string,
       query = ""
-    ): Promise<{ status: "ok"; data: { chunks: RetrievalChunk[]; query: string } }> {
+    ): Promise<{
+      status: "ok";
+      data: { chunks: RetrievalChunk[]; query: string };
+    }> {
       const suffix = query ? `?q=${encodeURIComponent(query)}` : "";
       return requestJson(options.baseUrl, `/projects/${projectId}/retrieval${suffix}`);
     },
@@ -389,7 +440,12 @@ export function createApiClient(options: ApiClientOptions) {
     },
     saveSessionMemory(
       sessionId: string,
-      input: { body: string; title?: string; tags?: string[]; importance?: number }
+      input: {
+        body: string;
+        title?: string;
+        tags?: string[];
+        importance?: number;
+      }
     ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/sessions/${encodeURIComponent(sessionId)}/memory`, {
         method: "POST",
@@ -511,7 +567,10 @@ export function createApiClient(options: ApiClientOptions) {
     getSettings(): Promise<{ status: "ok"; data: SettingsSnapshot }> {
       return requestJson(options.baseUrl, "/settings");
     },
-    listReviews(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listReviews(): Promise<{
+      status: "ok";
+      data: Array<Record<string, unknown>>;
+    }> {
       return requestJson(options.baseUrl, "/reviews");
     },
     getReview(reviewId: string): Promise<{ status: "ok"; data: ReviewRecord | null }> {
@@ -557,10 +616,16 @@ export function createApiClient(options: ApiClientOptions) {
     }> {
       return requestJson(options.baseUrl, "/models");
     },
-    getMcpOverview(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    getMcpOverview(): Promise<{
+      status: "ok";
+      data: Array<Record<string, unknown>>;
+    }> {
       return requestJson(options.baseUrl, "/mcp");
     },
-    getMcpCalls(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    getMcpCalls(): Promise<{
+      status: "ok";
+      data: Array<Record<string, unknown>>;
+    }> {
       return requestJson(options.baseUrl, "/mcp/calls");
     },
     getMcpCall(callId: string): Promise<{ status: "ok"; data: Record<string, unknown> | null }> {
@@ -630,7 +695,9 @@ export function createApiClient(options: ApiClientOptions) {
       return requestJson(options.baseUrl, `/skills/candidates${suffix}`);
     },
     acceptSkillCandidate(id: string): Promise<{ status: "ok"; data: SkillRecord }> {
-      return requestJson(options.baseUrl, `/skills/candidates/${id}/accept`, { method: "POST" });
+      return requestJson(options.baseUrl, `/skills/candidates/${id}/accept`, {
+        method: "POST",
+      });
     },
     rejectSkillCandidate(id: string, reason?: string): Promise<{ status: "ok"; data: SkillCandidateRecord }> {
       return requestJson(options.baseUrl, `/skills/candidates/${id}/reject`, {
@@ -644,7 +711,10 @@ export function createApiClient(options: ApiClientOptions) {
     },
     getModelProviders(): Promise<{
       status: "ok";
-      data: { providers: ModelProviderRecord[]; profiles: ModelProfileRecord[] };
+      data: {
+        providers: ModelProviderRecord[];
+        profiles: ModelProfileRecord[];
+      };
     }> {
       return requestJson(options.baseUrl, `/models/providers`);
     },
@@ -674,7 +744,14 @@ export function createApiClient(options: ApiClientOptions) {
       status: "ok";
       data:
         | ModelCallRecord[]
-        | { data: ModelCallRecord[]; pagination: { limit: number; hasMore: boolean; nextCursor?: string } };
+        | {
+            data: ModelCallRecord[];
+            pagination: {
+              limit: number;
+              hasMore: boolean;
+              nextCursor?: string;
+            };
+          };
     }> {
       const params = new URLSearchParams({ limit: String(limit) });
       return requestJson(options.baseUrl, `/models/calls?${params}`);
@@ -753,7 +830,10 @@ export function createApiClient(options: ApiClientOptions) {
         headers: { "content-type": "application/json" },
       });
     },
-    listAnswerEvaluations(): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
+    listAnswerEvaluations(): Promise<{
+      status: "ok";
+      data: Array<Record<string, unknown>>;
+    }> {
       return requestJson(options.baseUrl, `/eval/answers`);
     },
     listSessionOutcomes(sessionId?: string): Promise<{ status: "ok"; data: Array<Record<string, unknown>> }> {
@@ -827,7 +907,10 @@ export function createApiClient(options: ApiClientOptions) {
       olderThanDays?: number | null;
       providerId?: string | null;
       modelName?: string | null;
-    }): Promise<{ status: "ok"; data: { removed: number; entryCount: number } }> {
+    }): Promise<{
+      status: "ok";
+      data: { removed: number; entryCount: number };
+    }> {
       return requestJson(options.baseUrl, `/embeddings/cache/purge`, {
         method: "POST",
         body: JSON.stringify(input ?? {}),
@@ -836,7 +919,9 @@ export function createApiClient(options: ApiClientOptions) {
     },
     streamEvents(onEvent: (event: EventEnvelope) => void): () => void {
       const controller = new AbortController();
-      fetch(resolveUrl(options.baseUrl, "/events/stream"), { signal: controller.signal }).then(async (response) => {
+      fetch(resolveUrl(options.baseUrl, "/events/stream"), {
+        signal: controller.signal,
+      }).then(async (response) => {
         if (!response.body) {
           return;
         }
