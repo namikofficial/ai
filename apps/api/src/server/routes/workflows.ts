@@ -187,7 +187,24 @@ export function registerWorkflowRoutes(
       errorCode,
       errorSummary,
     };
-    return deps.store.workflows.save({ ...record, execution });
+    const saved = deps.store.workflows.save({ ...record, execution });
+    const launch = deps.store.workflows.getLaunchForExecution(execution.id);
+    if (launch && (launch.launch.state === "waiting" || launch.launch.state === "ready")) {
+      deps.store.workflows.transitionLaunch({
+        expectedState: launch.launch.state,
+        record: {
+          tokenHash: null,
+          launch: {
+            ...launch.launch,
+            state: "cancelled",
+            updatedAt: timestamp,
+            authorizationExpiresAt: null,
+            finishedAt: timestamp,
+          },
+        },
+      });
+    }
+    return saved;
   }
 
   function makeInteractiveWorkflowReady(
@@ -715,6 +732,47 @@ export function registerWorkflowRoutes(
         sendJson(res, json("ok", { executionId, state: "cancelling" }), 202);
         return;
       }
+      const launch = deps.store.workflows.getLaunchForExecution(executionId);
+      const pid = launch?.launch.state === "running" ? launch.launch.launcherPid : null;
+      if (pid) {
+        try {
+          process.kill(-pid, "SIGTERM");
+          const forceKill = setTimeout(() => {
+            try {
+              process.kill(-pid, "SIGKILL");
+            } catch {
+              // The desktop process group completed before escalation.
+            }
+          }, 2_000);
+          forceKill.unref?.();
+          sendJson(res, json("ok", { executionId, state: "cancelling" }), 202);
+          return;
+        } catch {
+          sendJson(res, json("error", undefined, { message: "desktop workflow process is no longer available" }), 409);
+          return;
+        }
+      }
+    }
+    if (record.execution.state === "ready") {
+      const saved = cancelWaitingWorkflow(record, "launch_cancelled", "Interactive workflow launch was cancelled");
+      const event = createEvent(
+        "workflow.cancelled",
+        { workflowId: saved.execution.workflowId, executionId, beforeLaunch: true },
+        {
+          projectId: saved.execution.projectId,
+          sessionId: saved.execution.sessionId,
+          taskId: saved.execution.taskId,
+          agent: "workflow-executor",
+          sourceService: "workbench-api",
+          level: "warn",
+          summary: `Workflow ${saved.execution.workflowId} cancelled before launch`,
+          correlationId: executionId,
+        }
+      );
+      deps.store.appendEvent(event);
+      deps.publish(event);
+      sendJson(res, json("ok", { ...saved, launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)) }));
+      return;
     }
     sendJson(
       res,
@@ -890,7 +948,12 @@ export function registerWorkflowRoutes(
         deps.publish(event);
         sendJson(
           res,
-          json("ok", { ...saved, approval, deepLink: `/approvals/${encodeURIComponent(approval.id)}` }),
+          json("ok", {
+            ...saved,
+            approval,
+            launch: publicLaunch(deps.store.workflows.getLaunchForExecution(waiting.id)),
+            deepLink: `/approvals/${encodeURIComponent(approval.id)}`,
+          }),
           202
         );
         return;

@@ -360,3 +360,140 @@ test("running workflow cancellation terminates execution and persists cancelled 
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test("interactive workflows use token-bound terminal and tmux launch handoffs", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-launch-"));
+  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const project = store.createProject({ path: workspace, name: "Interactive Project" });
+  const interactive = command("interactive", "git", ["--version"]);
+  interactive.interactive = true;
+  const mutating = command("interactive-mutate", "git", ["tag", "interactive-approved"], "project_write");
+  mutating.interactive = true;
+  const manifest: ProjectManifest = {
+    ...fixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+    desktop: { ...fixture.ProjectManifest.desktop, tmuxSession: "interactive-project" },
+    commands: { interactive, mutating },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const session = store.createSession({
+    projectId: project.id,
+    title: "Interactive session",
+    userGoal: "launch safely",
+    mode: "check",
+    source: "test",
+  });
+  const handle = await startWorkbenchServer({
+    store,
+    inProcess: true,
+    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  try {
+    const requested = await handle.inject({
+      method: "POST",
+      url: "/actions/interactive/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id, sessionId: session.id, executionMode: "terminal" },
+    });
+    assert.equal(requested.statusCode, 202, requested.body);
+    const ready = JSON.parse(requested.body).data as {
+      execution: { id: string; state: string };
+      launch: { state: string; mode: string; environment: Record<string, string> };
+    };
+    assert.equal(ready.execution.state, "ready");
+    assert.equal(ready.launch.state, "ready");
+    assert.equal(ready.launch.mode, "terminal");
+    assert.equal(ready.launch.environment.AI_WORKBENCH_PROJECT_ID, project.id);
+    assert.equal(ready.launch.environment.AI_WORKBENCH_SESSION_ID, session.id);
+    assert.ok(!JSON.stringify(ready.launch).includes("token"));
+
+    const authorized = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${ready.execution.id}/launch/authorize`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: {},
+    });
+    assert.equal(authorized.statusCode, 200);
+    const capability = JSON.parse(authorized.body).data as {
+      token: string;
+      launch: { authorizationExpiresAt: string };
+    };
+    assert.ok(capability.token.length >= 64);
+    assert.ok(Date.parse(capability.launch.authorizationExpiresAt) > Date.now());
+    assert.ok(
+      !JSON.stringify(store.workflows.getLaunchForExecution(ready.execution.id)?.launch).includes(capability.token)
+    );
+
+    const invalid = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${ready.execution.id}/launch/start`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { token: "wrong", launcherInstanceId: "test-launcher", pid: process.pid },
+    });
+    assert.equal(invalid.statusCode, 409);
+
+    const started = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${ready.execution.id}/launch/start`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { token: capability.token, launcherInstanceId: "test-launcher", pid: process.pid },
+    });
+    assert.equal(started.statusCode, 200, started.body);
+    assert.equal(JSON.parse(started.body).data.execution.state, "running");
+    const replayStart = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${ready.execution.id}/launch/start`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { token: capability.token, launcherInstanceId: "replay", pid: process.pid },
+    });
+    assert.equal(replayStart.statusCode, 409);
+
+    const completed = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${ready.execution.id}/launch/complete`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { token: capability.token, exitCode: 0 },
+    });
+    assert.equal(completed.statusCode, 200, completed.body);
+    assert.equal(JSON.parse(completed.body).data.execution.state, "completed");
+    const replayComplete = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${ready.execution.id}/launch/complete`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { token: capability.token, exitCode: 0 },
+    });
+    assert.equal(replayComplete.statusCode, 409);
+
+    const pending = await handle.inject({
+      method: "POST",
+      url: "/actions/interactive-mutate/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id, executionMode: "tmux" },
+    });
+    assert.equal(pending.statusCode, 202);
+    const pendingData = JSON.parse(pending.body).data as { execution: { id: string }; launch?: unknown };
+    assert.equal(store.workflows.getLaunchForExecution(pendingData.execution.id)?.launch.state, "waiting");
+    const approved = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${pendingData.execution.id}/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { decidedBy: "test" },
+    });
+    assert.equal(approved.statusCode, 202, approved.body);
+    const approvedData = JSON.parse(approved.body).data as {
+      execution: { state: string };
+      launch: { mode: string; tmuxSession: string };
+    };
+    assert.equal(approvedData.execution.state, "ready");
+    assert.equal(approvedData.launch.mode, "tmux");
+    assert.equal(approvedData.launch.tmuxSession, "interactive-project");
+    assert.ok(store.listEvents().some((event) => event.type === "workflow.launch_ready"));
+  } finally {
+    await handle.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
