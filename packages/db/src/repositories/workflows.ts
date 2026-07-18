@@ -29,6 +29,8 @@ interface WorkflowExecutionRow {
   artifacts_json: string;
   error_code: string | null;
   error_summary: string | null;
+  recovery_workflow_ids_json: string;
+  recovery_of_execution_id: string | null;
   command_json: string;
   stdout: string;
   stderr: string;
@@ -103,6 +105,14 @@ export interface WorkflowBackgroundJobRecord {
   finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface WorkflowRecoveryRecord {
+  originalExecutionId: string;
+  recoveryExecutionId: string;
+  workflowId: string;
+  requestedAt: string;
+  requestedBy: string;
 }
 
 function rowToBackgroundJob(row: Record<string, unknown>): WorkflowBackgroundJobRecord {
@@ -235,6 +245,8 @@ function rowToRecord(row: WorkflowExecutionRow): WorkflowExecutionRecord {
     artifacts: safeParseJsonArray<string>(row.artifacts_json),
     errorCode: asStringOrNull(row.error_code),
     errorSummary: asStringOrNull(row.error_summary),
+    recoveryWorkflowIds: safeParseJsonArray<string>(row.recovery_workflow_ids_json),
+    recoveryOfExecutionId: asStringOrNull(row.recovery_of_execution_id),
   });
   const command = safeParseJson<WorkflowExecutionRecord["command"]>(row.command_json);
   return {
@@ -266,6 +278,35 @@ function definitionContent(definition: WorkflowDefinition): string {
 
 export function createWorkflowsRepo(db: DatabaseSync) {
   return {
+    createRecovery(input: {
+      originalExecutionId: string;
+      recoveryExecutionId: string;
+      workflowId: string;
+      requestedBy: string;
+    }): WorkflowRecoveryRecord {
+      const requestedAt = now();
+      db.prepare(
+        `INSERT INTO workflow_recoveries
+           (original_execution_id, recovery_execution_id, workflow_id, requested_at, requested_by)
+         VALUES (?, ?, ?, ?, ?)`
+      ).run(input.originalExecutionId, input.recoveryExecutionId, input.workflowId, requestedAt, input.requestedBy);
+      return { ...input, requestedAt };
+    },
+
+    listRecoveries(originalExecutionId: string): WorkflowRecoveryRecord[] {
+      return (
+        db
+          .prepare("SELECT * FROM workflow_recoveries WHERE original_execution_id = ? ORDER BY requested_at DESC")
+          .all(originalExecutionId) as Array<Record<string, unknown>>
+      ).map((row) => ({
+        originalExecutionId: asString(row.original_execution_id),
+        recoveryExecutionId: asString(row.recovery_execution_id),
+        workflowId: asString(row.workflow_id),
+        requestedAt: asString(row.requested_at),
+        requestedBy: asString(row.requested_by),
+      }));
+    },
+
     saveDefinition(definition: unknown, source: "manifest" | "manual" | "import" = "manual"): WorkflowDefinition {
       const parsed = workflowDefinitionSchema.parse(definition);
       if (!parsed.projectId) throw new Error("workflow definition requires a projectId");
@@ -493,8 +534,8 @@ export function createWorkflowsRepo(db: DatabaseSync) {
            id, workflow_id, project_id, session_id, task_id, run_id, state, current_step_id,
            step_states_json, started_at, finished_at, approval_id, exit_code, artifacts_json,
            error_code, error_summary, command_json, stdout, stderr, duration_ms, origin_json,
-           capabilities_json, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           capabilities_json, created_at, updated_at, recovery_workflow_ids_json, recovery_of_execution_id
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            state = excluded.state,
            current_step_id = excluded.current_step_id,
@@ -505,6 +546,8 @@ export function createWorkflowsRepo(db: DatabaseSync) {
            artifacts_json = excluded.artifacts_json,
            error_code = excluded.error_code,
            error_summary = excluded.error_summary,
+           recovery_workflow_ids_json = excluded.recovery_workflow_ids_json,
+           recovery_of_execution_id = excluded.recovery_of_execution_id,
            command_json = excluded.command_json,
            stdout = excluded.stdout,
            stderr = excluded.stderr,
@@ -534,7 +577,9 @@ export function createWorkflowsRepo(db: DatabaseSync) {
         JSON.stringify(execution.origin),
         JSON.stringify(execution.capabilities),
         execution.createdAt,
-        execution.updatedAt
+        execution.updatedAt,
+        JSON.stringify(execution.recoveryWorkflowIds),
+        execution.recoveryOfExecutionId
       );
       const saved = this.get(execution.id);
       if (!saved) throw new Error(`workflow execution ${execution.id} was not persisted`);

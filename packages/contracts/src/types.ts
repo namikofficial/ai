@@ -299,6 +299,8 @@ export interface WorkflowExecution extends VersionedContract {
   artifacts: string[];
   errorCode: string | null;
   errorSummary: string | null;
+  recoveryWorkflowIds: string[];
+  recoveryOfExecutionId: string | null;
 }
 
 export interface WorkflowLaunch extends VersionedContract {

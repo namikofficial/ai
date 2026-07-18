@@ -101,6 +101,8 @@ export function registerWorkflowRoutes(
     sessionId: string | null;
     taskId: string | null;
     state: "starting" | "running" | "waiting" | "ready";
+    recoveryWorkflowIds?: string[];
+    recoveryOfExecutionId?: string | null;
   }): WorkflowExecution {
     const timestamp = new Date().toISOString();
     return {
@@ -132,6 +134,8 @@ export function registerWorkflowRoutes(
       artifacts: [],
       errorCode: null,
       errorSummary: null,
+      recoveryWorkflowIds: input.recoveryWorkflowIds ?? [],
+      recoveryOfExecutionId: input.recoveryOfExecutionId ?? null,
     };
   }
 
@@ -1557,6 +1561,9 @@ export function registerWorkflowRoutes(
           projectId,
           sessionId,
           taskId,
+          recoveryWorkflowIds: [
+            ...new Set(preparedPlan.plan.steps.flatMap((entry) => entry.step.recoveryWorkflowIds)),
+          ],
           state: preparedPlan.plan.approvalRequired
             ? "waiting"
             : preparedPlan.plan.backgroundRequired
@@ -1678,6 +1685,7 @@ export function registerWorkflowRoutes(
         projectId,
         sessionId,
         taskId,
+        recoveryWorkflowIds: prepared.workflow.command.recoveryWorkflowIds,
         state: prepared.workflow.command.mutation !== "read_only" ? "waiting" : desktopLaunch ? "ready" : "running",
       });
       if (desktopLaunch) {

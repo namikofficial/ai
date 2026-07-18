@@ -492,6 +492,8 @@ const workflowExecutionRaw = objectSchema({
   artifacts: strings,
   errorCode: nullable(nonEmptyString),
   errorSummary: nullable(nonEmptyString),
+  recoveryWorkflowIds: defaulted(strings, []),
+  recoveryOfExecutionId: defaulted(nullable(nonEmptyString), null),
 });
 const workflowLaunchRaw = objectSchema({
   ...baseShape,
