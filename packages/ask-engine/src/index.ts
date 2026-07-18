@@ -1375,7 +1375,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   });
   let answer: string;
   let answerCallId: string | null = null;
-  if (selected.length === 0) {
+  if (selected.length === 0 && !clipboardForModel) {
     answer = buildAskFallbackAnswer(project.name, input.input.question);
     input.store.appendEvent(
       createEvent(
