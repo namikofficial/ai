@@ -257,6 +257,7 @@ const activeContextRaw = objectSchema({
   source: enumSchema([
     "explicit_override",
     "manual_pin",
+    "workbench_selection",
     "workbench_route",
     "focused_editor",
     "focused_terminal",
@@ -459,6 +460,7 @@ const desktopObservationRaw = objectSchema({
       session: nullable(nonEmptyString),
       paneId: nullable(nonEmptyString),
       cwd: nullable(nonEmptyString),
+      associationVerified: booleanSchema,
     })
   ),
   browser: nullable(objectSchema({ url: nullable(nonEmptyString), projectId: nullable(nonEmptyString) })),

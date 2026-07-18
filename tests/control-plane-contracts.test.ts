@@ -88,4 +88,6 @@ test("desktop observations require tmux association data to be explicit", () => 
   const observation = structuredClone(fixtures.DesktopObservation) as Record<string, unknown>;
   observation.tmux = { session: "unrelated" };
   assert.throws(() => desktopObservationSchema.parse(observation), /tmux.clientPid/);
+  observation.tmux = { clientPid: 4, session: null, paneId: null, cwd: null, associationVerified: false };
+  assert.doesNotThrow(() => desktopObservationSchema.parse(observation));
 });

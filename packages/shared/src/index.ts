@@ -447,7 +447,16 @@ export type EventType =
   | "handoff.archived"
   | "review.reflected"
   | "plan.reviewed"
-  | "lesson.created";
+  | "lesson.created"
+  | "project.manifest_proposed"
+  | "project.manifest_approved"
+  | "project.manifest_rejected"
+  | "project.selected"
+  | "project.pinned"
+  | "project.unpinned"
+  | "active_context.changed"
+  | "context.confidence_reduced"
+  | "desktop.observed";
 
 export interface ConfigSnapshot {
   databasePath: string;

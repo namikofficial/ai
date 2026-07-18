@@ -220,7 +220,7 @@ No destructive migration is authorized until an automated backup command and res
 - The Python RAG database needs a dry-run inventory before any import.
 - Qdrant remains optional and rebuildable; SQLite is the baseline.
 
-## Phase 2 registry foundation
+## Phase 2 registry
 
 Migration `0013_control_plane_registry` introduces the first canonical SQLite ownership slice:
 
@@ -229,8 +229,14 @@ Migration `0013_control_plane_registry` introduces the first canonical SQLite ow
 - `active_project_selection` stores one durable selected project with an optional workspace, session or persistent pin scope.
 - `ProjectRegistryRepo` validates project identity, rejects unknown projects, resolves proposals transactionally and returns public contract types rather than database rows.
 
-This foundation does not yet alter the existing `/projects` API, desktop cache, Kage, Rofi or Wayle. Existing consumers remain compatible until API/import/cache parity exists.
+The registry now includes HTTP and CLI import/diff/proposal/approval/export operations, non-executing legacy profile import, local manifest scans, configuration precedence, atomic XDG caches and integrity-checked SQLite backups. Existing `/projects` behavior remains compatible.
+
+## Phase 3 active context
+
+Desktop observations and resolved active context are durable validated contracts. Resolution covers explicit overrides, anchored pins, Workbench routes, editor paths, focused terminals, verified tmux clients, process CWD, browser hints, Workbench selection and recent context. Winning and rejected evidence are inspectable through the API and CLI. An event-driven Hyprland observer lives in the dotfiles repository.
+
+See `docs/PROJECT_REGISTRY_AND_ACTIVE_CONTEXT.md` for operations and troubleshooting.
 
 ## Next coherent slice
 
-Continue Phase 2 by exposing registry read/import/diff/approve/export operations, building the legacy `project-profile.sh` dry-run importer, and generating an atomic XDG read-only cache. Automated backup/restore must be implemented before applying this migration to a durable user database. Wayle and Kage must remain unchanged until that status path is working and tested.
+Phase 4 should aggregate Git, checks, services, index freshness, active work and runtime readiness into one optimized status payload. Wayle and Kage remain unchanged until that path is working and tested.

@@ -17,6 +17,7 @@ import { getRequestPath, isHtmlRequest, safeParseJson } from "./server/http.ts";
 import { renderDashboard, renderErrorPage, renderNotFoundPage } from "./server/render-pages.ts";
 import { json, sendJson } from "./server/response.ts";
 import { registerAgentRoutes } from "./server/routes/agents.ts";
+import { registerControlPlaneRoutes } from "./server/routes/control-plane.ts";
 import { registerEvalRoutes } from "./server/routes/eval.ts";
 import { registerHealthRoutes } from "./server/routes/health.ts";
 import { registerMcpRoutes } from "./server/routes/mcp.ts";
@@ -314,6 +315,10 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
     readProjectGraph: (projectId) => readProjectGraph(store, projectId),
   });
   app.use(projectRouter);
+
+  const controlPlaneRouter = express.Router();
+  registerControlPlaneRoutes(controlPlaneRouter, { store, publish });
+  app.use(controlPlaneRouter);
 
   const sessionRouter = express.Router();
   registerSessionRoutes(sessionRouter, {

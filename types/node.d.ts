@@ -73,6 +73,7 @@ declare module "node:fs/promises" {
     options?: { encoding?: BufferEncoding } | BufferEncoding
   ): Promise<string>;
   export function readdir(path: string, options?: { withFileTypes?: boolean }): Promise<string[] | Dirent[]>;
+  export function rename(oldPath: string, newPath: string): Promise<void>;
   export function stat(path: string): Promise<{
     isDirectory(): boolean;
     isFile(): boolean;

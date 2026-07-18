@@ -1,3 +1,4 @@
+export { type ActiveContextRepo, createActiveContextRepo } from "./active-context.ts";
 export { type AgentsRepo, createAgentsRepo } from "./agents.ts";
 export { type CodeIntelligenceRepo, createCodeIntelligenceRepo } from "./code-intelligence.ts";
 export { type ContextRepo, createContextRepo } from "./context.ts";

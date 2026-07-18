@@ -114,6 +114,7 @@ export interface ProjectManifest extends VersionedContract {
 export type ActiveContextSource =
   | "explicit_override"
   | "manual_pin"
+  | "workbench_selection"
   | "workbench_route"
   | "focused_editor"
   | "focused_terminal"
@@ -321,7 +322,13 @@ export interface DesktopObservation extends VersionedContract {
   process: { pid: number; parentPid: number | null; cwd: string | null; command: string | null } | null;
   editor: { file: string | null; workspace: string | null } | null;
   terminal: { cwd: string | null; shell: string | null } | null;
-  tmux: { clientPid: number | null; session: string | null; paneId: string | null; cwd: string | null } | null;
+  tmux: {
+    clientPid: number | null;
+    session: string | null;
+    paneId: string | null;
+    cwd: string | null;
+    associationVerified: boolean;
+  } | null;
   browser: { url: string | null; projectId: string | null } | null;
   explicitProjectId: string | null;
   transientWindow: boolean;

@@ -1,4 +1,10 @@
 import type { ProjectContextGraph } from "../../code-intelligence/src/index.ts";
+import type { ActiveContext, DesktopObservation, ProjectManifest } from "../../contracts/src/index.ts";
+import type {
+  ActiveProjectSelection,
+  ManifestProposal,
+  ProjectPinScope,
+} from "../../db/src/repositories/project-registry.ts";
 import type {
   AgentHandoffRecord,
   AgentRunRecord,
@@ -99,6 +105,58 @@ export function createApiClient(options: ApiClientOptions) {
     },
     listProjects(): Promise<{ status: "ok"; data: ProjectSummary[] }> {
       return requestJson(options.baseUrl, "/projects");
+    },
+    getRegistry(): Promise<{
+      status: "ok";
+      data: { manifests: ProjectManifest[]; selection: ActiveProjectSelection | null };
+    }> {
+      return requestJson(options.baseUrl, "/registry");
+    },
+    proposeProjectManifest(
+      projectId: string,
+      manifest: ProjectManifest,
+      sourceRef?: string | null
+    ): Promise<{ status: "ok"; data: { proposal: ManifestProposal; diff: unknown[] } }> {
+      return requestJson(options.baseUrl, `/projects/${encodeURIComponent(projectId)}/manifest/proposals`, {
+        method: "POST",
+        body: JSON.stringify({ manifest, sourceRef: sourceRef ?? null }),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    resolveManifestProposal(
+      proposalId: string,
+      resolution: "approve" | "reject"
+    ): Promise<{ status: "ok"; data: ManifestProposal }> {
+      return requestJson(options.baseUrl, `/registry/proposals/${encodeURIComponent(proposalId)}/${resolution}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+      });
+    },
+    selectProject(
+      projectId: string,
+      pinScope: ProjectPinScope | null = null
+    ): Promise<{ status: "ok"; data: ActiveProjectSelection }> {
+      return requestJson(options.baseUrl, "/context/selection", {
+        method: "POST",
+        body: JSON.stringify({ projectId, source: "cli", pinScope }),
+        headers: { "content-type": "application/json" },
+      });
+    },
+    clearProjectSelection(): Promise<{ status: "ok"; data: ActiveProjectSelection }> {
+      return requestJson(options.baseUrl, "/context/selection?source=cli", { method: "DELETE" });
+    },
+    getActiveContext(): Promise<{ status: "ok"; data: ActiveContext | null }> {
+      return requestJson(options.baseUrl, "/context/status");
+    },
+    explainActiveContext(): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, "/context/explain");
+    },
+    sendDesktopObservation(observation: DesktopObservation): Promise<{ status: "ok"; data: ActiveContext }> {
+      return requestJson(options.baseUrl, "/desktop/observations", {
+        method: "POST",
+        body: JSON.stringify(observation),
+        headers: { "content-type": "application/json" },
+      });
     },
     getProject(projectId: string): Promise<{ status: "ok"; data: ProjectSummary | null }> {
       return requestJson(options.baseUrl, `/projects/${projectId}`);

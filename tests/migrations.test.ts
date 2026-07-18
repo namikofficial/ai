@@ -22,6 +22,8 @@ test("migrations list includes the complete control-plane baseline", () => {
   assert.ok(versions.includes("0011_memory_events"));
   assert.ok(versions.includes("0012_memory_graph"));
   assert.ok(versions.includes("0013_control_plane_registry"));
+  assert.ok(versions.includes("0014_active_context"));
+  assert.ok(versions.includes("0015_pin_anchors"));
 });
 
 test("migrations apply cleanly and create all expected tables", async () => {
@@ -30,7 +32,7 @@ test("migrations apply cleanly and create all expected tables", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 13);
+    assert.equal(result.applied.length, 15);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -53,6 +55,8 @@ test("migrations apply cleanly and create all expected tables", async () => {
     assert.ok(tableNames.includes("project_manifests"), "project_manifests table must exist");
     assert.ok(tableNames.includes("project_manifest_proposals"), "project_manifest_proposals table must exist");
     assert.ok(tableNames.includes("active_project_selection"), "active_project_selection table must exist");
+    assert.ok(tableNames.includes("desktop_observations"), "desktop_observations table must exist");
+    assert.ok(tableNames.includes("active_context_state"), "active_context_state table must exist");
 
     const executionCommandColumns = db.prepare("PRAGMA table_info(execution_commands)").all() as Array<{
       name: string;

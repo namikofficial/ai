@@ -69,6 +69,7 @@ import {
 } from "../../shared/src/model-profiles.ts";
 import { runMigrations } from "./migrate.ts";
 import {
+  createActiveContextRepo,
   createAgentsRepo,
   createCodeIntelligenceRepo,
   createContextRepo,
@@ -308,6 +309,7 @@ export function createStore(db: DatabaseSync) {
   } | null = null;
 
   const conversationRepo = createConversationRepo(db);
+  const activeContextRepo = createActiveContextRepo(db);
   const codeIntelligenceRepo = createCodeIntelligenceRepo(db);
   const retrievalRepo = createRetrievalRepo(db);
   const modelsRepo = createModelsRepo(db);
@@ -2239,6 +2241,7 @@ export function createStore(db: DatabaseSync) {
       return store.listSessions(100);
     },
     conversation: conversationRepo,
+    activeContext: activeContextRepo,
     codeIntelligence: codeIntelligenceRepo,
     retrieval: retrievalRepo,
     models: modelsRepo,

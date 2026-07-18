@@ -20,6 +20,8 @@ export interface ActiveProjectSelection {
   projectId: string | null;
   source: string;
   pinScope: ProjectPinScope | null;
+  workspaceId: string | null;
+  sessionId: string | null;
   selectedAt: string;
   updatedAt: string;
 }
@@ -42,6 +44,8 @@ interface SelectionRow {
   project_id: string | null;
   source: string;
   pin_scope: string | null;
+  workspace_id: string | null;
+  session_id: string | null;
   selected_at: string;
   updated_at: string;
 }
@@ -192,24 +196,34 @@ export function createProjectRegistryRepo(db: DatabaseSync) {
         projectId: asStringOrNull(row.project_id),
         source: asString(row.source),
         pinScope: asStringOrNull(row.pin_scope) as ProjectPinScope | null,
+        workspaceId: asStringOrNull(row.workspace_id),
+        sessionId: asStringOrNull(row.session_id),
         selectedAt: asString(row.selected_at),
         updatedAt: asString(row.updated_at),
       };
     },
 
-    selectProject(projectId: string, source: string, pinScope: ProjectPinScope | null = null): ActiveProjectSelection {
+    selectProject(
+      projectId: string,
+      source: string,
+      pinScope: ProjectPinScope | null = null,
+      anchors: { workspaceId?: string | null; sessionId?: string | null } = {}
+    ): ActiveProjectSelection {
       ensureProjectExists(db, projectId);
       const timestamp = now();
       db.prepare(
-        `INSERT INTO active_project_selection (singleton_id, project_id, source, pin_scope, selected_at, updated_at)
-         VALUES ('active', ?, ?, ?, ?, ?)
+        `INSERT INTO active_project_selection (
+           singleton_id, project_id, source, pin_scope, workspace_id, session_id, selected_at, updated_at
+         ) VALUES ('active', ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(singleton_id) DO UPDATE SET
            project_id = excluded.project_id,
            source = excluded.source,
            pin_scope = excluded.pin_scope,
+           workspace_id = excluded.workspace_id,
+           session_id = excluded.session_id,
            selected_at = excluded.selected_at,
            updated_at = excluded.updated_at`
-      ).run(projectId, source, pinScope, timestamp, timestamp);
+      ).run(projectId, source, pinScope, anchors.workspaceId ?? null, anchors.sessionId ?? null, timestamp, timestamp);
       const selection = this.getSelection();
       if (!selection) throw new Error("active project selection was not persisted");
       return selection;
@@ -218,12 +232,15 @@ export function createProjectRegistryRepo(db: DatabaseSync) {
     clearSelection(source: string): ActiveProjectSelection {
       const timestamp = now();
       db.prepare(
-        `INSERT INTO active_project_selection (singleton_id, project_id, source, pin_scope, selected_at, updated_at)
-         VALUES ('active', NULL, ?, NULL, ?, ?)
+        `INSERT INTO active_project_selection (
+           singleton_id, project_id, source, pin_scope, workspace_id, session_id, selected_at, updated_at
+         ) VALUES ('active', NULL, ?, NULL, NULL, NULL, ?, ?)
          ON CONFLICT(singleton_id) DO UPDATE SET
            project_id = NULL,
            source = excluded.source,
            pin_scope = NULL,
+           workspace_id = NULL,
+           session_id = NULL,
            selected_at = excluded.selected_at,
            updated_at = excluded.updated_at`
       ).run(source, timestamp, timestamp);

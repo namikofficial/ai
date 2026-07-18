@@ -5,11 +5,22 @@ import { startWorkbenchServer } from "../../../apps/api/src/server.ts";
 import { startWorkbenchWeb } from "../../../apps/web/src/server.ts";
 import { startWorkbenchWorker } from "../../../apps/worker/src/worker.ts";
 import { startMcpServer } from "../../../mcp/server/src/stdio.ts";
+import { readActiveContextCache } from "../../../packages/active-context/src/index.ts";
 import { createApiClient } from "../../../packages/api-client/src/index.ts";
 import { resolveConfig, resolveProjectConfig } from "../../../packages/config/src/index.ts";
+import { projectManifestSchema } from "../../../packages/contracts/src/index.ts";
 import { runRetrievalExplain } from "../../../packages/db/src/retrieval-explain.ts";
 import { createStore, initializeStore } from "../../../packages/db/src/store.ts";
 import { createModelRuntime } from "../../../packages/model-runtime/src/index.ts";
+import {
+  atomicWriteJson,
+  createWorkbenchBackup,
+  defaultRegistryCachePath,
+  diffProjectManifests,
+  importLegacyProjectProfiles,
+  readProjectLocalManifest,
+  refreshRegistryCache,
+} from "../../../packages/project-registry/src/index.ts";
 import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 
@@ -21,12 +32,23 @@ function printUsage(): void {
   ai api --port <api-port>
   ai worker
   ai project add <path> [--name <name>]
+  ai project list
+  ai project pin <project> [--scope workspace|session|persistent]
+  ai project unpin
+  ai project import-legacy <project-profile.sh> [--apply]
+  ai project import <manifest.json> --project <project-id> [--apply]
+  ai project proposal <approve|reject> <proposal-id>
+  ai project scan [project-id] [--apply]
+  ai project export <project> [--output <path>]
+  ai project backup <sqlite-output-path>
   ai project index <project>
   ai project graph <project>
   ai project symbols <project> [--query <text>] [--limit <n>]
   ai project symbol <symbol-id>
   ai ask "<question>" --project <project>
   ai context explain "<question>" --project <project>
+  ai context status
+  ai context explain
   ai config show --project <project>
   ai config init --project <project>
   ai config validate --project <project>
@@ -328,6 +350,156 @@ async function run(): Promise<void> {
 
   if (command === "project") {
     const subcommand = positionals.shift();
+    if (subcommand === "list") {
+      printJson(await client.getRegistry());
+      return;
+    }
+    if (subcommand === "pin") {
+      const projectId = positionals.shift();
+      if (!projectId) throw new Error("project pin requires a project id");
+      const scope = options.scope ?? "persistent";
+      if (scope !== "workspace" && scope !== "session" && scope !== "persistent") {
+        throw new Error("project pin --scope must be workspace, session, or persistent");
+      }
+      printJson(await client.selectProject(projectId, scope));
+      return;
+    }
+    if (subcommand === "unpin") {
+      printJson(await client.clearProjectSelection());
+      return;
+    }
+    if (subcommand === "import-legacy") {
+      const sourcePath = positionals.shift();
+      if (!sourcePath) throw new Error("project import-legacy requires a project-profile.sh path");
+      const manifests = importLegacyProjectProfiles(readFileSync(sourcePath, "utf8"), {
+        home: process.env.HOME ?? "",
+        sourceRef: sourcePath,
+      });
+      if (options.apply !== "true") {
+        printJson({ dryRun: true, manifests, mutations: [] });
+        return;
+      }
+      const store = openLocalStore();
+      try {
+        const proposals = manifests.map((manifest) => {
+          const existing = store.getProjectByPath(manifest.path);
+          const project = existing ?? store.createProject({ path: manifest.path, name: manifest.name });
+          const canonical = { ...manifest, id: project.id, name: project.name };
+          return store.projectRegistry.proposeManifest(project.id, canonical, sourcePath);
+        });
+        await refreshRegistryCache(store.projectRegistry, defaultRegistryCachePath());
+        printJson({ dryRun: false, proposals });
+      } finally {
+        store.db.close();
+      }
+      return;
+    }
+    if (subcommand === "import") {
+      const sourcePath = positionals.shift();
+      const projectId = options.project;
+      if (!sourcePath || !projectId) throw new Error("project import requires a manifest path and --project");
+      const manifest = projectManifestSchema.parse(JSON.parse(readFileSync(sourcePath, "utf8")));
+      const store = openLocalStore();
+      try {
+        const diff = diffProjectManifests(store.projectRegistry.getManifest(projectId), manifest);
+        if (options.apply !== "true") {
+          printJson({ dryRun: true, projectId, manifest, diff, mutations: [] });
+        } else {
+          const proposal = store.projectRegistry.proposeManifest(projectId, manifest, sourcePath);
+          printJson({ dryRun: false, proposal, diff });
+        }
+      } finally {
+        store.db.close();
+      }
+      return;
+    }
+    if (subcommand === "proposal") {
+      const resolution = positionals.shift();
+      const proposalId = positionals.shift();
+      if ((resolution !== "approve" && resolution !== "reject") || !proposalId) {
+        throw new Error("project proposal requires approve|reject and a proposal id");
+      }
+      printJson(await client.resolveManifestProposal(proposalId, resolution));
+      return;
+    }
+    if (subcommand === "scan") {
+      const requestedProjectId = positionals.shift();
+      const store = openLocalStore();
+      try {
+        const projects = requestedProjectId
+          ? store.listProjects().filter((project) => project.id === requestedProjectId)
+          : store.listProjects();
+        if (requestedProjectId && projects.length === 0) throw new Error(`Unknown project: ${requestedProjectId}`);
+        const results = [];
+        for (const project of projects) {
+          const local = await readProjectLocalManifest(project.path);
+          if (!local.manifest) {
+            results.push({
+              projectId: project.id,
+              path: local.path,
+              status: local.error ? "invalid" : "absent",
+              error: local.error,
+            });
+            continue;
+          }
+          if (local.manifest.id !== project.id) {
+            results.push({
+              projectId: project.id,
+              path: local.path,
+              status: "conflict",
+              error: `manifest id ${local.manifest.id} does not match ${project.id}`,
+            });
+            continue;
+          }
+          const diff = diffProjectManifests(store.projectRegistry.getManifest(project.id), local.manifest);
+          const proposal =
+            options.apply === "true" && diff.length > 0
+              ? store.projectRegistry.proposeManifest(project.id, local.manifest, local.path)
+              : null;
+          results.push({
+            projectId: project.id,
+            path: local.path,
+            status: diff.length === 0 ? "unchanged" : "proposed",
+            dryRun: options.apply !== "true",
+            diff,
+            proposal,
+          });
+        }
+        printJson({ results });
+      } finally {
+        store.db.close();
+      }
+      return;
+    }
+    if (subcommand === "export") {
+      const projectId = positionals.shift();
+      if (!projectId) throw new Error("project export requires a project id");
+      const store = openLocalStore();
+      try {
+        const manifest = store.projectRegistry.getManifest(projectId);
+        if (!manifest) throw new Error(`No approved manifest for project: ${projectId}`);
+        if (options.output) {
+          await atomicWriteJson(options.output, manifest);
+          printJson({ projectId, output: options.output });
+        } else {
+          printJson(manifest);
+        }
+      } finally {
+        store.db.close();
+      }
+      return;
+    }
+    if (subcommand === "backup") {
+      const output = positionals.shift();
+      if (!output) throw new Error("project backup requires an output path");
+      const store = openLocalStore();
+      try {
+        printJson(await createWorkbenchBackup(store.db, output));
+      } finally {
+        store.db.close();
+      }
+      return;
+    }
     if (subcommand === "add") {
       const path = positionals.shift();
       if (!path) {
@@ -428,9 +600,23 @@ async function run(): Promise<void> {
 
   if (command === "context") {
     const subcommand = positionals.shift();
+    if (subcommand === "status") {
+      try {
+        printJson(await client.getActiveContext());
+      } catch (error) {
+        const cache = await readActiveContextCache();
+        if (!cache) throw error;
+        printJson({ status: "offline", stale: true, data: cache.context, generatedAt: cache.generatedAt });
+      }
+      return;
+    }
     if (subcommand === "explain") {
       const question = positionals.join(" ");
       const project = options.project;
+      if (!question && !project) {
+        printJson(await client.explainActiveContext());
+        return;
+      }
       if (!project) {
         throw new Error("context explain requires --project <project>");
       }
