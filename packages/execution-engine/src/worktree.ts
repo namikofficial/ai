@@ -12,7 +12,7 @@
 
 import { type ExecFileOptions, execFile } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
+import { cp, lstat, mkdir, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { IGNORED_DIRECTORIES, isIgnoredDirectory, normalizeSlashes } from "./files.ts";
@@ -49,6 +49,7 @@ export interface WorkspaceRecord {
   strategy: "git_worktree" | "safe_copy";
   branch: string | null;
   baseCommit: string | null;
+  originalBranch: string | null;
   isGitWorktree: boolean;
   originalRoot: string;
 }
@@ -130,11 +131,12 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
   const branchName = `ai/dev/${runShortId}`;
 
   const strategy = input.strategy ?? "auto";
-  const useWorktree = strategy === "git_worktree" || (strategy === "auto" && (await isGitRepository(root)));
+  const gitRepository = await isGitRepository(root);
+  const baseCommit = gitRepository ? await getCurrentCommit(root) : null;
+  const currentBranch = gitRepository ? await getCurrentBranch(root) : null;
+  const useWorktree = strategy === "git_worktree" || (strategy === "auto" && gitRepository);
 
   if (useWorktree) {
-    const baseCommit = await getCurrentCommit(root);
-    const currentBranch = await getCurrentBranch(root);
     try {
       await execFileAsync("git", ["worktree", "add", "-b", branchName, workspaceDir], { cwd: root });
       return {
@@ -144,6 +146,7 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
           strategy: "git_worktree",
           branch: branchName,
           baseCommit,
+          originalBranch: currentBranch,
           isGitWorktree: true,
           originalRoot: root,
         },
@@ -174,7 +177,8 @@ export async function createTaskWorkspace(input: CreateWorkspaceInput): Promise<
       path: workspaceDir,
       strategy: "safe_copy",
       branch: null,
-      baseCommit: null,
+      baseCommit,
+      originalBranch: currentBranch,
       isGitWorktree: false,
       originalRoot: root,
     },
@@ -207,16 +211,6 @@ async function copyDirectory(source: string, target: string): Promise<void> {
     } else if (entry.isFile()) {
       await cp(from, to, { recursive: false });
     } else if (entry.isSymbolicLink()) {
-      try {
-        const target = await readFile(from)
-          .then(() => undefined)
-          .catch(() => undefined);
-        if (target !== undefined) {
-          await cp(from, to, { recursive: false });
-        }
-      } catch {
-        // ignore broken symlink
-      }
     }
   }
 }
@@ -416,21 +410,91 @@ export interface ApplyPatchInput {
   allowedRoots: ReadonlyArray<string>;
 }
 
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+async function assertNoSymlinkEscape(root: string, relativePath: string, requireLeaf: boolean): Promise<void> {
+  const canonicalRoot = await realpath(root);
+  const parts = normalizeSlashes(relativePath).split("/").filter(Boolean);
+  let current = root;
+  for (const [index, part] of parts.entries()) {
+    current = path.join(current, part);
+    try {
+      const info = await lstat(current);
+      if (info.isSymbolicLink()) throw new Error(`refused symlink patch path: ${relativePath}`);
+      if (index === parts.length - 1 && requireLeaf && !info.isFile()) {
+        throw new Error(`patch source is not a regular file: ${relativePath}`);
+      }
+      const canonical = await realpath(current);
+      if (!isWithin(canonicalRoot, canonical)) throw new Error(`patch path escapes canonical root: ${relativePath}`);
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT") {
+        if (requireLeaf) throw new Error(`patch source is missing: ${relativePath}`);
+        break;
+      }
+      throw error;
+    }
+  }
+}
+
+async function assertApplyTargetUnchanged(
+  workspace: WorkspaceRecord,
+  originalRoot: string,
+  paths: string[]
+): Promise<void> {
+  if (workspace.baseCommit) {
+    const currentCommit = await getCurrentCommit(originalRoot);
+    if (currentCommit !== workspace.baseCommit) {
+      throw new Error(
+        `project HEAD changed since workspace creation (${workspace.baseCommit} -> ${currentCommit ?? "unknown"})`
+      );
+    }
+  }
+  if (workspace.originalBranch) {
+    const currentBranch = await getCurrentBranch(originalRoot);
+    if (currentBranch !== workspace.originalBranch) {
+      throw new Error(
+        `project branch changed since workspace creation (${workspace.originalBranch} -> ${currentBranch ?? "unknown"})`
+      );
+    }
+  }
+  if (workspace.baseCommit && paths.length > 0) {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["status", "--porcelain=v1", "--untracked-files=all", "--", ...paths],
+      { cwd: originalRoot, timeout: 30_000 }
+    );
+    if (stdout.trim().length > 0) {
+      throw new Error("one or more reviewed patch paths changed in the original project");
+    }
+  }
+}
+
 export async function applyWorkspaceToOriginal(
   input: ApplyPatchInput
 ): Promise<{ applied: string[]; skipped: string[] }> {
   const originalRoot = path.resolve(input.originalRoot);
-  const allowed = new Set(input.allowedRoots.map((value) => path.resolve(value)));
-  if (!allowed.has(originalRoot)) {
-    throw new Error(`original root ${originalRoot} is not in the allowed list`);
+  const canonicalRoot = await realpath(originalRoot);
+  const canonicalWorkspace = await realpath(input.workspace.path);
+  const allowed = new Set(
+    await Promise.all(input.allowedRoots.map(async (value) => await realpath(path.resolve(value))))
+  );
+  if (!allowed.has(canonicalRoot)) {
+    throw new Error(`original root ${canonicalRoot} is not in the allowed list`);
   }
+  if ((await realpath(input.workspace.originalRoot)) !== canonicalRoot) {
+    throw new Error("workspace original root does not match the apply target");
+  }
+  const uniquePaths = [...new Set(input.paths.map(normalizeSlashes))];
+  await assertApplyTargetUnchanged(input.workspace, originalRoot, uniquePaths);
   const applied: string[] = [];
   const skipped: string[] = [];
-  for (const relative of input.paths) {
-    const relativePath = normalizeSlashes(relative);
+  for (const relativePath of uniquePaths) {
     const workspacePath = path.join(input.workspace.path, relativePath);
     const target = path.resolve(path.join(originalRoot, relativePath));
-    if (!target.startsWith(originalRoot + path.sep) && target !== originalRoot) {
+    if (!isWithin(originalRoot, target)) {
       skipped.push(relativePath);
       continue;
     }
@@ -438,6 +502,7 @@ export async function applyWorkspaceToOriginal(
       skipped.push(relativePath);
       continue;
     }
+    await assertNoSymlinkEscape(originalRoot, relativePath, false);
     if (!existsSync(workspacePath)) {
       if (existsSync(target)) {
         await rm(target, { force: true });
@@ -447,6 +512,9 @@ export async function applyWorkspaceToOriginal(
       }
       continue;
     }
+    await assertNoSymlinkEscape(input.workspace.path, relativePath, true);
+    const canonicalSource = await realpath(workspacePath);
+    if (!isWithin(canonicalWorkspace, canonicalSource)) throw new Error(`workspace path escapes root: ${relativePath}`);
     await mkdir(path.dirname(target), { recursive: true });
     await cp(workspacePath, target, { recursive: false });
     applied.push(relativePath);

@@ -41,12 +41,12 @@ flowchart LR
 | Dev runs/checks/approvals | Workbench SQLite | Web, CLI, MCP | Not visible to desktop | Workbench active-work/status aggregate | Stale approvals and wrong branch apply | Dev-agent and E2E tests |
 | Reviews | Workbench SQLite | Web/API/CLI | Separate from live Wayle state | Workbench active-work/status aggregate | Linking review to run/task | Review tests |
 | Sessions/handoffs | Workbench and Python RAG | Web, CLI, MCP, OpenCode | Clients can create separate histories | Shared Workbench sessions | Import conflicts and sensitive prompts | Session, trace, MCP tests |
-| Memory/lessons | Workbench memory tables and Python RAG developer memory | Web, retrieval, agents | Two memory systems | Workbench SQLite with provenance | Duplicate/conflicting memories | Memory/reflection tests; importer absent |
+| Memory/lessons | Workbench memory tables and Python RAG developer memory | Web, retrieval, agents | Two memory systems | Workbench SQLite with provenance | Duplicate/conflicting memories | Memory/reflection tests; backup-first compatibility importer |
 | Retrieval/index state | Workbench SQLite/Qdrant and Python RAG | Ask, agents, web, MCP | Two indexes and stale-state semantics | Workbench with FTS baseline and optional Qdrant | Dimension/schema mismatch | Retrieval/index/eval tests |
 | Model routing | Workbench model tables/config; llama-swap env/scripts | Workbench, OpenCode, scratchpads, Wayle | Status probes only a port/model list | `RuntimeHealth` + central runtime config | Model loading vs readiness ambiguity | Model runtime/health tests |
 | Runtime health | Workbench `/health/deep`; shell port probes | Web, launcher, Wayle | No normalized desktop payload | `RuntimeHealth` contract and status cache | Partial outages | Health hardening tests |
 | Events | Workbench SQLite normalized events/SSE; desktop notification adapter | Web live drawer, CLI, notification bridge | Compatibility aliases remain during rollout | Versioned `WorkbenchEvent` with durable correlation/causation | Retiring legacy aliases too early | Event validation, persistence, SSE cursor and notification policy tests |
-| Todos/decisions/command/error memory | Python RAG SQLite | Python RAG CLI/agents | Missing or partial in Workbench | Import into typed Workbench memory/work records | Semantic loss | Python state tests; migration tests absent |
+| Todos/decisions/command/error memory | Python RAG SQLite | Python RAG CLI/agents | Missing or partial in Workbench | Import into typed Workbench memory/work records | Semantic loss | Dry-run/apply, provenance, backup and idempotency tests |
 
 ## Verified implementation boundaries
 
@@ -194,6 +194,9 @@ At discovery time:
 
 After the Phase 1 cleanup, repository-wide `pnpm lint`, `pnpm typecheck` and the full fast test suite pass. The cleanup preserved lint rules rather than suppressing the diagnostics.
 
+The enforced local trust boundaries, approval-context binding, symlink/path protections, threat inventory, and
+known consent/authentication gaps are maintained in [SECURITY_THREAT_MODEL.md](./SECURITY_THREAT_MODEL.md).
+
 ## Migration backup procedure
 
 Before the first registry or migration write:
@@ -207,7 +210,7 @@ Before the first registry or migration write:
 7. Verify the copied database with `PRAGMA integrity_check` and open it with the current migration reader.
 8. Store a migration log containing source path, destination path, schema versions, counts and hashes.
 
-No destructive migration is authorized until an automated backup command and restore test implement this procedure in the registry phase.
+The registry now provides automated consistent backup, guarded atomic restore, pre-restore preservation, integrity validation and a disposable restore rehearsal. Destructive migrations must continue to invoke backup before their first destination write.
 
 ## Phase 0 risks and compatibility constraints
 
@@ -217,7 +220,7 @@ No destructive migration is authorized until an automated backup command and res
 - Project paths can be symlinks; canonical root and symlink-escape policy must be resolved before execution.
 - Existing events must be adapted to `WorkbenchEvent`; replacing the envelope immediately would break web/SSE/MCP tests.
 - Existing task/session/dev-run states use narrower enums. Adapters are required before persistence migration.
-- The Python RAG database needs a dry-run inventory before any import.
+- The Python RAG dry-run and typed importer cover memory, sessions, context packs, handoffs, validated task DAGs/outcomes, retrieval diagnostics and evaluation history. Legacy execution runs and Python MCP remain compatibility capabilities until their semantic/client parity gates pass.
 - Qdrant remains optional and rebuildable; SQLite is the baseline.
 
 ## Phase 2 registry

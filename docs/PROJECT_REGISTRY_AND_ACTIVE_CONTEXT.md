@@ -140,7 +140,7 @@ systemctl --user enable --now ai-workbench-desktop-observer.service
 
 `ai project backup` uses SQLite `VACUUM INTO`, opens the result read-only, runs `PRAGMA integrity_check`, records applied migrations and writes atomic metadata beside the backup. Model weights and regenerable indexes are not copied separately.
 
-Restore remains an explicit manual operation: stop Workbench writers, validate the backup, preserve the current database, replace it, start Workbench and run health plus migration checks.
+`ai project restore <backup>` validates and previews a restore without mutation. After every Workbench writer is stopped, `ai project restore <backup> --apply --confirm-stopped` automatically backs up the current destination, validates a temporary restored copy, atomically replaces the database and writes restore metadata. Restart Workbench and run `ai diagnose` after the replacement.
 
 ## Current compatibility boundary
 

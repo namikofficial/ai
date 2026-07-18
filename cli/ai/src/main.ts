@@ -20,8 +20,12 @@ import {
   importLegacyProjectProfiles,
   readProjectLocalManifest,
   refreshRegistryCache,
+  restoreWorkbenchBackup,
+  validateWorkbenchBackup,
 } from "../../../packages/project-registry/src/index.ts";
 import { readProjectStatusCache } from "../../../packages/project-status/src/index.ts";
+import { applyPythonRagMigration } from "../../../packages/python-rag-migration/src/apply.ts";
+import { inventoryPythonRag } from "../../../packages/python-rag-migration/src/index.ts";
 import type { RetrievalDepth, RetrievalMode } from "../../../packages/shared/src/index.ts";
 import { buildSessionTimeline } from "../../../packages/timeline/src/index.ts";
 
@@ -43,6 +47,7 @@ function printUsage(): void {
   ai project scan [project-id] [--apply]
   ai project export <project> [--output <path>]
   ai project backup <sqlite-output-path>
+  ai project restore <sqlite-backup-path> [--destination <path>] [--apply --confirm-stopped]
   ai project index <project>
   ai project graph <project>
   ai project symbols <project> [--query <text>] [--limit <n>]
@@ -104,6 +109,8 @@ function printUsage(): void {
   ai status
   ai runtime status
   ai diagnose
+  ai migration python-rag <rag.sqlite3> [--rag-home <path>] [--output <report.json>]
+  ai migration python-rag <rag.sqlite3> --apply [--backup <path>] [--output <report.json>]
   ai health [--deep]
   ai health --deep --json`);
 }
@@ -518,6 +525,31 @@ async function run(): Promise<void> {
       } finally {
         store.db.close();
       }
+      return;
+    }
+    if (subcommand === "restore") {
+      const backupPath = positionals.shift();
+      if (!backupPath) throw new Error("project restore requires a SQLite backup path");
+      const destination = options.destination ?? resolveConfig().databasePath;
+      if (options.apply !== "true") {
+        printJson({
+          dryRun: true,
+          source: { path: backupPath, ...validateWorkbenchBackup(backupPath) },
+          destination,
+          requirement: "Rerun with --apply --confirm-stopped after stopping every Workbench SQLite writer.",
+        });
+        return;
+      }
+      if (options["confirm-stopped"] !== "true") {
+        throw new Error("project restore --apply requires --confirm-stopped after all Workbench writers are stopped");
+      }
+      printJson(
+        await restoreWorkbenchBackup({
+          backupPath,
+          destination,
+          preRestoreBackupPath: options["pre-restore-backup"],
+        })
+      );
       return;
     }
     if (subcommand === "add") {
@@ -938,6 +970,51 @@ async function run(): Promise<void> {
 
   if (command === "diagnose") {
     printJson(await client.diagnostics());
+    return;
+  }
+
+  if (command === "migration") {
+    const subcommand = positionals.shift();
+    if (subcommand !== "python-rag") {
+      throw new Error("migration requires the python-rag subcommand");
+    }
+    const databasePath = positionals.shift();
+    if (!databasePath) {
+      throw new Error("migration python-rag requires the source rag.sqlite3 path");
+    }
+    const store = openLocalStore();
+    try {
+      const projects = store
+        .listProjects()
+        .map((project) => ({ id: project.id, name: project.name, path: project.path }));
+      const report =
+        options.apply === "true"
+          ? await applyPythonRagMigration({
+              destination: store.db,
+              databasePath,
+              ragHome: options["rag-home"],
+              projects,
+              backupPath:
+                options.backup ?? `${resolveConfig().databasePath}.pre-python-rag-${Date.now().toString()}.backup`,
+            })
+          : await inventoryPythonRag({
+              databasePath,
+              ragHome: options["rag-home"],
+              projects,
+            });
+      if (options.output) {
+        await atomicWriteJson(options.output, report);
+        printJson({
+          output: options.output,
+          totals: report.totals,
+          conflicts: report.mode === "apply" ? report.totals.conflicted : report.conflicts.length,
+        });
+      } else {
+        printJson(report);
+      }
+    } finally {
+      store.db.close();
+    }
     return;
   }
 

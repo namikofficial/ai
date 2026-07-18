@@ -69,7 +69,22 @@ journalctl --user -u ai-workbench.service -u ai-workbench-worker.service -f
 curl -fsS http://127.0.0.1:4417/ready | jq
 curl -fsS http://127.0.0.1:4417/runtime/health | jq
 pnpm cli diagnose
+./scripts/measure-runtime.sh
 ```
+
+`measure-runtime.sh` is read-only. It samples `/ready`, compact project status, the canonical XDG status cache, and
+the supervised API process. The JSON report includes median readiness/status/cache-read latency plus one-second
+idle CPU and resident-memory samples when the systemd service is active. Stopped services and missing caches are
+reported as offline/`null`, never as zero-latency successes. Set `AI_PERFORMANCE_SAMPLES` to adjust the default 25
+requests.
+For the tmux/terminal fallback, pass `AI_WORKBENCH_PID` to sample that API process instead of the systemd main PID.
+
+Focus-to-context and Git-change-to-Wayle latency require a live Hyprland session and a real target repository. For
+a release measurement, record timestamps before the event, wait for `desktop-observation-v1.json` and
+`project-status-v1.json` generation times to advance, then invoke each `workbench-wayle-status` chip. Confirm that
+the observer remains event-driven at idle, temporary windows do not flap context, and an unrelated tmux client is
+listed as rejected evidence. Keep machine-specific results out of canonical defaults; attach them to the release or
+migration report with CPU model, repository size, sample count, and Workbench revision.
 
 The desktop launcher first asks systemd to start the target. If the target is not installed or cannot start, it stops the failed target and starts the established `ai-workbench` tmux scene instead.
 

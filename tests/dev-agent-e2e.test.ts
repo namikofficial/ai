@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import type { DevEdit } from "../packages/shared/src/index.ts";
+import type { DevEdit, DevRun } from "../packages/shared/src/index.ts";
 import { createId } from "../packages/shared/src/index.ts";
 
 // ---------------------------------------------------------------------------
@@ -14,7 +14,7 @@ import { createId } from "../packages/shared/src/index.ts";
 // 2. applyApprovedDevRun copies workspace files back to the original project
 // ---------------------------------------------------------------------------
 
-import { applyApprovedDevRun, approveDevRun } from "../packages/dev-agent/src/index.ts";
+import { applyApprovedDevRun, approvalContextHash, approveDevRun } from "../packages/dev-agent/src/index.ts";
 import { createTaskWorkspace } from "../packages/execution-engine/src/index.ts";
 
 test("approveDevRun: transitions awaiting_approval run to approved", async () => {
@@ -63,7 +63,18 @@ test("approveDevRun: transitions awaiting_approval run to approved", async () =>
         approval.decidedBy = input.decidedBy;
       }
     },
-    getWorkspaceForRun: (_runId: string) => null,
+    getWorkspaceForRun: (runId: string) => ({
+      id: "ws_approve",
+      runId,
+      projectId: "proj_1",
+      path: projectPath,
+      strategy: "safe_copy",
+      branch: null,
+      baseCommit: null,
+      originalBranch: null,
+      isGitWorktree: false,
+      originalRoot: projectPath,
+    }),
     createWorkspace: () => null,
     recordPatch: () => {},
   };
@@ -85,6 +96,14 @@ test("approveDevRun: transitions awaiting_approval run to approved", async () =>
     risk: "low",
     requiresExplicit: false,
     reason: "test",
+    contextHash: approvalContextHash({
+      runId: run.id,
+      projectId: "proj_1",
+      diffText: "",
+      paths: [],
+      baseCommit: null,
+      originalBranch: null,
+    }),
   });
 
   const result = await approveDevRun({ runId: run.id, runtime, decidedBy: "test-user" });
@@ -190,8 +209,26 @@ test("applyApprovedDevRun: copies workspace files back to original", async () =>
     branch: created.workspace.branch,
     isGitWorktree: created.workspace.isGitWorktree,
     baseCommit: created.workspace.baseCommit,
+    originalBranch: created.workspace.originalBranch,
     originalRoot: projectPath,
   });
+
+  execution.listApprovals = () => [
+    {
+      id: "approval_apply",
+      runId: run.id,
+      projectId: "proj_1",
+      status: "approved",
+      contextHash: approvalContextHash({
+        runId: run.id,
+        projectId: "proj_1",
+        diffText: "",
+        paths: ["src/index.ts", "src/new.ts"],
+        baseCommit: created.workspace.baseCommit,
+        originalBranch: created.workspace.originalBranch,
+      }),
+    },
+  ];
 
   const result = await applyApprovedDevRun({ runId: run.id, projectPath, runtime });
 
@@ -208,4 +245,74 @@ test("applyApprovedDevRun: copies workspace files back to original", async () =>
   await created.cleanup();
   await rm(workspace, { recursive: true, force: true });
   await rm(runtimeDir, { recursive: true, force: true });
+});
+
+test("applyApprovedDevRun rejects approval bypass, stale review context, and project confusion", async () => {
+  const baseRun = {
+    id: "run_guard",
+    sessionId: "session_guard",
+    projectId: "project_guard",
+    status: "awaiting_approval",
+    diffText: "reviewed diff",
+    createdAt: "2026-07-18T00:00:00.000Z",
+  } as unknown as DevRun;
+  const workspace = {
+    id: "workspace_guard",
+    runId: baseRun.id,
+    projectId: baseRun.projectId,
+    strategy: "safe_copy" as const,
+    path: "/tmp/workspace-guard",
+    branch: null,
+    isGitWorktree: false,
+    baseCommit: null,
+    originalBranch: null,
+    originalRoot: "/tmp/project-guard",
+    cleanedUp: false,
+    createdAt: baseRun.createdAt,
+    updatedAt: baseRun.createdAt,
+  };
+  const runtimeFor = (run: DevRun, workspaceProjectId = run.projectId, contextHash = "stale") =>
+    ({
+      devRuns: {
+        getRun: () => run,
+        listEdits: () => [],
+      },
+      execution: {
+        getWorkspaceForRun: () => ({ ...workspace, projectId: workspaceProjectId }),
+        listApprovals: () => [
+          {
+            id: "approval_guard",
+            runId: run.id,
+            projectId: run.projectId,
+            status: "approved",
+            contextHash,
+          },
+        ],
+      },
+    }) as unknown as Parameters<typeof applyApprovedDevRun>[0]["runtime"];
+
+  const bypass = await applyApprovedDevRun({
+    runId: baseRun.id,
+    projectPath: workspace.originalRoot,
+    runtime: runtimeFor(baseRun),
+  });
+  assert.equal(bypass.ok, false);
+  assert.match(bypass.error ?? "", /cannot apply.*awaiting_approval/);
+
+  const approvedRun = { ...baseRun, status: "approved" } as DevRun;
+  const stale = await applyApprovedDevRun({
+    runId: approvedRun.id,
+    projectPath: workspace.originalRoot,
+    runtime: runtimeFor(approvedRun),
+  });
+  assert.equal(stale.ok, false);
+  assert.match(stale.error ?? "", /no approved decision matches/);
+
+  const confused = await applyApprovedDevRun({
+    runId: approvedRun.id,
+    projectPath: workspace.originalRoot,
+    runtime: runtimeFor(approvedRun, "different-project"),
+  });
+  assert.equal(confused.ok, false);
+  assert.match(confused.error ?? "", /workspace project does not match/);
 });

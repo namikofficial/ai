@@ -1,4 +1,5 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { copyFile, lstat, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import type { ProjectManifest } from "../../contracts/src/index.ts";
@@ -178,6 +179,79 @@ export function validateWorkbenchBackup(path: string): { integrity: string; migr
     return { integrity, migrations };
   } finally {
     backup.close();
+  }
+}
+
+export async function restoreWorkbenchBackup(input: {
+  backupPath: string;
+  destination: string;
+  preRestoreBackupPath?: string;
+}): Promise<{
+  restoredAt: string;
+  source: { path: string; integrity: string; migrations: string[] };
+  destination: string;
+  preRestoreBackup: { path: string; createdAt: string; integrity: string; migrations: string[] } | null;
+  restored: { integrity: string; migrations: string[] };
+  removedSidecars: string[];
+}> {
+  const backupPath = resolve(input.backupPath);
+  const destination = resolve(input.destination);
+  if (backupPath === destination) throw new Error("backup and restore destination must be different files");
+  const sourceInfo = await lstat(backupPath);
+  if (!sourceInfo.isFile() || sourceInfo.isSymbolicLink()) {
+    throw new Error(`backup must be a regular non-symlink file: ${backupPath}`);
+  }
+  const sourceValidation = validateWorkbenchBackup(backupPath);
+  if (sourceValidation.integrity !== "ok") {
+    throw new Error(`backup integrity check failed: ${sourceValidation.integrity}`);
+  }
+  await mkdir(dirname(destination), { recursive: true });
+  let preRestoreBackup: Awaited<ReturnType<typeof createWorkbenchBackup>> | null = null;
+  try {
+    const destinationInfo = await lstat(destination);
+    if (!destinationInfo.isFile() || destinationInfo.isSymbolicLink()) {
+      throw new Error(`restore destination must be a regular non-symlink file: ${destination}`);
+    }
+    const current = new DatabaseSync(destination);
+    try {
+      preRestoreBackup = await createWorkbenchBackup(
+        current,
+        input.preRestoreBackupPath ?? `${destination}.pre-restore-${Date.now().toString()}.backup`
+      );
+    } finally {
+      current.close();
+    }
+  } catch (error) {
+    if (!(error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT")) throw error;
+  }
+  const temporary = `${destination}.restore-${randomUUID()}.tmp`;
+  const removedSidecars: string[] = [];
+  try {
+    await copyFile(backupPath, temporary);
+    const restored = validateWorkbenchBackup(temporary);
+    if (restored.integrity !== "ok") throw new Error(`restored copy integrity check failed: ${restored.integrity}`);
+    for (const sidecar of [`${destination}-wal`, `${destination}-shm`]) {
+      try {
+        await rm(sidecar);
+        removedSidecars.push(sidecar);
+      } catch (error) {
+        if (!(error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT")) throw error;
+      }
+    }
+    await rename(temporary, destination);
+    const result = {
+      restoredAt: new Date().toISOString(),
+      source: { path: backupPath, ...sourceValidation },
+      destination,
+      preRestoreBackup,
+      restored,
+      removedSidecars,
+    };
+    await atomicWriteJson(`${destination}.restore.metadata.json`, result);
+    return result;
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
   }
 }
 

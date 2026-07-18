@@ -11,7 +11,9 @@
 // planning or repair: edits only land in the workspace copy, and the
 // final patch is applied only when the user explicitly approves the run.
 
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import { type ExecutionEvent, parseDevRequest } from "../../agent-protocol/src/dev.ts";
 import type { ConversationRepo } from "../../db/src/repositories/conversation.ts";
 import type { DevRunsRepo } from "../../db/src/repositories/dev-runs.ts";
@@ -46,9 +48,32 @@ import type {
   RetrievalSelectedContextRecord,
   RiskLevel,
 } from "../../shared/src/index.ts";
+
 import { createId } from "../../shared/src/index.ts";
 import { extractJsonFragment } from "../../shared/src/model-output.ts";
 import { PROFILE_DEV_REPAIR, PROFILE_PLANNER_BALANCED } from "../../shared/src/model-profiles.ts";
+
+export function approvalContextHash(input: {
+  runId: string;
+  projectId: string;
+  diffText: string;
+  paths: string[];
+  baseCommit: string | null;
+  originalBranch: string | null;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        runId: input.runId,
+        projectId: input.projectId,
+        diffText: input.diffText,
+        paths: [...new Set(input.paths)].sort(),
+        baseCommit: input.baseCommit,
+        originalBranch: input.originalBranch,
+      })
+    )
+    .digest("hex");
+}
 
 export interface RunDevWorkflowInput {
   request: DevRequest;
@@ -469,6 +494,7 @@ async function collectDiffForRun(input: {
       strategy: input.workspace.strategy,
       branch: input.workspace.branch,
       baseCommit: input.workspace.baseCommit,
+      originalBranch: input.workspace.originalBranch,
       isGitWorktree: input.workspace.isGitWorktree,
       originalRoot: input.workspace.originalRoot,
     },
@@ -779,6 +805,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       branch: created.workspace.branch,
       isGitWorktree: created.workspace.isGitWorktree,
       baseCommit: created.workspace.baseCommit,
+      originalBranch: created.workspace.originalBranch,
       originalRoot: created.workspace.originalRoot,
     });
     emit({ kind: "workspace.ready", message: describeWorkspaceForLog(created.workspace) });
@@ -1002,6 +1029,14 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
         risk: riskLevel,
         requiresExplicit: riskLevel === "high",
         reason: approvalCheck.reason,
+        contextHash: approvalContextHash({
+          runId: run.id,
+          projectId: input.project.id,
+          diffText: diff.diff,
+          paths: editOutcomes.applied.map((edit) => edit.path),
+          baseCommit: workspace.baseCommit,
+          originalBranch: workspace.originalBranch,
+        }),
       });
       const updated = input.runtime.devRuns.updateRun(run.id, {
         status: "awaiting_approval",
@@ -1027,6 +1062,7 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
           strategy: workspace.strategy,
           branch: workspace.branch,
           baseCommit: workspace.baseCommit,
+          originalBranch: workspace.originalBranch,
           isGitWorktree: workspace.isGitWorktree,
           originalRoot: input.project.path,
         },
@@ -1093,6 +1129,14 @@ export async function runDevWorkflow(input: RunDevWorkflowInput): Promise<RunDev
       risk: riskLevel,
       requiresExplicit: true,
       reason: "Manual approval required before applying workspace changes",
+      contextHash: approvalContextHash({
+        runId: run.id,
+        projectId: input.project.id,
+        diffText: diff.diff,
+        paths: editOutcomes.applied.map((edit) => edit.path),
+        baseCommit: workspace.baseCommit,
+        originalBranch: workspace.originalBranch,
+      }),
     });
     emit({
       kind: "approval.required",
@@ -1131,16 +1175,34 @@ export async function approveDevRun(input: {
   if (run.status !== "awaiting_approval") {
     return { ok: false, run, error: `cannot approve a run in status ${run.status}` };
   }
+  const workspace = input.runtime.execution.getWorkspaceForRun(run.id);
+  if (!workspace) return { ok: false, run, error: "no workspace for run" };
+  if (workspace.projectId !== run.projectId) return { ok: false, run, error: "workspace project does not match run" };
+  const paths = input.runtime.devRuns
+    .listEdits(run.id)
+    .filter((row) => row.status === "applied")
+    .map((edit) => edit.path);
+  const expectedContextHash = approvalContextHash({
+    runId: run.id,
+    projectId: run.projectId,
+    diffText: run.diffText ?? "",
+    paths,
+    baseCommit: workspace.baseCommit,
+    originalBranch: workspace.originalBranch,
+  });
   const approvals = input.runtime.execution.listApprovals(run.id);
   const pending = approvals.find((approval) => approval.status === "pending");
-  if (pending) {
-    input.runtime.execution.decideApproval({
-      id: pending.id,
-      status: "approved",
-      decidedBy: input.decidedBy ?? "cli",
-      notes: input.notes ?? null,
-    });
+  if (!pending) return { ok: false, run, error: "run has no pending approval" };
+  if (pending.projectId !== run.projectId) return { ok: false, run, error: "approval project does not match run" };
+  if (pending.contextHash !== expectedContextHash) {
+    return { ok: false, run, error: "approval is stale because the reviewed run context changed" };
   }
+  input.runtime.execution.decideApproval({
+    id: pending.id,
+    status: "approved",
+    decidedBy: input.decidedBy ?? "cli",
+    notes: input.notes ?? null,
+  });
   const updated = input.runtime.devRuns.updateRun(run.id, {
     status: "approved",
     summary: "Approved; ready to apply",
@@ -1155,15 +1217,40 @@ export async function applyApprovedDevRun(input: {
 }): Promise<{ ok: boolean; run: DevRun | null; error: string | null; applied: string[] }> {
   const run = input.runtime.devRuns.getRun(input.runId);
   if (!run) return { ok: false, run: null, error: "run not found", applied: [] };
-  if (run.status !== "approved" && run.status !== "awaiting_approval") {
+  if (run.status !== "approved") {
     return { ok: false, run, error: `cannot apply a run in status ${run.status}`, applied: [] };
   }
   const workspace = input.runtime.execution.getWorkspaceForRun(run.id);
   if (!workspace) {
     return { ok: false, run, error: "no workspace for run", applied: [] };
   }
+  if (workspace.projectId !== run.projectId) {
+    return { ok: false, run, error: "workspace project does not match run", applied: [] };
+  }
+  if (resolve(workspace.originalRoot) !== resolve(input.projectPath)) {
+    return { ok: false, run, error: "workspace original root does not match selected project", applied: [] };
+  }
   const edits = input.runtime.devRuns.listEdits(run.id).filter((row) => row.status === "applied");
   const editPaths = Array.from(new Set(edits.map((edit) => edit.path)));
+  const expectedContextHash = approvalContextHash({
+    runId: run.id,
+    projectId: run.projectId,
+    diffText: run.diffText ?? "",
+    paths: editPaths,
+    baseCommit: workspace.baseCommit,
+    originalBranch: workspace.originalBranch,
+  });
+  const approval = input.runtime.execution
+    .listApprovals(run.id)
+    .find(
+      (candidate) =>
+        candidate.status === "approved" &&
+        candidate.projectId === run.projectId &&
+        candidate.contextHash === expectedContextHash
+    );
+  if (!approval) {
+    return { ok: false, run, error: "no approved decision matches the current run context", applied: [] };
+  }
   const outcome = await applyWorkspaceToOriginal({
     workspace: {
       id: workspace.id,
@@ -1171,6 +1258,7 @@ export async function applyApprovedDevRun(input: {
       strategy: workspace.strategy,
       branch: workspace.branch,
       baseCommit: workspace.baseCommit,
+      originalBranch: workspace.originalBranch,
       isGitWorktree: workspace.isGitWorktree,
       originalRoot: input.projectPath,
     },

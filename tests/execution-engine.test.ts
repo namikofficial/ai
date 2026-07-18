@@ -1,18 +1,22 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
   applyStructuredPatch,
+  applyWorkspaceToOriginal,
   createTaskWorkspace,
   guardPath,
   listProjectFiles,
   readProjectChecksConfig,
+  readProjectFile,
   resolveCheckCommand,
   runAllowedChecks,
   runValidationPipeline,
   searchProjectText,
+  writeProjectFile,
 } from "../packages/execution-engine/src/index.ts";
 
 async function makeProject(): Promise<{ root: string; cleanup: () => Promise<void> }> {
@@ -54,6 +58,33 @@ test("execution-engine: list/search helpers stay inside safe project files", asy
     assert.equal(matches.length, 1);
     assert.equal(matches[0]?.path, "src/auth.ts");
   } finally {
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: file helpers refuse repository symlinks", async () => {
+  const project = await makeProject();
+  const outside = await mkdtemp(join(tmpdir(), "ai-exec-outside-"));
+  try {
+    const externalFile = join(outside, "secret.txt");
+    await writeFile(externalFile, "outside secret\n");
+    await symlink(externalFile, join(project.root, "src", "linked.txt"));
+
+    await assert.rejects(readProjectFile(project.root, "src/linked.txt"), /symbolic link/);
+    const write = await writeProjectFile({
+      root: project.root,
+      candidate: "src/linked.txt",
+      contents: "overwritten\n",
+      overwrite: true,
+    });
+    assert.equal(write.ok, false);
+    assert.match(write.reason, /symbolic link/);
+    assert.equal(await readFile(externalFile, "utf8"), "outside secret\n");
+
+    const matches = await searchProjectText({ root: project.root, query: "outside secret" });
+    assert.deepEqual(matches, []);
+  } finally {
+    await rm(outside, { recursive: true, force: true });
     await project.cleanup();
   }
 });
@@ -114,6 +145,98 @@ test("execution-engine: workspaces use runtime/dev-runs/<runId>/workspace", asyn
       sessionId: "session_abc",
     });
     assert.match(created.workspace.path, /dev-runs\/run_run_123\/workspace$/);
+    await created.cleanup();
+  } finally {
+    await rm(runtime, { recursive: true, force: true });
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: apply refuses workspace and target symlink escapes", async () => {
+  const project = await makeProject();
+  const runtime = await mkdtemp(join(tmpdir(), "ai-runtime-symlink-"));
+  const outside = await mkdtemp(join(tmpdir(), "ai-outside-"));
+  try {
+    const created = await createTaskWorkspace({
+      projectPath: project.root,
+      runtimeDir: runtime,
+      runId: "run_symlink",
+      sessionId: "session_symlink",
+      strategy: "safe_copy",
+    });
+    await rm(join(created.workspace.path, "src", "index.ts"));
+    await writeFile(join(outside, "secret.ts"), "outside\n");
+    await symlink(join(outside, "secret.ts"), join(created.workspace.path, "src", "index.ts"));
+    await assert.rejects(
+      applyWorkspaceToOriginal({
+        workspace: created.workspace,
+        originalRoot: project.root,
+        paths: ["src/index.ts"],
+        allowedRoots: [project.root],
+      }),
+      /symlink/
+    );
+
+    await mkdir(join(created.workspace.path, "linked"), { recursive: true });
+    await writeFile(join(created.workspace.path, "linked", "escape.ts"), "escape\n");
+    await symlink(outside, join(project.root, "linked"));
+    await assert.rejects(
+      applyWorkspaceToOriginal({
+        workspace: created.workspace,
+        originalRoot: project.root,
+        paths: ["linked/escape.ts"],
+        allowedRoots: [project.root],
+      }),
+      /symlink/
+    );
+    await created.cleanup();
+  } finally {
+    await rm(runtime, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
+    await project.cleanup();
+  }
+});
+
+test("execution-engine: apply refuses changed branch and dirty reviewed paths", async () => {
+  const project = await makeProject();
+  const runtime = await mkdtemp(join(tmpdir(), "ai-runtime-branch-"));
+  try {
+    execFileSync("git", ["init"], { cwd: project.root });
+    execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: project.root });
+    execFileSync("git", ["config", "user.name", "Test"], { cwd: project.root });
+    execFileSync("git", ["add", "src/index.ts", "src/auth.ts"], { cwd: project.root });
+    execFileSync("git", ["commit", "-m", "fixture"], { cwd: project.root });
+    const created = await createTaskWorkspace({
+      projectPath: project.root,
+      runtimeDir: runtime,
+      runId: "run_branch",
+      sessionId: "session_branch",
+      strategy: "git_worktree",
+    });
+    await writeFile(join(created.workspace.path, "src", "index.ts"), "export const answer = 42;\n");
+
+    execFileSync("git", ["switch", "-c", "other-branch"], { cwd: project.root });
+    await assert.rejects(
+      applyWorkspaceToOriginal({
+        workspace: created.workspace,
+        originalRoot: project.root,
+        paths: ["src/index.ts"],
+        allowedRoots: [project.root],
+      }),
+      /branch changed/
+    );
+
+    execFileSync("git", ["switch", created.workspace.originalBranch ?? "master"], { cwd: project.root });
+    await writeFile(join(project.root, "src", "index.ts"), "export const answer = 99;\n");
+    await assert.rejects(
+      applyWorkspaceToOriginal({
+        workspace: created.workspace,
+        originalRoot: project.root,
+        paths: ["src/index.ts"],
+        allowedRoots: [project.root],
+      }),
+      /reviewed patch paths changed/
+    );
     await created.cleanup();
   } finally {
     await rm(runtime, { recursive: true, force: true });

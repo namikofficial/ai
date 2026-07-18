@@ -4,7 +4,7 @@
 // outside the project root or its workspace. This module provides path
 // normalization, secret/path blocking, and safe file read/write.
 
-import { mkdir, readdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import * as path from "node:path";
 
 export const IGNORED_DIRECTORIES: ReadonlyArray<string> = [
@@ -128,8 +128,39 @@ export function guardPath(input: PathGuardInput): PathGuardResult {
   };
 }
 
+function within(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export async function guardPathCanonical(input: PathGuardInput): Promise<PathGuardResult> {
+  const guard = guardPath(input);
+  if (!guard.ok) return guard;
+  const root = path.resolve(input.root);
+  const canonicalRoot = await realpath(root);
+  const parts = normalizeSlashes(guard.relative).split("/").filter(Boolean);
+  let current = root;
+  for (const part of parts) {
+    current = path.join(current, part);
+    try {
+      const info = await lstat(current);
+      if (info.isSymbolicLink()) {
+        return { ...guard, ok: false, reason: "path contains a symbolic link" };
+      }
+      const canonical = await realpath(current);
+      if (!within(canonicalRoot, canonical)) {
+        return { ...guard, ok: false, reason: "path escapes canonical project root" };
+      }
+    } catch (error) {
+      if (error instanceof Error && "code" in error && (error as { code?: string }).code === "ENOENT") break;
+      throw error;
+    }
+  }
+  return guard;
+}
+
 export async function readProjectFile(root: string, candidate: string): Promise<string> {
-  const guard = guardPath({ root, candidate });
+  const guard = await guardPathCanonical({ root, candidate });
   if (!guard.ok) {
     throw new Error(`refused to read ${candidate}: ${guard.reason}`);
   }
@@ -163,7 +194,7 @@ export interface WriteFileResult {
 }
 
 export async function writeProjectFile(input: WriteFileInput): Promise<WriteFileResult> {
-  const guard = guardPath({ root: input.root, candidate: input.candidate });
+  const guard = await guardPathCanonical({ root: input.root, candidate: input.candidate });
   if (!guard.ok) {
     return {
       ok: false,
@@ -201,7 +232,7 @@ export async function writeProjectFile(input: WriteFileInput): Promise<WriteFile
 }
 
 export async function removeProjectFile(root: string, candidate: string): Promise<boolean> {
-  const guard = guardPath({ root, candidate });
+  const guard = await guardPathCanonical({ root, candidate });
   if (!guard.ok) {
     return false;
   }
@@ -283,7 +314,7 @@ export async function searchProjectText(input: SearchProjectTextInput): Promise<
   const needle = query.toLowerCase();
   for (const file of files) {
     if (matches.length >= limit) break;
-    const guard = guardPath({ root: input.root, candidate: file });
+    const guard = await guardPathCanonical({ root: input.root, candidate: file });
     if (!guard.ok || guard.isSecret) continue;
     const info = await stat(guard.resolved);
     if (info.size > maxFileBytes) continue;
@@ -323,7 +354,7 @@ export interface ApplyEditResult {
 }
 
 export async function applyEdit(input: ApplyEditInput): Promise<ApplyEditResult> {
-  const guard = guardPath({ root: input.root, candidate: input.edit.path });
+  const guard = await guardPathCanonical({ root: input.root, candidate: input.edit.path });
   if (!guard.ok) {
     return {
       ok: false,

@@ -55,6 +55,7 @@ test("control-plane API approves manifests, persists selection, and resolves des
     risk: "low",
     requiresExplicit: true,
     reason: "Review the proposed patch",
+    contextHash: "test-context",
   });
   const previousCacheHome = process.env.XDG_CACHE_HOME;
   process.env.XDG_CACHE_HOME = join(workspace, "cache");

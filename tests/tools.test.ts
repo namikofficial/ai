@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -107,6 +107,41 @@ test("tools: file_read refuses secret files and reports redaction", async () => 
     assert.equal(result.redacted, true);
     assert.match(result.error ?? "", /secret/);
   } finally {
+    await repo.cleanup();
+  }
+});
+
+test("tools: file tools refuse symlinks without exposing or overwriting outside content", async () => {
+  const repo = await makeRepo();
+  const outside = await mkdtemp(join(tmpdir(), "ai-tools-outside-"));
+  try {
+    const externalFile = join(outside, "external.txt");
+    await writeFile(externalFile, "outside secret\n");
+    await symlink(externalFile, join(repo.root, "src", "linked.txt"));
+    const registry = createDefaultToolRegistry();
+    const context = {
+      projectPath: repo.root,
+      projectId: "p",
+      sessionId: "s",
+      allowHighRisk: false,
+    };
+
+    const read = await registry.call("file_read", { path: "src/linked.txt" }, context);
+    assert.equal(read.ok, false);
+    assert.equal(read.output, null);
+    assert.match(read.error ?? "", /symbolic link/);
+    assert.doesNotMatch(read.error ?? "", /outside secret/);
+
+    const write = await registry.call(
+      "file_write",
+      { path: "src/linked.txt", contents: "overwritten\n", overwrite: true },
+      context
+    );
+    assert.equal(write.ok, false);
+    assert.match(write.error ?? "", /symbolic link/);
+    assert.equal(await readFile(externalFile, "utf8"), "outside secret\n");
+  } finally {
+    await rm(outside, { recursive: true, force: true });
     await repo.cleanup();
   }
 });

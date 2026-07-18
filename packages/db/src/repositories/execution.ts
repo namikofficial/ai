@@ -11,6 +11,7 @@ interface WorkspaceRow {
   branch: string | null;
   is_git_worktree: number;
   base_commit: string | null;
+  original_branch: string | null;
   original_root: string;
   cleaned_up: number;
   created_at: string;
@@ -52,6 +53,7 @@ interface ApprovalRow {
   decided_at: string | null;
   decided_by: string | null;
   notes: string | null;
+  context_hash: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -79,6 +81,7 @@ export interface ExecutionWorkspaceRecord {
   branch: string | null;
   isGitWorktree: boolean;
   baseCommit: string | null;
+  originalBranch: string | null;
   originalRoot: string;
   cleanedUp: boolean;
   createdAt: string;
@@ -120,6 +123,7 @@ export interface ExecutionApprovalRecord {
   decidedAt: string | null;
   decidedBy: string | null;
   notes: string | null;
+  contextHash: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -148,6 +152,7 @@ function rowToWorkspace(row: WorkspaceRow): ExecutionWorkspaceRecord {
     branch: asStringOrNull(row.branch),
     isGitWorktree: asBool(row.is_git_worktree),
     baseCommit: asStringOrNull(row.base_commit),
+    originalBranch: asStringOrNull(row.original_branch),
     originalRoot: asString(row.original_root),
     cleanedUp: asBool(row.cleaned_up),
     createdAt: asString(row.created_at),
@@ -193,6 +198,7 @@ function rowToApproval(row: ApprovalRow): ExecutionApprovalRecord {
     decidedAt: asStringOrNull(row.decided_at),
     decidedBy: asStringOrNull(row.decided_by),
     notes: asStringOrNull(row.notes),
+    contextHash: asStringOrNull(row.context_hash),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };
@@ -224,6 +230,7 @@ export function createExecutionRepo(db: DatabaseSync) {
       branch?: string | null;
       isGitWorktree: boolean;
       baseCommit?: string | null;
+      originalBranch?: string | null;
       originalRoot: string;
     }): ExecutionWorkspaceRecord {
       const id = newId("ws");
@@ -231,8 +238,8 @@ export function createExecutionRepo(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO execution_workspaces (
           id, run_id, project_id, strategy, path, branch, is_git_worktree, base_commit,
-          original_root, cleaned_up, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          original_branch, original_root, cleaned_up, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.runId,
@@ -242,6 +249,7 @@ export function createExecutionRepo(db: DatabaseSync) {
         input.branch ?? null,
         input.isGitWorktree ? 1 : 0,
         input.baseCommit ?? null,
+        input.originalBranch ?? null,
         input.originalRoot,
         0,
         ts,
@@ -256,6 +264,7 @@ export function createExecutionRepo(db: DatabaseSync) {
         branch: input.branch ?? null,
         isGitWorktree: input.isGitWorktree,
         baseCommit: input.baseCommit ?? null,
+        originalBranch: input.originalBranch ?? null,
         originalRoot: input.originalRoot,
         cleanedUp: false,
         createdAt: ts,
@@ -385,14 +394,15 @@ export function createExecutionRepo(db: DatabaseSync) {
       risk: string;
       requiresExplicit: boolean;
       reason: string;
+      contextHash: string;
     }): ExecutionApprovalRecord {
       const id = newId("appr");
       const ts = now();
       db.prepare(
         `INSERT INTO execution_approvals (
           id, run_id, project_id, requested_at, status, policy, risk, requires_explicit,
-          reason, decided_at, decided_by, notes, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          reason, decided_at, decided_by, notes, context_hash, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).run(
         id,
         input.runId,
@@ -406,6 +416,7 @@ export function createExecutionRepo(db: DatabaseSync) {
         null,
         null,
         null,
+        input.contextHash,
         ts,
         ts
       );
@@ -422,6 +433,7 @@ export function createExecutionRepo(db: DatabaseSync) {
         decidedAt: null,
         decidedBy: null,
         notes: null,
+        contextHash: input.contextHash,
         createdAt: ts,
         updatedAt: ts,
       };
@@ -433,11 +445,14 @@ export function createExecutionRepo(db: DatabaseSync) {
       notes?: string | null;
     }): ExecutionApprovalRecord {
       const ts = now();
-      db.prepare(
-        `UPDATE execution_approvals
+      const result = db
+        .prepare(
+          `UPDATE execution_approvals
            SET status = ?, decided_at = ?, decided_by = ?, notes = ?, updated_at = ?
-         WHERE id = ?`
-      ).run(input.status, ts, input.decidedBy ?? null, input.notes ?? null, ts, input.id);
+         WHERE id = ? AND status = 'pending'`
+        )
+        .run(input.status, ts, input.decidedBy ?? null, input.notes ?? null, ts, input.id);
+      if (Number(result.changes) !== 1) throw new Error(`approval is missing or already decided: ${input.id}`);
       const row = db.prepare("SELECT * FROM execution_approvals WHERE id = ?").get(input.id) as ApprovalRow;
       return rowToApproval(row);
     },

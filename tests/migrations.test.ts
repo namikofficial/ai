@@ -25,6 +25,9 @@ test("migrations list includes the complete control-plane baseline", () => {
   assert.ok(versions.includes("0014_active_context"));
   assert.ok(versions.includes("0015_pin_anchors"));
   assert.ok(versions.includes("0016_normalized_events"));
+  assert.ok(versions.includes("0017_legacy_imports"));
+  assert.ok(versions.includes("0018_task_dag_outcomes"));
+  assert.ok(versions.includes("0019_approval_context"));
 });
 
 test("migrations apply cleanly and create all expected tables", async () => {
@@ -33,7 +36,7 @@ test("migrations apply cleanly and create all expected tables", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 16);
+    assert.equal(result.applied.length, 19);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -58,6 +61,15 @@ test("migrations apply cleanly and create all expected tables", async () => {
     assert.ok(tableNames.includes("active_project_selection"), "active_project_selection table must exist");
     assert.ok(tableNames.includes("desktop_observations"), "desktop_observations table must exist");
     assert.ok(tableNames.includes("active_context_state"), "active_context_state table must exist");
+    assert.ok(tableNames.includes("legacy_import_runs"), "legacy_import_runs table must exist");
+    assert.ok(tableNames.includes("legacy_import_items"), "legacy_import_items table must exist");
+    assert.ok(tableNames.includes("agent_task_dependencies"), "agent_task_dependencies table must exist");
+    assert.ok(tableNames.includes("agent_task_outcomes"), "agent_task_outcomes table must exist");
+
+    const workspaceColumns = db.prepare("PRAGMA table_info(execution_workspaces)").all() as Array<{ name: string }>;
+    assert.ok(workspaceColumns.some((column) => column.name === "original_branch"));
+    const approvalColumns = db.prepare("PRAGMA table_info(execution_approvals)").all() as Array<{ name: string }>;
+    assert.ok(approvalColumns.some((column) => column.name === "context_hash"));
 
     const eventColumns = db.prepare("PRAGMA table_info(agent_events)").all() as Array<{ name: string }>;
     const eventColumnNames = eventColumns.map((column) => column.name);
