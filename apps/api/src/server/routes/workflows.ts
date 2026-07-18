@@ -992,20 +992,31 @@ export function registerWorkflowRoutes(
         sendJson(res, json("error", undefined, { message: "canonical project or approved manifest changed" }), 409);
         return;
       }
-      const prepared = await prepareManifestWorkflow(
-        withCanonicalWorkflowDefinitions(manifest),
-        record.execution.workflowId,
-        {
-          allowMutating: true,
-          allowInteractive: true,
-        }
-      );
-      if (!prepared.ok) {
+      const canonicalManifest = withCanonicalWorkflowDefinitions(manifest);
+      const definition = deps.store.workflows.getDefinition(record.execution.projectId, record.execution.workflowId);
+      const preparedPlan = definition?.steps.length
+        ? await prepareWorkflowPlan(canonicalManifest, definition, { allowMutating: true, allowInteractive: true })
+        : null;
+      const prepared = preparedPlan
+        ? null
+        : await prepareManifestWorkflow(canonicalManifest, record.execution.workflowId, {
+            allowMutating: true,
+            allowInteractive: true,
+          });
+      if (preparedPlan && !preparedPlan.ok) {
+        sendJson(res, json("error", undefined, { message: preparedPlan.rejection.summary }), 409);
+        return;
+      }
+      if (prepared && !prepared.ok) {
         sendJson(res, json("error", undefined, { message: prepared.rejection.summary }), 409);
         return;
       }
-      const context = await collectWorkflowApprovalContext(prepared.workflow);
-      if (workflowApprovalContextHash(context) !== approval.contextHash) {
+      const contextHash = preparedPlan?.ok
+        ? workflowPlanApprovalContextHash(await collectWorkflowPlanApprovalContext(preparedPlan.plan))
+        : prepared?.ok
+          ? workflowApprovalContextHash(await collectWorkflowApprovalContext(prepared.workflow))
+          : null;
+      if (!contextHash || contextHash !== approval.contextHash) {
         deps.store.workflows.decideApproval({
           id: approval.id,
           status: "expired",
@@ -1041,6 +1052,17 @@ export function registerWorkflowRoutes(
       );
       deps.store.appendEvent(granted);
       deps.publish(granted);
+      if (preparedPlan?.ok) {
+        if (preparedPlan.plan.backgroundRequired) {
+          const saved = enqueueBackgroundWorkflow(record, granted.id);
+          sendJson(res, json("ok", { ...saved, approval: decided }), 202);
+          return;
+        }
+        const saved = await executePreparedPlan(preparedPlan.plan, record.execution, granted.id);
+        sendJson(res, json("ok", { ...saved, approval: decided }), saved.execution.state === "completed" ? 200 : 422);
+        return;
+      }
+      if (!prepared?.ok) throw new Error("approved workflow preparation disappeared");
       if (["terminal", "tmux"].includes(prepared.workflow.command.executionMode)) {
         const saved = makeInteractiveWorkflowReady(record, prepared.workflow.command.name, granted.id);
         sendJson(res, json("ok", { ...saved, approval: decided }), 202);
