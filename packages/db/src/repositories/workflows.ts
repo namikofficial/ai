@@ -215,6 +215,7 @@ export function createWorkflowsRepo(db: DatabaseSync) {
            artifacts_json = excluded.artifacts_json,
            error_code = excluded.error_code,
            error_summary = excluded.error_summary,
+           command_json = excluded.command_json,
            stdout = excluded.stdout,
            stderr = excluded.stderr,
            duration_ms = excluded.duration_ms,

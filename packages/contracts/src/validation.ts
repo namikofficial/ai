@@ -2,6 +2,7 @@ import {
   type ActiveContext,
   type ActiveWork,
   CONTROL_PLANE_SCHEMA_VERSION,
+  type CommandDefinition,
   type DesktopObservation,
   type ProjectManifest,
   type ProjectStatus,
@@ -18,6 +19,7 @@ import {
 export interface ContractSchema<T> {
   parse(value: unknown, path?: string): T;
   jsonSchema: Record<string, unknown>;
+  optional?: boolean;
 }
 
 type Shape = Record<string, ContractSchema<unknown>>;
@@ -77,6 +79,14 @@ function nullable<T>(schema: ContractSchema<T>): ContractSchema<T | null> {
   };
 }
 
+function defaulted<T>(schema: ContractSchema<T>, fallback: T): ContractSchema<T> {
+  return {
+    jsonSchema: { ...schema.jsonSchema, default: fallback },
+    optional: true,
+    parse: (value, path = "value") => (value === undefined ? fallback : schema.parse(value, path)),
+  };
+}
+
 function arraySchema<T>(schema: ContractSchema<T>): ContractSchema<T[]> {
   return {
     jsonSchema: { type: "array", items: schema.jsonSchema },
@@ -92,7 +102,9 @@ function objectSchema<T extends Shape>(shape: T): ContractSchema<InferShape<T>> 
     jsonSchema: {
       type: "object",
       additionalProperties: true,
-      required: Object.keys(shape),
+      required: Object.entries(shape)
+        .filter(([, schema]) => !schema.optional)
+        .map(([key]) => key),
       properties: Object.fromEntries(Object.entries(shape).map(([key, schema]) => [key, schema.jsonSchema])),
     },
     parse: (value, path = "value") => {
@@ -162,7 +174,7 @@ const gitStatusSchema = objectSchema({
   dirty: booleanSchema,
 });
 
-const commandSchema = objectSchema({
+const commandRaw = objectSchema({
   id: nonEmptyString,
   name: nonEmptyString,
   description: nonEmptyString,
@@ -172,11 +184,28 @@ const commandSchema = objectSchema({
   workingDirectory: nullable(nonEmptyString),
   environmentRefs: strings,
   interactive: booleanSchema,
+  executionMode: defaulted(enumSchema(["direct", "terminal", "tmux", "isolated", "background"] as const), "direct"),
   mutation: enumSchema(["read_only", "workspace_write", "project_write", "destructive", "external"] as const),
   timeoutSeconds: nullable(numberSchema({ minimum: 1, integer: true })),
   requiresCapabilities: strings,
   visibleWhen: strings,
 });
+const commandSchema: ContractSchema<CommandDefinition> = {
+  jsonSchema: commandRaw.jsonSchema,
+  parse: (value, path = "value") => {
+    const parsed = commandRaw.parse(value, path);
+    const input = value as Record<string, unknown>;
+    const normalized: CommandDefinition = {
+      ...parsed,
+      executionMode:
+        typeof input.executionMode === "string" ? parsed.executionMode : parsed.interactive ? "terminal" : "direct",
+    };
+    if (normalized.interactive && !["terminal", "tmux"].includes(normalized.executionMode)) {
+      fail(`${path}.executionMode`, "must be terminal or tmux when interactive is true");
+    }
+    return normalized;
+  },
+};
 
 const serviceSchema = objectSchema({
   id: nonEmptyString,

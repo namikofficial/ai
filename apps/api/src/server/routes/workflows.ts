@@ -1,4 +1,5 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import * as path from "node:path";
 import type { Router } from "express";
 import { parseDevRequest } from "../../../../../packages/agent-protocol/src/dev.ts";
 import { resolveProjectConfig } from "../../../../../packages/config/src/index.ts";
@@ -14,7 +15,11 @@ import {
   cancelDevRun,
   runDevWorkflow,
 } from "../../../../../packages/dev-agent/src/index.ts";
-import { readProjectChecksConfig, runAllowedChecks } from "../../../../../packages/execution-engine/src/index.ts";
+import {
+  createTaskWorkspace,
+  readProjectChecksConfig,
+  runAllowedChecks,
+} from "../../../../../packages/execution-engine/src/index.ts";
 import {
   collectWorkflowApprovalContext,
   prepareManifestWorkflow,
@@ -251,6 +256,63 @@ export function registerWorkflowRoutes(
     existing: WorkflowExecution,
     causationId: string | null = null
   ) {
+    let runnable = prepared.workflow;
+    let artifacts = [...existing.artifacts];
+    try {
+      if (prepared.workflow.command.executionMode === "isolated") {
+        const project = deps.store.getProject(existing.projectId);
+        if (!project) throw new Error(`project ${existing.projectId} not found for isolated workflow`);
+        const relativeCwd = path.relative(project.path, prepared.workflow.cwd);
+        if (relativeCwd.startsWith("..") || path.isAbsolute(relativeCwd)) {
+          throw new Error("isolated workflow working directory must be inside the canonical project root");
+        }
+        const created = await createTaskWorkspace({
+          projectPath: project.path,
+          runtimeDir: deps.config.runtimeDir,
+          runId: existing.id,
+          sessionId: existing.sessionId ?? existing.id,
+        });
+        runnable = { ...prepared.workflow, cwd: path.resolve(created.workspace.path, relativeCwd) };
+        artifacts = [created.workspace.path];
+      }
+    } catch (error) {
+      const timestamp = new Date().toISOString();
+      const execution: WorkflowExecution = {
+        ...existing,
+        state: "failed",
+        updatedAt: timestamp,
+        currentStepId: null,
+        stepStates: { ...(existing.approvalId ? { approval: "completed" } : {}), command: "failed" },
+        finishedAt: timestamp,
+        errorCode: "workspace_setup_failed",
+        errorSummary: error instanceof Error ? error.message : String(error),
+      };
+      const saved = deps.store.workflows.save({
+        execution,
+        command: commandRecord(prepared.workflow),
+        stdout: "",
+        stderr: execution.errorSummary ?? "",
+        durationMs: 0,
+      });
+      const event = createEvent(
+        "workflow.failed",
+        { workflowId: execution.workflowId, executionId: execution.id, code: execution.errorCode },
+        {
+          projectId: execution.projectId,
+          sessionId: execution.sessionId,
+          taskId: execution.taskId,
+          agent: "workflow-executor",
+          sourceService: "workbench-api",
+          level: "error",
+          summary: execution.errorSummary ?? "Isolated workspace setup failed",
+          correlationId: execution.id,
+          causationId,
+        }
+      );
+      deps.store.appendEvent(event);
+      deps.publish(event);
+      return saved;
+    }
     const startedAt = new Date().toISOString();
     const running: WorkflowExecution = {
       ...existing,
@@ -260,12 +322,13 @@ export function registerWorkflowRoutes(
       stepStates: { ...(existing.approvalId ? { approval: "completed" } : {}), command: "running" },
       startedAt,
       finishedAt: null,
+      artifacts,
       errorCode: null,
       errorSummary: null,
     };
     deps.store.workflows.save({
       execution: running,
-      command: commandRecord(prepared.workflow),
+      command: commandRecord(runnable),
       stdout: "",
       stderr: "",
       durationMs: 0,
@@ -291,7 +354,7 @@ export function registerWorkflowRoutes(
     activeWorkflowControllers.set(running.id, controller);
     let result: Awaited<ReturnType<typeof runPreparedManifestWorkflow>>;
     try {
-      result = await runPreparedManifestWorkflow(prepared.workflow, { signal: controller.signal });
+      result = await runPreparedManifestWorkflow(runnable, { signal: controller.signal });
     } finally {
       activeWorkflowControllers.delete(running.id);
     }
@@ -323,7 +386,7 @@ export function registerWorkflowRoutes(
     };
     const saved = deps.store.workflows.save({
       execution,
-      command: commandRecord(prepared.workflow),
+      command: commandRecord(runnable),
       stdout: result.stdout,
       stderr: result.stderr,
       durationMs: result.durationMs,
@@ -476,7 +539,7 @@ export function registerWorkflowRoutes(
       );
       deps.store.appendEvent(granted);
       deps.publish(granted);
-      if (prepared.workflow.command.interactive) {
+      if (["terminal", "tmux"].includes(prepared.workflow.command.executionMode)) {
         const saved = makeInteractiveWorkflowReady(record, prepared.workflow.command.name, granted.id);
         sendJson(res, json("ok", { ...saved, approval: decided }), 202);
         return;
@@ -865,9 +928,9 @@ export function registerWorkflowRoutes(
         return;
       }
 
-      const interactive = prepared.workflow.command.interactive;
-      const launchMode = requestedMode ?? (manifest.desktop.tmuxSession ? "tmux" : "terminal");
-      if (interactive && launchMode === "tmux" && !manifest.desktop.tmuxSession) {
+      const desktopLaunch = ["terminal", "tmux"].includes(prepared.workflow.command.executionMode);
+      const launchMode = requestedMode ?? (prepared.workflow.command.executionMode === "tmux" ? "tmux" : "terminal");
+      if (desktopLaunch && launchMode === "tmux" && !manifest.desktop.tmuxSession) {
         sendJson(
           res,
           json("error", undefined, { message: "workflow requested tmux but the manifest has no tmux session" }),
@@ -875,10 +938,10 @@ export function registerWorkflowRoutes(
         );
         return;
       }
-      if (!interactive && requestedMode) {
+      if (!desktopLaunch && requestedMode) {
         sendJson(
           res,
-          json("error", undefined, { message: "executionMode is valid only for interactive workflows" }),
+          json("error", undefined, { message: "executionMode override is valid only for terminal/tmux workflows" }),
           409
         );
         return;
@@ -888,9 +951,9 @@ export function registerWorkflowRoutes(
         projectId,
         sessionId,
         taskId,
-        state: prepared.workflow.command.mutation !== "read_only" ? "waiting" : interactive ? "ready" : "running",
+        state: prepared.workflow.command.mutation !== "read_only" ? "waiting" : desktopLaunch ? "ready" : "running",
       });
-      if (interactive) {
+      if (desktopLaunch) {
         deps.store.workflows.save({
           execution: initial,
           command: commandRecord(prepared.workflow),
@@ -961,7 +1024,7 @@ export function registerWorkflowRoutes(
         );
         return;
       }
-      if (interactive) {
+      if (desktopLaunch) {
         const record = deps.store.workflows.get(initial.id);
         if (!record) throw new Error("interactive workflow execution was not persisted");
         sendJson(res, json("ok", makeInteractiveWorkflowReady(record, prepared.workflow.command.name)), 202);

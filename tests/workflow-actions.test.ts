@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -25,7 +25,7 @@ function command(
   id: string,
   executable: string,
   args: string[],
-  mutation: "read_only" | "project_write" = "read_only"
+  mutation: "read_only" | "workspace_write" | "project_write" = "read_only"
 ): ProjectManifest["commands"][string] {
   return {
     id,
@@ -37,6 +37,7 @@ function command(
     workingDirectory: null,
     environmentRefs: [],
     interactive: false,
+    executionMode: "direct",
     mutation,
     timeoutSeconds: 30,
     requiresCapabilities: [],
@@ -66,6 +67,7 @@ test("workflow actions list approved commands, execute read-only work, and persi
         workingDirectory: null,
         environmentRefs: [],
         interactive: false,
+        executionMode: "direct",
         mutation: "read_only",
         timeoutSeconds: 10,
         requiresCapabilities: [],
@@ -81,6 +83,7 @@ test("workflow actions list approved commands, execute read-only work, and persi
         workingDirectory: null,
         environmentRefs: [],
         interactive: false,
+        executionMode: "direct",
         mutation: "read_only",
         timeoutSeconds: 10,
         requiresCapabilities: [],
@@ -367,8 +370,10 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
   const project = store.createProject({ path: workspace, name: "Interactive Project" });
   const interactive = command("interactive", "git", ["--version"]);
   interactive.interactive = true;
+  interactive.executionMode = "terminal";
   const mutating = command("interactive-mutate", "git", ["tag", "interactive-approved"], "project_write");
   mutating.interactive = true;
+  mutating.executionMode = "tmux";
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -507,6 +512,69 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
       body: {},
     });
     assert.equal(authorizeCancelled.statusCode, 409);
+  } finally {
+    await handle.close();
+    await rm(workspace, { recursive: true, force: true });
+  }
+});
+
+test("isolated workflows retain review artifacts without mutating the canonical project", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-isolated-"));
+  await writeFile(join(workspace, "app.py"), "value = 1\n");
+  const store = createStore(initializeStore(join(workspace, "workbench.db")));
+  const project = store.createProject({ path: workspace, name: "Isolated Project" });
+  const isolated = command("compile", "python3", ["-m", "compileall", "app.py"], "workspace_write");
+  isolated.executionMode = "isolated";
+  const manifest: ProjectManifest = {
+    ...fixture.ProjectManifest,
+    id: project.id,
+    name: project.name,
+    path: project.path,
+    repositoryRoot: project.path,
+    approvedRoots: [project.path],
+    commands: { isolated },
+  };
+  store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
+  const handle = await startWorkbenchServer({
+    store,
+    inProcess: true,
+    config: { databasePath: join(workspace, "workbench.db"), runtimeDir: join(workspace, "runtime"), apiPort: 0 },
+  });
+  try {
+    const downgrade = await handle.inject({
+      method: "POST",
+      url: "/actions/compile/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id, executionMode: "terminal" },
+    });
+    assert.equal(downgrade.statusCode, 409);
+    assert.match(downgrade.body, /override is valid only/);
+    const pending = await handle.inject({
+      method: "POST",
+      url: "/actions/compile/run",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { projectId: project.id },
+    });
+    assert.equal(pending.statusCode, 202);
+    const executionId = JSON.parse(pending.body).data.execution.id as string;
+    await assert.rejects(access(join(workspace, "__pycache__")));
+
+    const approved = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { decidedBy: "test" },
+    });
+    assert.equal(approved.statusCode, 200, approved.body);
+    const completed = JSON.parse(approved.body).data as {
+      execution: { state: string; artifacts: string[] };
+      command: { workingDirectory: string };
+    };
+    assert.equal(completed.execution.state, "completed");
+    assert.equal(completed.execution.artifacts.length, 1);
+    assert.equal(completed.command.workingDirectory, completed.execution.artifacts[0]);
+    await access(join(completed.execution.artifacts[0] ?? "", "__pycache__"));
+    await assert.rejects(access(join(workspace, "__pycache__")));
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });

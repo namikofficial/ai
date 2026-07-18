@@ -19,12 +19,14 @@ lists concrete remaining gates rather than treating compatibility slices as fini
   scope, remain audit logged, and deliberately cannot self-approve.
 - Interactive workflows use a durable `WorkflowLaunch` handoff, short-lived hashed capabilities, structured Kitty/tmux
   desktop launching, lifecycle callbacks, process-group cancellation, and canonical context environment identifiers.
+- Manifest commands now own a backward-compatible `executionMode`; isolated workflows remap execution into a retained
+  Git-worktree/safe-copy workspace and expose that workspace as a review artifact without touching the original tree.
 
 ## Priority 1 — Complete workflow modes
 
 Build on `workflow_executions` rather than adding another runner:
 
-1. Implement isolated and background modes, dependencies/retries, expected artifacts, and restart recovery.
+1. Implement background mode, dependencies/retries, expected artifacts, and restart recovery.
 2. Resolve environment references from an approved secret provider without returning values to logs/caches.
 3. Add recovery workflows and artifact inspection to workflow reviews.
 

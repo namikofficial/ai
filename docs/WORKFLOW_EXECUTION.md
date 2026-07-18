@@ -101,8 +101,9 @@ launch signals the reported process group and the helper records its terminal st
 1. Add a structured command to a `ProjectManifest.commands` object. Use an executable plus argument array; never
    encode pipes, redirects, substitutions, or shell fragments.
 2. Set the narrowest correct mutation classification. Never label a command read-only merely to bypass approval.
-3. Set `interactive`, `workingDirectory`, timeout, environment references, capability requirements, and visibility
-   conditions explicitly.
+3. Set canonical `executionMode`, `interactive`, `workingDirectory`, timeout, environment references, capability
+   requirements, and visibility conditions explicitly. Callers may choose terminal versus tmux only for a workflow
+   already declared as a desktop launch; they cannot downgrade `isolated` or `background` to direct execution.
 4. Import the project-local manifest as a proposal, review its diff, and approve it into canonical SQLite.
 5. Confirm `ai action list --project <id>` shows the expected availability reason.
 6. Run it once from CLI and inspect its execution/event record. For a mutating action, review the Workbench approval
@@ -122,6 +123,7 @@ Example:
     "workingDirectory": null,
     "environmentRefs": [],
     "interactive": false,
+    "executionMode": "direct",
     "mutation": "read_only",
     "timeoutSeconds": 600,
     "requiresCapabilities": [],
@@ -130,15 +132,26 @@ Example:
 }
 ```
 
-Package scripts are trusted only after manifest approval and still run with reduced environment inheritance. For
-strong enforcement against a misclassified package script, use an isolated workflow once the generic isolated
-workflow adapter is complete.
+Package scripts are trusted only after manifest approval and still run with reduced environment inheritance. Use an
+isolated workflow when changes must remain in a retained review workspace rather than the canonical checkout.
+
+Legacy v1 manifests without `executionMode` remain readable: non-interactive commands normalize to `direct`, while
+interactive commands normalize to `terminal`. Newly imported/exported manifests carry the field explicitly. An
+explicit interactive `direct`, `isolated`, or `background` declaration is rejected.
+
+## Isolated workflows
+
+An `isolated` command creates a Git worktree when possible and a bounded safe copy otherwise. Its canonical relative
+working directory is remapped inside that workspace before the structured command is started. The original checkout
+is never used as the process working directory. The retained workspace path is stored in `WorkflowExecution.artifacts`
+for review; applying anything back remains a separate approval-controlled operation. Workspace setup failures become
+durable failed executions instead of leaving a run stuck in `running`.
 
 ## Remaining adapters
 
 - background supervision, retry/dependency steps, restart recovery, and recovery workflows;
 - safe secret-reference resolution without logging values;
-- isolated generic workflows and artifact collection;
+- isolated artifact diff presentation and explicit cleanup controls;
 - platform capability discovery and `visibleWhen` evaluation.
 
 Until each adapter has persistence and policy tests, the API returns an explicit blocked reason instead of silently

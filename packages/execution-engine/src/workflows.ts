@@ -47,12 +47,13 @@ export async function prepareManifestWorkflow(
       },
     };
   }
-  if (command.interactive && !options.allowInteractive) {
+  const desktopLaunch = command.executionMode === "terminal" || command.executionMode === "tmux";
+  if (desktopLaunch && !options.allowInteractive) {
     return {
       ok: false,
       rejection: {
         code: "interactive_terminal_required",
-        summary: `workflow ${command.id} requires an interactive terminal`,
+        summary: `workflow ${command.id} requires a ${command.executionMode} desktop launch`,
       },
     };
   }
@@ -187,6 +188,7 @@ export function workflowApprovalContextHash(context: WorkflowApprovalContext): s
       workingDirectory: context.command.workingDirectory,
       environmentRefs: context.command.environmentRefs,
       interactive: context.command.interactive,
+      executionMode: context.command.executionMode,
       mutation: context.command.mutation,
       timeoutSeconds: context.command.timeoutSeconds,
       requiresCapabilities: context.command.requiresCapabilities,

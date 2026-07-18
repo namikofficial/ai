@@ -80,6 +80,16 @@ test("requires structured workflow commands instead of shell command strings", (
   assert.throws(() => projectManifestSchema.parse(manifest), /commands.verify must be an object/);
 });
 
+test("normalizes legacy command execution modes without allowing an interactive direct process", () => {
+  const legacy = structuredClone(fixtures.ProjectManifest) as Record<string, unknown>;
+  const commands = legacy.commands as Record<string, Record<string, unknown>>;
+  delete commands.verify?.executionMode;
+  commands.verify.interactive = true;
+  assert.equal(projectManifestSchema.parse(legacy).commands.verify?.executionMode, "terminal");
+  commands.verify.executionMode = "direct";
+  assert.throws(() => projectManifestSchema.parse(legacy), /must be terminal or tmux/);
+});
+
 test("represents an untracked-only repository as dirty", () => {
   const parsed = projectStatusSchema.parse(fixtures.ProjectStatus);
   assert.equal(parsed.git?.untracked, 1);

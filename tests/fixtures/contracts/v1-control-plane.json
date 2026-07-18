@@ -25,6 +25,7 @@
         "workingDirectory": null,
         "environmentRefs": [],
         "interactive": false,
+        "executionMode": "direct",
         "mutation": "read_only",
         "timeoutSeconds": 900,
         "requiresCapabilities": ["pnpm"],

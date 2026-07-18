@@ -61,6 +61,7 @@ export interface CommandDefinition {
   workingDirectory: string | null;
   environmentRefs: string[];
   interactive: boolean;
+  executionMode: ExecutionMode;
   mutation: MutationClass;
   timeoutSeconds: number | null;
   requiresCapabilities: string[];
