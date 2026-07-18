@@ -47,6 +47,23 @@ export interface WorkflowExecutionRecord {
   durationMs: number;
 }
 
+export interface WorkflowStepExecutionRecord {
+  executionId: string;
+  stepId: string;
+  workflowId: string | null;
+  state: WorkflowExecution["state"];
+  command: WorkflowExecutionRecord["command"] | null;
+  attempts: Array<{ attempt: number; status: string; exitCode: number | null; durationMs: number }>;
+  artifacts: string[];
+  stdout: string;
+  stderr: string;
+  durationMs: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  errorCode: string | null;
+  errorSummary: string | null;
+}
+
 interface WorkflowLaunchRow {
   id: string;
   execution_id: string;
@@ -340,6 +357,71 @@ export function createWorkflowsRepo(db: DatabaseSync) {
         throw error;
       }
       return this.listDefinitions(manifest.id).filter((definition) => manifestIds.has(definition.id));
+    },
+
+    saveStepExecution(record: WorkflowStepExecutionRecord): WorkflowStepExecutionRecord {
+      const timestamp = now();
+      db.prepare(
+        `INSERT INTO workflow_step_executions (
+           execution_id, step_id, workflow_id, state, command_json, attempts_json, artifacts_json,
+           stdout, stderr, duration_ms, started_at, finished_at, error_code, error_summary, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(execution_id, step_id) DO UPDATE SET
+           state = excluded.state,
+           command_json = excluded.command_json,
+           attempts_json = excluded.attempts_json,
+           artifacts_json = excluded.artifacts_json,
+           stdout = excluded.stdout,
+           stderr = excluded.stderr,
+           duration_ms = excluded.duration_ms,
+           started_at = excluded.started_at,
+           finished_at = excluded.finished_at,
+           error_code = excluded.error_code,
+           error_summary = excluded.error_summary,
+           updated_at = excluded.updated_at`
+      ).run(
+        record.executionId,
+        record.stepId,
+        record.workflowId,
+        record.state,
+        record.command ? JSON.stringify(record.command) : null,
+        JSON.stringify(record.attempts),
+        JSON.stringify(record.artifacts),
+        record.stdout,
+        record.stderr,
+        record.durationMs,
+        record.startedAt,
+        record.finishedAt,
+        record.errorCode,
+        record.errorSummary,
+        timestamp,
+        timestamp
+      );
+      const saved = this.listStepExecutions(record.executionId).find((entry) => entry.stepId === record.stepId);
+      if (!saved) throw new Error(`workflow step ${record.stepId} was not persisted`);
+      return saved;
+    },
+
+    listStepExecutions(executionId: string): WorkflowStepExecutionRecord[] {
+      const rows = db
+        .prepare("SELECT * FROM workflow_step_executions WHERE execution_id = ? ORDER BY created_at, step_id")
+        .all(executionId) as Array<Record<string, unknown>>;
+      return rows.map((row) => ({
+        executionId: asString(row.execution_id),
+        stepId: asString(row.step_id),
+        workflowId: asStringOrNull(row.workflow_id),
+        state: asString(row.state) as WorkflowExecution["state"],
+        command: row.command_json == null ? null : safeParseJson(asString(row.command_json)),
+        attempts: safeParseJsonArray(asString(row.attempts_json)),
+        artifacts: safeParseJsonArray<string>(asString(row.artifacts_json)),
+        stdout: asString(row.stdout),
+        stderr: asString(row.stderr),
+        durationMs: asNumber(row.duration_ms),
+        startedAt: asStringOrNull(row.started_at),
+        finishedAt: asStringOrNull(row.finished_at),
+        errorCode: asStringOrNull(row.error_code),
+        errorSummary: asStringOrNull(row.error_summary),
+      })) as WorkflowStepExecutionRecord[];
     },
 
     createBackgroundJob(input: { executionId: string; jobId: string }): WorkflowBackgroundJobRecord {
