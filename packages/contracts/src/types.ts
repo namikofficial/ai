@@ -193,6 +193,9 @@ export interface ActiveWork extends VersionedContract {
   taskTitle: string | null;
   taskProgress: { completed: number; total: number } | null;
   runId: string | null;
+  workflowExecutionId: string | null;
+  workflowId: string | null;
+  recoveryWorkflowIds: string[];
   sessionId: string | null;
   approvalId: string | null;
   blocker: { code: string; summary: string } | null;

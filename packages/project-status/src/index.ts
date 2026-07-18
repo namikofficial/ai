@@ -393,59 +393,96 @@ function buildActiveWork(store: Store, projectId: string, branch: string | null,
   );
   const latestRun =
     activeRun ?? (activeSession ? runs.find((run) => run.sessionId === activeSession.id) : runs[0]) ?? null;
+  const workflowExecutions = store.workflows.list(projectId, 20);
+  const workflowRecord =
+    workflowExecutions.find((record) => !["completed", "failed", "cancelled"].includes(record.execution.state)) ??
+    workflowExecutions.find(
+      (record) =>
+        ["failed", "blocked", "cancelled"].includes(record.execution.state) &&
+        record.execution.recoveryWorkflowIds.length > 0
+    ) ??
+    null;
   const session = activeSession ?? (latestRun ? store.getSession(latestRun.sessionId) : null);
   const task = session?.activeTaskId
     ? store.getTask(session.activeTaskId)
     : session
       ? store.getCurrentTask(session.id)
       : null;
-  if (!session && !latestRun && !task) return null;
+  if (!session && !latestRun && !task && !workflowRecord) return null;
   const tasks = session ? store.listTasks(session.id, 100) : [];
-  const approval = latestRun
+  const runApproval = latestRun
     ? (store.execution.listApprovals(latestRun.id).find((candidate) => candidate.status === "pending") ?? null)
     : null;
+  const workflowApproval = workflowRecord ? store.workflows.getApprovalForExecution(workflowRecord.execution.id) : null;
+  const workflowIsPrimary =
+    workflowRecord !== null &&
+    (!latestRun || workflowRecord.execution.updatedAt.localeCompare(latestRun.updatedAt) >= 0) &&
+    (!session || workflowRecord.execution.updatedAt.localeCompare(session.updatedAt) >= 0);
+  const approval = workflowApproval?.status === "pending" ? workflowApproval : runApproval;
   const completed = tasks.filter((candidate) => candidate.status === "completed").length;
   const blocker =
-    task?.status === "blocked"
-      ? { code: "task_blocked", summary: task.title }
-      : latestRun?.status === "blocked"
-        ? { code: "run_blocked", summary: latestRun.errorMessage ?? "Development run is blocked" }
-        : null;
+    workflowIsPrimary && ["failed", "blocked"].includes(workflowRecord.execution.state)
+      ? {
+          code: workflowRecord.execution.errorCode ?? "workflow_blocked",
+          summary:
+            workflowRecord.execution.errorSummary ?? `Workflow ${workflowRecord.execution.workflowId} is blocked`,
+        }
+      : task?.status === "blocked"
+        ? { code: "task_blocked", summary: task.title }
+        : latestRun?.status === "blocked"
+          ? { code: "run_blocked", summary: latestRun.errorMessage ?? "Development run is blocked" }
+          : null;
   const state = blocker
     ? "blocked"
-    : latestRun
-      ? unifiedRunState(latestRun.status)
-      : task?.status === "failed"
-        ? "failed"
-        : session?.status === "paused"
-          ? "waiting"
-          : session?.status === "completed"
-            ? "completed"
-            : "running";
+    : workflowIsPrimary
+      ? workflowRecord.execution.state
+      : latestRun
+        ? unifiedRunState(latestRun.status)
+        : task?.status === "failed"
+          ? "failed"
+          : session?.status === "paused"
+            ? "waiting"
+            : session?.status === "completed"
+              ? "completed"
+              : "running";
   return {
     schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
     id: `active-work:${projectId}`,
-    createdAt: session?.createdAt ?? latestRun?.createdAt ?? now,
-    updatedAt: session?.updatedAt ?? latestRun?.updatedAt ?? now,
+    createdAt: session?.createdAt ?? latestRun?.createdAt ?? workflowRecord?.execution.createdAt ?? now,
+    updatedAt:
+      [session?.updatedAt, latestRun?.updatedAt, workflowRecord?.execution.updatedAt]
+        .filter((value): value is string => Boolean(value))
+        .sort()
+        .at(-1) ?? now,
     origin: { source: "workbench", instanceId: null, legacyRef: null },
-    capabilities: ["resume", "project-scoped"],
+    capabilities: [
+      "resume",
+      "project-scoped",
+      ...(workflowRecord ? ["workflow-review"] : []),
+      ...(workflowRecord?.execution.recoveryWorkflowIds.length ? ["workflow-recovery"] : []),
+    ],
     projectId,
     state,
     goalId: null,
     goal: latestRun?.goal ?? session?.userGoal ?? null,
     planId: null,
     taskId: task?.id ?? null,
-    taskTitle: task?.title ?? null,
+    taskTitle: task?.title ?? workflowRecord?.execution.workflowId ?? null,
     taskProgress: tasks.length > 0 ? { completed, total: tasks.length } : null,
     runId: latestRun?.id ?? null,
-    sessionId: session?.id ?? latestRun?.sessionId ?? null,
+    workflowExecutionId: workflowRecord?.execution.id ?? null,
+    workflowId: workflowRecord?.execution.workflowId ?? null,
+    recoveryWorkflowIds: workflowRecord?.execution.recoveryWorkflowIds ?? [],
+    sessionId: session?.id ?? latestRun?.sessionId ?? workflowRecord?.execution.sessionId ?? null,
     approvalId: approval?.id ?? null,
     blocker,
     branch: latestRun?.workspace?.branch ?? branch,
     files: latestRun ? [...new Set([...latestRun.filesEdited, ...latestRun.filesCreated])] : [],
     modelRole: session?.modelProfile ?? null,
-    recommendedActionIds: [],
-    resumable: state === "waiting" || state === "blocked" || state === "running",
+    recommendedActionIds: workflowRecord?.execution.recoveryWorkflowIds ?? [],
+    resumable:
+      ["starting", "loading", "ready", "waiting", "blocked", "running"].includes(state) ||
+      (workflowRecord?.execution.recoveryWorkflowIds.length ?? 0) > 0,
   };
 }
 
