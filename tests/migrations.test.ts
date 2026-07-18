@@ -30,6 +30,7 @@ test("migrations list includes the complete control-plane baseline", () => {
   assert.ok(versions.includes("0019_approval_context"));
   assert.ok(versions.includes("0020_workflow_executions"));
   assert.ok(versions.includes("0021_workflow_approvals"));
+  assert.ok(versions.includes("0022_workflow_launches"));
 });
 
 test("migrations apply cleanly and create all expected tables", async () => {
@@ -38,7 +39,7 @@ test("migrations apply cleanly and create all expected tables", async () => {
   const db = new DatabaseSync(dbPath);
   try {
     const result = runMigrations(db);
-    assert.equal(result.applied.length, 21);
+    assert.equal(result.applied.length, 22);
     assert.equal(result.skipped.length, 0);
 
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as Array<{
@@ -69,6 +70,7 @@ test("migrations apply cleanly and create all expected tables", async () => {
     assert.ok(tableNames.includes("agent_task_outcomes"), "agent_task_outcomes table must exist");
     assert.ok(tableNames.includes("workflow_executions"), "workflow_executions table must exist");
     assert.ok(tableNames.includes("workflow_approvals"), "workflow_approvals table must exist");
+    assert.ok(tableNames.includes("workflow_launches"), "workflow_launches table must exist");
 
     const workspaceColumns = db.prepare("PRAGMA table_info(execution_workspaces)").all() as Array<{ name: string }>;
     assert.ok(workspaceColumns.some((column) => column.name === "original_branch"));

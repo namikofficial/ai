@@ -290,6 +290,24 @@ export interface WorkflowExecution extends VersionedContract {
   errorSummary: string | null;
 }
 
+export interface WorkflowLaunch extends VersionedContract {
+  executionId: string;
+  projectId: string;
+  sessionId: string | null;
+  taskId: string | null;
+  mode: "terminal" | "tmux";
+  state: UnifiedState;
+  command: { executable: string; arguments: string[]; workingDirectory: string };
+  environment: Record<string, string>;
+  tmuxSession: string | null;
+  authorizationExpiresAt: string | null;
+  launcherInstanceId: string | null;
+  launcherPid: number | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  exitCode: number | null;
+}
+
 export type WorkbenchEventSeverity = "debug" | "info" | "warning" | "error" | "critical";
 export interface WorkbenchEvent<TPayload extends Record<string, unknown> = Record<string, unknown>>
   extends VersionedContract {

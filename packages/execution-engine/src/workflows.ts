@@ -29,7 +29,7 @@ export interface ManifestWorkflowRejection {
 export async function prepareManifestWorkflow(
   manifest: ProjectManifest,
   workflowId: string,
-  options: { allowMutating?: boolean } = {}
+  options: { allowMutating?: boolean; allowInteractive?: boolean } = {}
 ): Promise<{ ok: true; workflow: PreparedManifestWorkflow } | { ok: false; rejection: ManifestWorkflowRejection }> {
   const entry = Object.entries(manifest.commands).find(
     ([key, command]) => key === workflowId || command.id === workflowId
@@ -47,7 +47,7 @@ export async function prepareManifestWorkflow(
       },
     };
   }
-  if (command.interactive) {
+  if (command.interactive && !options.allowInteractive) {
     return {
       ok: false,
       rejection: {

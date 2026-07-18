@@ -470,6 +470,7 @@ export type EventType =
   | "workflow.failed"
   | "workflow.blocked"
   | "workflow.cancelled"
+  | "workflow.launch_ready"
   | "handoff.created"
   | "handoff.archived"
   | "review.reflected"

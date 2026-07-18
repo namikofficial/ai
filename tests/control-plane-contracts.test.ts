@@ -13,6 +13,7 @@ import {
   workbenchEventSchema,
   workflowDefinitionSchema,
   workflowExecutionSchema,
+  workflowLaunchSchema,
 } from "../packages/contracts/src/index.ts";
 
 const fixtures = JSON.parse(
@@ -29,6 +30,7 @@ const schemas = {
   WorkbenchEvent: workbenchEventSchema,
   WorkflowDefinition: workflowDefinitionSchema,
   WorkflowExecution: workflowExecutionSchema,
+  WorkflowLaunch: workflowLaunchSchema,
   DesktopObservation: desktopObservationSchema,
 };
 

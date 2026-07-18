@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { WorkflowExecution } from "../../../contracts/src/index.ts";
-import { workflowExecutionSchema } from "../../../contracts/src/index.ts";
+import type { WorkflowExecution, WorkflowLaunch } from "../../../contracts/src/index.ts";
+import { workflowExecutionSchema, workflowLaunchSchema } from "../../../contracts/src/index.ts";
 import { asNumber, asString, asStringOrNull, newId, now, safeParseJson, safeParseJsonArray } from "./_shared.ts";
 
 interface WorkflowExecutionRow {
@@ -36,6 +36,64 @@ export interface WorkflowExecutionRecord {
   stdout: string;
   stderr: string;
   durationMs: number;
+}
+
+interface WorkflowLaunchRow {
+  id: string;
+  execution_id: string;
+  project_id: string;
+  session_id: string | null;
+  task_id: string | null;
+  mode: string;
+  state: string;
+  command_json: string;
+  environment_json: string;
+  tmux_session: string | null;
+  token_hash: string | null;
+  authorization_expires_at: string | null;
+  launcher_instance_id: string | null;
+  launcher_pid: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+  exit_code: number | null;
+  origin_json: string;
+  capabilities_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkflowLaunchRecord {
+  launch: WorkflowLaunch;
+  tokenHash: string | null;
+}
+
+function rowToLaunch(row: WorkflowLaunchRow): WorkflowLaunchRecord {
+  return {
+    launch: workflowLaunchSchema.parse({
+      schemaVersion: 1,
+      id: asString(row.id),
+      createdAt: asString(row.created_at),
+      updatedAt: asString(row.updated_at),
+      origin: safeParseJson(row.origin_json),
+      capabilities: safeParseJsonArray<string>(row.capabilities_json),
+      executionId: asString(row.execution_id),
+      projectId: asString(row.project_id),
+      sessionId: asStringOrNull(row.session_id),
+      taskId: asStringOrNull(row.task_id),
+      mode: asString(row.mode),
+      state: asString(row.state),
+      command: safeParseJson(row.command_json),
+      environment: safeParseJson(row.environment_json),
+      tmuxSession: asStringOrNull(row.tmux_session),
+      authorizationExpiresAt: asStringOrNull(row.authorization_expires_at),
+      launcherInstanceId: asStringOrNull(row.launcher_instance_id),
+      launcherPid: row.launcher_pid == null ? null : asNumber(row.launcher_pid),
+      startedAt: asStringOrNull(row.started_at),
+      finishedAt: asStringOrNull(row.finished_at),
+      exitCode: row.exit_code == null ? null : asNumber(row.exit_code),
+    }),
+    tokenHash: asStringOrNull(row.token_hash),
+  };
 }
 
 export type WorkflowApprovalStatus = "pending" | "approved" | "rejected" | "expired";
@@ -204,6 +262,104 @@ export function createWorkflowsRepo(db: DatabaseSync) {
         .prepare("SELECT * FROM workflow_executions WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
         .all(projectId, Math.max(1, Math.min(200, Math.floor(limit)))) as WorkflowExecutionRow[];
       return rows.map(rowToRecord);
+    },
+
+    saveLaunch(record: WorkflowLaunchRecord): WorkflowLaunchRecord {
+      const launch = workflowLaunchSchema.parse(record.launch);
+      db.prepare(
+        `INSERT INTO workflow_launches (
+           id, execution_id, project_id, session_id, task_id, mode, state, command_json,
+           environment_json, tmux_session, token_hash, authorization_expires_at,
+           launcher_instance_id, launcher_pid, started_at, finished_at, exit_code,
+           origin_json, capabilities_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           state = excluded.state,
+           token_hash = excluded.token_hash,
+           authorization_expires_at = excluded.authorization_expires_at,
+           launcher_instance_id = excluded.launcher_instance_id,
+           launcher_pid = excluded.launcher_pid,
+           started_at = excluded.started_at,
+           finished_at = excluded.finished_at,
+           exit_code = excluded.exit_code,
+           updated_at = excluded.updated_at`
+      ).run(
+        launch.id,
+        launch.executionId,
+        launch.projectId,
+        launch.sessionId,
+        launch.taskId,
+        launch.mode,
+        launch.state,
+        JSON.stringify(launch.command),
+        JSON.stringify(launch.environment),
+        launch.tmuxSession,
+        record.tokenHash,
+        launch.authorizationExpiresAt,
+        launch.launcherInstanceId,
+        launch.launcherPid,
+        launch.startedAt,
+        launch.finishedAt,
+        launch.exitCode,
+        JSON.stringify(launch.origin),
+        JSON.stringify(launch.capabilities),
+        launch.createdAt,
+        launch.updatedAt
+      );
+      const saved = this.getLaunch(launch.id);
+      if (!saved) throw new Error(`workflow launch ${launch.id} was not persisted`);
+      return saved;
+    },
+
+    getLaunch(id: string): WorkflowLaunchRecord | null {
+      const row = db.prepare("SELECT * FROM workflow_launches WHERE id = ? LIMIT 1").get(id) as
+        | WorkflowLaunchRow
+        | undefined;
+      return row ? rowToLaunch(row) : null;
+    },
+
+    getLaunchForExecution(executionId: string): WorkflowLaunchRecord | null {
+      const row = db.prepare("SELECT * FROM workflow_launches WHERE execution_id = ? LIMIT 1").get(executionId) as
+        | WorkflowLaunchRow
+        | undefined;
+      return row ? rowToLaunch(row) : null;
+    },
+
+    transitionLaunch(input: {
+      record: WorkflowLaunchRecord;
+      expectedState: string;
+      expectedTokenHash?: string | null;
+    }): WorkflowLaunchRecord {
+      const launch = workflowLaunchSchema.parse(input.record.launch);
+      const tokenClause = input.expectedTokenHash === undefined ? "" : " AND token_hash = ?";
+      const parameters: unknown[] = [
+        launch.state,
+        input.record.tokenHash,
+        launch.authorizationExpiresAt,
+        launch.launcherInstanceId,
+        launch.launcherPid,
+        launch.startedAt,
+        launch.finishedAt,
+        launch.exitCode,
+        launch.updatedAt,
+        launch.id,
+        input.expectedState,
+      ];
+      if (input.expectedTokenHash !== undefined) parameters.push(input.expectedTokenHash);
+      const result = db
+        .prepare(
+          `UPDATE workflow_launches SET
+             state = ?, token_hash = ?, authorization_expires_at = ?, launcher_instance_id = ?,
+             launcher_pid = ?, started_at = ?, finished_at = ?, exit_code = ?, updated_at = ?
+           WHERE id = ? AND state = ?${tokenClause}`
+        )
+        .run(...parameters);
+      if (Number(result.changes) !== 1) {
+        throw new Error(`workflow launch ${launch.id} state or authorization changed`);
+      }
+      const saved = this.getLaunch(launch.id);
+      if (!saved) throw new Error(`workflow launch ${launch.id} disappeared after transition`);
+      return saved;
     },
 
     requestApproval(input: {

@@ -12,6 +12,7 @@ import {
   type WorkbenchEvent,
   type WorkflowDefinition,
   type WorkflowExecution,
+  type WorkflowLaunch,
 } from "./types.ts";
 
 export interface ContractSchema<T> {
@@ -412,6 +413,24 @@ const workflowExecutionRaw = objectSchema({
   errorCode: nullable(nonEmptyString),
   errorSummary: nullable(nonEmptyString),
 });
+const workflowLaunchRaw = objectSchema({
+  ...baseShape,
+  executionId: nonEmptyString,
+  projectId: nonEmptyString,
+  sessionId: nullable(nonEmptyString),
+  taskId: nullable(nonEmptyString),
+  mode: enumSchema(["terminal", "tmux"] as const),
+  state: stateSchema,
+  command: objectSchema({ executable: nonEmptyString, arguments: strings, workingDirectory: nonEmptyString }),
+  environment: recordSchema(nonEmptyString),
+  tmuxSession: nullable(nonEmptyString),
+  authorizationExpiresAt: nullable(isoTimestamp),
+  launcherInstanceId: nullable(nonEmptyString),
+  launcherPid: nullable(numberSchema({ minimum: 1, integer: true })),
+  startedAt: nullable(isoTimestamp),
+  finishedAt: nullable(isoTimestamp),
+  exitCode: nullable(numberSchema({ integer: true })),
+});
 
 const workbenchEventRaw = objectSchema({
   ...baseShape,
@@ -489,6 +508,7 @@ export const recommendedActionSchema = publicSchema(recommendedActionRaw) as Con
 export const workbenchEventSchema = publicSchema(workbenchEventRaw) as ContractSchema<WorkbenchEvent>;
 export const workflowDefinitionSchema = publicSchema(workflowDefinitionRaw) as ContractSchema<WorkflowDefinition>;
 export const workflowExecutionSchema = publicSchema(workflowExecutionRaw) as ContractSchema<WorkflowExecution>;
+export const workflowLaunchSchema = publicSchema(workflowLaunchRaw) as ContractSchema<WorkflowLaunch>;
 export const desktopObservationSchema = publicSchema(desktopObservationRaw) as ContractSchema<DesktopObservation>;
 
 export const contractJsonSchemas = Object.freeze({
@@ -501,5 +521,6 @@ export const contractJsonSchemas = Object.freeze({
   WorkbenchEvent: workbenchEventSchema.jsonSchema,
   WorkflowDefinition: workflowDefinitionSchema.jsonSchema,
   WorkflowExecution: workflowExecutionSchema.jsonSchema,
+  WorkflowLaunch: workflowLaunchSchema.jsonSchema,
   DesktopObservation: desktopObservationSchema.jsonSchema,
 });

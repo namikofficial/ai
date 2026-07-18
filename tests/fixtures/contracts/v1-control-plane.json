@@ -258,6 +258,37 @@
     "errorCode": null,
     "errorSummary": null
   },
+  "WorkflowLaunch": {
+    "schemaVersion": 1,
+    "id": "workflow_launch_1",
+    "createdAt": "2026-07-18T10:00:00.000Z",
+    "updatedAt": "2026-07-18T10:00:00.000Z",
+    "origin": { "source": "workbench", "instanceId": "local", "legacyRef": null },
+    "capabilities": ["terminal"],
+    "executionId": "workflow_execution_1",
+    "projectId": "nox-billings",
+    "sessionId": "session_1",
+    "taskId": "task_2",
+    "mode": "terminal",
+    "state": "ready",
+    "command": {
+      "executable": "pnpm",
+      "arguments": ["verify"],
+      "workingDirectory": "/home/namik/Documents/code/noxorigin/nox-billings"
+    },
+    "environment": {
+      "AI_WORKBENCH_PROJECT_ID": "nox-billings",
+      "AI_WORKBENCH_SESSION_ID": "session_1",
+      "AI_WORKBENCH_TASK_ID": "task_2"
+    },
+    "tmuxSession": null,
+    "authorizationExpiresAt": null,
+    "launcherInstanceId": null,
+    "launcherPid": null,
+    "startedAt": null,
+    "finishedAt": null,
+    "exitCode": null
+  },
   "WorkbenchEvent": {
     "schemaVersion": 1,
     "id": "event_1",
