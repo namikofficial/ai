@@ -3,7 +3,11 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { type ProjectManifest, projectStatusSchema } from "../packages/contracts/src/index.ts";
+import {
+  type ProjectManifest,
+  type WorkflowExecution,
+  projectStatusSchema,
+} from "../packages/contracts/src/index.ts";
 import { createStore, initializeStore } from "../packages/db/src/store.ts";
 import {
   buildProjectStatus,
@@ -259,7 +263,7 @@ test("compact status is human-readable and the offline cache is atomic and versi
 test("aggregated project status scopes checks and actions to the canonical selected project", async () => {
   const fixtureData = JSON.parse(
     await readFile(new URL("./fixtures/contracts/v1-control-plane.json", import.meta.url), "utf8")
-  ) as { ProjectManifest: ProjectManifest };
+  ) as { ProjectManifest: ProjectManifest; WorkflowExecution: WorkflowExecution };
   const store = createStore(initializeStore(":memory:"));
   const project = store.createProject({ path: "/projects/selected", name: "Selected" });
   const other = store.createProject({ path: "/projects/other", name: "Other" });
@@ -273,6 +277,29 @@ test("aggregated project status scopes checks and actions to the canonical selec
   };
   store.projectRegistry.saveApprovedManifest(project.id, manifest, "test");
   store.projectRegistry.selectProject(project.id, "test", "persistent");
+  store.workflows.save({
+    execution: {
+      ...fixtureData.WorkflowExecution,
+      id: "workflow-status-failed",
+      projectId: project.id,
+      sessionId: null,
+      taskId: null,
+      state: "failed",
+      currentStepId: null,
+      stepStates: { command: "failed" },
+      startedAt: "2026-07-18T00:00:00.000Z",
+      finishedAt: "2026-07-18T00:00:01.000Z",
+      errorCode: "check_failed",
+      errorSummary: "Verification failed",
+      recoveryWorkflowIds: ["show-failed-checks"],
+      createdAt: "2026-07-18T00:00:00.000Z",
+      updatedAt: "2026-07-18T00:00:01.000Z",
+    },
+    command: { executable: "pnpm", arguments: ["verify"], workingDirectory: project.path },
+    stdout: "",
+    stderr: "verification failed",
+    durationMs: 1_000,
+  });
   store.createCheckRun({ projectId: project.id, name: "verify", status: "failed", exitCode: 1 });
   store.createCheckRun({ projectId: other.id, name: "foreign", status: "failed", exitCode: 1 });
   const runner: CommandRunner = {
@@ -290,5 +317,11 @@ test("aggregated project status scopes checks and actions to the canonical selec
     true
   );
   assert.equal(status.recommendedActions[0]?.projectId, project.id);
+  assert.equal(status.activeWork?.workflowExecutionId, "workflow-status-failed");
+  assert.equal(status.activeWork?.workflowId, "verify");
+  assert.deepEqual(status.activeWork?.recoveryWorkflowIds, ["show-failed-checks"]);
+  assert.equal(status.activeWork?.blocker?.code, "check_failed");
+  assert.equal(status.activeWork?.resumable, true);
+  assert.match(compactProjectStatus(status).work.label, /verify/);
   store.db.close();
 });
