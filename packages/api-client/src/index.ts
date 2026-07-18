@@ -755,7 +755,7 @@ export function createApiClient(options: ApiClientOptions) {
       return requestJson(options.baseUrl, `/retrieval/queries${suffix}`);
     },
     getRetrievalQuery(id: string): Promise<{ status: "ok"; data: RetrievalQueryRecord }> {
-      return requestJson(options.baseUrl, `/retrieval/queries/${id}`);
+      return requestJson(options.baseUrl, `/retrieval/queries/${encodeURIComponent(id)}`);
     },
     listMemoryCandidates(input: {
       status?: "pending" | "accepted" | "rejected";

@@ -2040,19 +2040,25 @@ function PlannerPage(): ReactNode {
 function HandoffPage(): ReactNode {
   const { projectId: routeProjectId } = useParams();
   const [searchParams] = useSearchParams();
+  const selectedProjectId = useWorkbenchStore((state) => state.selectedProjectId);
   const resource = useResource(() => Promise.all([api.listProjects(), api.listSessions()]));
   const projects = resource.data?.[0].data ?? [];
   const sessions = resource.data?.[1].data ?? [];
   const [sessionId, setSessionId] = useState(searchParams.get("session") ?? sessions[0]?.id ?? "");
-  const [project, setProject] = useState(routeProjectId ?? projects[0]?.id ?? "");
+  const [project, setProject] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
   const [target, setTarget] = useState<HandoffResponse["target"]>("manual");
   const [subtask, setSubtask] = useState("");
   const [result, setResult] = useState<HandoffResponse | null>(null);
+  const projectSessions = sessions.filter((session) => session.projectId === project);
 
   useEffect(() => {
-    if (!sessionId && sessions[0]?.id) setSessionId(sessions[0].id);
-    if (!project && projects[0]?.id) setProject(projects[0].id);
-  }, [project, projects, sessionId, sessions]);
+    if (routeProjectId && project !== routeProjectId) setProject(routeProjectId);
+    else if (!project && selectedProjectId) setProject(selectedProjectId);
+    else if (!project && projects[0]?.id) setProject(projects[0].id);
+    if (projectSessions.length > 0 && !projectSessions.some((session) => session.id === sessionId)) {
+      setSessionId(projectSessions[0]?.id ?? "");
+    }
+  }, [project, projectSessions, projects, routeProjectId, selectedProjectId, sessionId]);
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -2065,8 +2071,8 @@ function HandoffPage(): ReactNode {
       <Panel title="Create Handoff" span={6}>
         <form className="stack" onSubmit={submit}>
           <select value={sessionId} onChange={(event) => setSessionId(event.currentTarget.value)}>
-            {sessions.length > 0 ? (
-              sessions.map((session) => (
+            {projectSessions.length > 0 ? (
+              projectSessions.map((session) => (
                 <option key={session.id} value={session.id}>
                   {session.title}
                 </option>
@@ -2171,6 +2177,7 @@ function HandoffDetailPage(): ReactNode {
         </a>
       </Panel>
       <Panel title="Prompt" span={8}>
+        <Badge tone="warn">contains untrusted project evidence</Badge>
         <pre>{handoff.prompt}</pre>
       </Panel>
       <Panel title="Selected context" span={12}>
@@ -2466,13 +2473,16 @@ function RetrievalPage(): ReactNode {
   const [explanation, setExplanation] = useState<Record<string, unknown> | null>(null);
   const [explainError, setExplainError] = useState<string | null>(null);
   const [explaining, setExplaining] = useState(false);
+  const projectSessions = sessions.filter((session) => session.projectId === project);
 
   useEffect(() => {
     if (routeProjectId && project !== routeProjectId) setProject(routeProjectId);
     else if (!project && selectedProjectId) setProject(selectedProjectId);
     else if (!project && projects[0]?.id) setProject(projects[0].id);
-    if (!sessionId && sessions[0]?.id) setSessionId(sessions[0].id);
-  }, [project, projects, routeProjectId, selectedProjectId, sessionId, sessions]);
+    if (projectSessions.length > 0 && !projectSessions.some((session) => session.id === sessionId)) {
+      setSessionId(projectSessions[0]?.id ?? "");
+    }
+  }, [project, projectSessions, projects, routeProjectId, selectedProjectId, sessionId]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -2609,8 +2619,8 @@ function RetrievalPage(): ReactNode {
       <Panel title="Recent Retrieval Queries" span={8}>
         <div className="stack">
           <select value={sessionId} onChange={(event) => setSessionId(event.currentTarget.value)}>
-            {sessions.length > 0 ? (
-              sessions.map((session) => (
+            {projectSessions.length > 0 ? (
+              projectSessions.map((session) => (
                 <option key={session.id} value={session.id}>
                   {session.title}
                 </option>
@@ -2725,6 +2735,7 @@ function RetrievalQueryDetailPage(): ReactNode {
               <div className="list-item" key={String(r.id)}>
                 <div className="row">
                   <strong>{String(r.path ?? "")}</strong>
+                  <Badge tone="warn">untrusted evidence</Badge>
                   <Badge>score {Number(r.finalScore ?? r.baseScore ?? 0).toFixed(1)}</Badge>
                 </div>
                 <div className="tiny">
@@ -2746,6 +2757,7 @@ function RetrievalQueryDetailPage(): ReactNode {
                 <div className="row">
                   <strong>rank {Number(s.rank ?? 0)}</strong>
                   <Badge tone="good">{Number(s.tokenCount ?? 0)} tokens</Badge>
+                  <Badge tone="warn">untrusted evidence</Badge>
                 </div>
                 <div className="tiny">{String(s.excerpt ?? "").slice(0, 160)}</div>
               </div>
