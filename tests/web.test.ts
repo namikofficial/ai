@@ -127,8 +127,16 @@ test("project deep links synchronize canonical selection and flow into work surf
   assert.match(appSource, /api\.selectProject\(routeProjectId, null, "workbench_route"\)/);
   assert.match(appSource, /api\.getRegistry\(\)/);
   assert.match(appSource, /className="context-strip"/);
+  assert.match(appSource, /path="\/runs\/:runId" element=\{<RunReviewPage \/>\}/);
   assert.ok((pagesSource.match(/projectId: routeProjectId/g) ?? []).length >= 4);
   assert.match(pagesSource, /routeProjectId \?\? selectedProjectId/);
+  assert.match(pagesSource, /function ProjectWorkPage/);
+  assert.match(pagesSource, /api\.listDevRuns\(projectId\)/);
+  assert.match(pagesSource, /function RunReviewPage/);
+  const runReview = pagesSource.slice(pagesSource.indexOf("function RunReviewPage"), pagesSource.indexOf("function DevPage"));
+  assert.ok(runReview.indexOf('title="Diff"') < runReview.indexOf('title="Checks and warnings"'));
+  assert.match(runReview, /api\.approveDevRun\(runId\)/);
+  assert.match(runReview, /api\.applyDevRun\(runId\)/);
 });
 
 test("logs MCP calls through the shared store", async () => {
