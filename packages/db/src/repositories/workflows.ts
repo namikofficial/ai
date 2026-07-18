@@ -115,6 +115,46 @@ export interface WorkflowRecoveryRecord {
   requestedBy: string;
 }
 
+export type WorkflowArtifactCleanupStatus = "pending" | "running" | "completed" | "rejected" | "expired" | "failed";
+
+export interface WorkflowArtifactCleanupRecord {
+  id: string;
+  executionId: string;
+  projectId: string;
+  status: WorkflowArtifactCleanupStatus;
+  targetPath: string;
+  targetHash: string;
+  requestedAt: string;
+  expiresAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  notes: string | null;
+  errorSummary: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+function rowToArtifactCleanup(row: Record<string, unknown>): WorkflowArtifactCleanupRecord {
+  return {
+    id: asString(row.id),
+    executionId: asString(row.execution_id),
+    projectId: asString(row.project_id),
+    status: asString(row.status) as WorkflowArtifactCleanupStatus,
+    targetPath: asString(row.target_path),
+    targetHash: asString(row.target_hash),
+    requestedAt: asString(row.requested_at),
+    expiresAt: asString(row.expires_at),
+    decidedAt: asStringOrNull(row.decided_at),
+    decidedBy: asStringOrNull(row.decided_by),
+    notes: asStringOrNull(row.notes),
+    errorSummary: asStringOrNull(row.error_summary),
+    completedAt: asStringOrNull(row.completed_at),
+    createdAt: asString(row.created_at),
+    updatedAt: asString(row.updated_at),
+  };
+}
+
 function rowToBackgroundJob(row: Record<string, unknown>): WorkflowBackgroundJobRecord {
   return {
     executionId: asString(row.execution_id),
@@ -278,6 +318,102 @@ function definitionContent(definition: WorkflowDefinition): string {
 
 export function createWorkflowsRepo(db: DatabaseSync) {
   return {
+    requestArtifactCleanup(input: {
+      executionId: string;
+      projectId: string;
+      targetPath: string;
+      targetHash: string;
+      ttlSeconds?: number;
+    }): WorkflowArtifactCleanupRecord {
+      const existing = db
+        .prepare(
+          "SELECT * FROM workflow_artifact_cleanups WHERE execution_id = ? AND status IN ('pending', 'running') ORDER BY requested_at DESC LIMIT 1"
+        )
+        .get(input.executionId) as Record<string, unknown> | undefined;
+      if (existing) return rowToArtifactCleanup(existing);
+      const completed = db
+        .prepare(
+          "SELECT * FROM workflow_artifact_cleanups WHERE execution_id = ? AND status = 'completed' ORDER BY requested_at DESC LIMIT 1"
+        )
+        .get(input.executionId) as Record<string, unknown> | undefined;
+      if (completed) return rowToArtifactCleanup(completed);
+      const timestamp = now();
+      const ttlSeconds = Math.max(60, Math.min(3_600, Math.floor(input.ttlSeconds ?? 600)));
+      const expiresAt = new Date(Date.parse(timestamp) + ttlSeconds * 1_000).toISOString();
+      const id = newId("workflow_artifact_cleanup");
+      db.prepare(
+        `INSERT INTO workflow_artifact_cleanups (
+           id, execution_id, project_id, status, target_path, target_hash, requested_at, expires_at,
+           decided_at, decided_by, notes, error_summary, completed_at, created_at, updated_at
+         ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, ?, ?)`
+      ).run(
+        id,
+        input.executionId,
+        input.projectId,
+        input.targetPath,
+        input.targetHash,
+        timestamp,
+        expiresAt,
+        timestamp,
+        timestamp
+      );
+      const cleanup = this.getArtifactCleanup(id);
+      if (!cleanup) throw new Error(`workflow artifact cleanup ${id} was not persisted`);
+      return cleanup;
+    },
+
+    getArtifactCleanup(id: string): WorkflowArtifactCleanupRecord | null {
+      const row = db.prepare("SELECT * FROM workflow_artifact_cleanups WHERE id = ? LIMIT 1").get(id) as
+        | Record<string, unknown>
+        | undefined;
+      return row ? rowToArtifactCleanup(row) : null;
+    },
+
+    getLatestArtifactCleanup(executionId: string): WorkflowArtifactCleanupRecord | null {
+      const row = db
+        .prepare("SELECT * FROM workflow_artifact_cleanups WHERE execution_id = ? ORDER BY requested_at DESC LIMIT 1")
+        .get(executionId) as Record<string, unknown> | undefined;
+      return row ? rowToArtifactCleanup(row) : null;
+    },
+
+    transitionArtifactCleanup(input: {
+      id: string;
+      expectedStatus: WorkflowArtifactCleanupStatus;
+      status: WorkflowArtifactCleanupStatus;
+      decidedBy?: string | null;
+      notes?: string | null;
+      errorSummary?: string | null;
+      completedAt?: string | null;
+    }): WorkflowArtifactCleanupRecord {
+      const timestamp = now();
+      const result = db
+        .prepare(
+          `UPDATE workflow_artifact_cleanups
+           SET status = ?, decided_at = CASE WHEN ? IS NULL THEN decided_at ELSE ? END,
+               decided_by = COALESCE(?, decided_by), notes = COALESCE(?, notes),
+               error_summary = ?, completed_at = ?, updated_at = ?
+           WHERE id = ? AND status = ?`
+        )
+        .run(
+          input.status,
+          input.decidedBy ?? null,
+          timestamp,
+          input.decidedBy ?? null,
+          input.notes ?? null,
+          input.errorSummary ?? null,
+          input.completedAt ?? null,
+          timestamp,
+          input.id,
+          input.expectedStatus
+        );
+      if (Number(result.changes) !== 1) {
+        throw new Error(`workflow artifact cleanup is missing or no longer ${input.expectedStatus}: ${input.id}`);
+      }
+      const cleanup = this.getArtifactCleanup(input.id);
+      if (!cleanup) throw new Error(`workflow artifact cleanup ${input.id} disappeared after transition`);
+      return cleanup;
+    },
+
     createRecovery(input: {
       originalExecutionId: string;
       recoveryExecutionId: string;

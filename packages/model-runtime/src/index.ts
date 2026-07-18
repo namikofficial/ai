@@ -162,7 +162,10 @@ function redactMetadata(metadata: Record<string, unknown> | undefined): Record<s
   }
 }
 
-function requestForRecord(request: ModelInvokeRequest, options: ModelInvokeOptions | undefined): Record<string, unknown> {
+function requestForRecord(
+  request: ModelInvokeRequest,
+  options: ModelInvokeOptions | undefined
+): Record<string, unknown> {
   const recorded = options?.recordedRequest ?? request;
   return { ...recorded, metadata: redactMetadata(recorded.metadata) ?? undefined };
 }

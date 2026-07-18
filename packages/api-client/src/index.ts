@@ -253,6 +253,46 @@ export function createApiClient(options: ApiClientOptions) {
     getActionExecutionArtifacts(executionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
       return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/artifacts`);
     },
+    getActionExecutionArtifactDiff(executionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(options.baseUrl, `/actions/executions/${encodeURIComponent(executionId)}/artifacts/diff`);
+    },
+    requestActionArtifactCleanup(executionId: string): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(
+        options.baseUrl,
+        `/actions/executions/${encodeURIComponent(executionId)}/artifacts/cleanup/request`,
+        { method: "POST" }
+      );
+    },
+    approveActionArtifactCleanup(
+      executionId: string,
+      cleanupId: string,
+      notes?: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(
+        options.baseUrl,
+        `/actions/executions/${encodeURIComponent(executionId)}/artifacts/cleanup/approve`,
+        {
+          method: "POST",
+          body: JSON.stringify({ cleanupId, decidedBy: "api-client", ...(notes ? { notes } : {}) }),
+          headers: { "content-type": "application/json" },
+        }
+      );
+    },
+    rejectActionArtifactCleanup(
+      executionId: string,
+      cleanupId: string,
+      notes?: string
+    ): Promise<{ status: "ok"; data: Record<string, unknown> }> {
+      return requestJson(
+        options.baseUrl,
+        `/actions/executions/${encodeURIComponent(executionId)}/artifacts/cleanup/reject`,
+        {
+          method: "POST",
+          body: JSON.stringify({ cleanupId, decidedBy: "api-client", ...(notes ? { notes } : {}) }),
+          headers: { "content-type": "application/json" },
+        }
+      );
+    },
     approveActionExecution(
       executionId: string,
       notes?: string

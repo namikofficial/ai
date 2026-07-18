@@ -139,6 +139,20 @@ test("MCP clients share canonical sessions, messages, and context previews", asy
     assert.ok(context.selectedFiles.includes("src/context.ts"));
     assert.ok(context.included.every((item) => item.reason.length > 0));
 
+    const scopeResponse = await handleMcpRequest(store, config, {
+      jsonrpc: "2.0",
+      id: "scope",
+      method: "tools/call",
+      params: {
+        name: "ai_get_session_context_scope",
+        arguments: { sessionId: session.id },
+      },
+    });
+    const scope = mcpText(scopeResponse) as { sessionId: string; includeRetrieval: boolean; tokenBudget: number };
+    assert.equal(scope.sessionId, session.id);
+    assert.equal(scope.includeRetrieval, true);
+    assert.ok(scope.tokenBudget >= 1000);
+
     const planResponse = await handleMcpRequest(store, config, {
       jsonrpc: "2.0",
       id: 4,
@@ -165,6 +179,7 @@ test("MCP clients share canonical sessions, messages, and context previews", asy
     assert.equal(Boolean(memoryResponse?.error), false);
     assert.ok(store.listProjectLessons(project.id, 20).some((lesson) => lesson.title === "MCP continuity"));
     assert.ok(store.listMcpCalls(20).some((call) => call.toolName === "ai_get_session_context"));
+    assert.ok(store.listMcpCalls(20).some((call) => call.toolName === "ai_get_session_context_scope"));
   } finally {
     store.db.close();
     await rm(workspace, { recursive: true, force: true });

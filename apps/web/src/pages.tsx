@@ -4,6 +4,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import type {
   AgentRunRecord,
   AskResponse,
+  ClipboardContextPreview,
   ContextPackRecord,
   HandoffResponse,
   MemoryCandidateRecord,
@@ -13,7 +14,9 @@ import type {
   PromptLabRunRecord,
   RetrievalQueryRecord,
   ReviewRecord,
+  SessionContextConsent,
   SessionContextPreview,
+  SessionContextScope,
   SessionRecord,
   SessionTimelineResponse,
   TimelineItem,
@@ -1063,9 +1066,42 @@ function SessionDetailPage(): ReactNode {
     [sessionId],
     { live: true }
   );
+  const contextScopeResource = useResource(
+    () => api.getSessionContextScope(sessionId).then((response) => response.data),
+    [sessionId]
+  );
   const [contextPreview, setContextPreview] = useState<SessionContextPreview | null>(null);
+  const [contextScopeDraft, setContextScopeDraft] = useState<SessionContextScope | null>(null);
   const [sessionAction, setSessionAction] = useState<"preview" | "resume" | "close" | null>(null);
   const [sessionActionError, setSessionActionError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (contextScopeResource.data) setContextScopeDraft(contextScopeResource.data);
+  }, [contextScopeResource.data]);
+
+  const saveContextScope = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!contextScopeDraft) return;
+    setSessionActionError(null);
+    try {
+      const response = await api.updateSessionContextScope(sessionId, {
+        includeActiveFile: contextScopeDraft.includeActiveFile,
+        includeChangedFiles: contextScopeDraft.includeChangedFiles,
+        includeConversation: contextScopeDraft.includeConversation,
+        includeMemory: contextScopeDraft.includeMemory,
+        includeRetrieval: contextScopeDraft.includeRetrieval,
+        includeRules: contextScopeDraft.includeRules,
+        explicitFiles: contextScopeDraft.explicitFiles,
+        excludedPaths: contextScopeDraft.excludedPaths,
+        tokenBudget: contextScopeDraft.tokenBudget,
+      });
+      setContextScopeDraft(response.data);
+      setContextPreview(null);
+      contextScopeResource.refresh();
+    } catch (cause) {
+      setSessionActionError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
 
   const runSessionAction = async (action: "preview" | "resume" | "close") => {
     setSessionAction(action);
@@ -1222,6 +1258,87 @@ function SessionDetailPage(): ReactNode {
           <EmptyState
             title="Context not compiled"
             body="Preview on demand to avoid background Git and retrieval work."
+          />
+        )}
+      </Panel>
+      <Panel title="Context scope" span={12}>
+        {contextScopeDraft ? (
+          <form className="stack" onSubmit={saveContextScope}>
+            <div className="row">
+              {(
+                [
+                  ["includeActiveFile", "Active file"],
+                  ["includeChangedFiles", "Changed files"],
+                  ["includeConversation", "Conversation"],
+                  ["includeMemory", "Memory"],
+                  ["includeRetrieval", "Retrieval"],
+                  ["includeRules", "Project rules"],
+                ] as const
+              ).map(([field, label]) => (
+                <label className="row" key={field}>
+                  <input
+                    type="checkbox"
+                    checked={contextScopeDraft[field]}
+                    onChange={(event) =>
+                      setContextScopeDraft({ ...contextScopeDraft, [field]: event.currentTarget.checked })
+                    }
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <label className="stack">
+              Explicit project files (one relative path per line)
+              <textarea
+                value={contextScopeDraft.explicitFiles.join("\n")}
+                onChange={(event) =>
+                  setContextScopeDraft({
+                    ...contextScopeDraft,
+                    explicitFiles: event.currentTarget.value
+                      .split("\n")
+                      .map((entry) => entry.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </label>
+            <label className="stack">
+              Excluded paths (one relative path per line)
+              <textarea
+                value={contextScopeDraft.excludedPaths.join("\n")}
+                onChange={(event) =>
+                  setContextScopeDraft({
+                    ...contextScopeDraft,
+                    excludedPaths: event.currentTarget.value
+                      .split("\n")
+                      .map((entry) => entry.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+            </label>
+            <label className="stack">
+              Token budget
+              <input
+                type="number"
+                min={1000}
+                max={32000}
+                step={500}
+                value={contextScopeDraft.tokenBudget}
+                onChange={(event) =>
+                  setContextScopeDraft({ ...contextScopeDraft, tokenBudget: Number(event.currentTarget.value) })
+                }
+              />
+            </label>
+            <div className="row">
+              <button type="submit">Save scope</button>
+              <span className="tiny">The same durable scope is enforced by preview and Ask.</span>
+            </div>
+          </form>
+        ) : (
+          <EmptyState
+            title="Context scope unavailable"
+            body={contextScopeResource.error ?? "Loading session context policy."}
           />
         )}
       </Panel>
@@ -1516,6 +1633,9 @@ function AskPage(): ReactNode {
   const [project, setProject] = useState(routeProjectId ?? selectedProjectId ?? projects[0]?.id ?? "");
   const [result, setResult] = useState<AskResponse | null>(null);
   const [contextPreview, setContextPreview] = useState<SessionContextPreview | null>(null);
+  const [clipboardContent, setClipboardContent] = useState("");
+  const [clipboardPreview, setClipboardPreview] = useState<ClipboardContextPreview | null>(null);
+  const [clipboardConsent, setClipboardConsent] = useState<SessionContextConsent | null>(null);
   const [memorySaved, setMemorySaved] = useState(false);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -1530,10 +1650,25 @@ function AskPage(): ReactNode {
     setSubmitting(true);
     setError("");
     try {
-      const response = await api.ask({ project, question, depth, mode: "local", sessionId: result?.sessionId ?? null });
+      const response = await api.ask({
+        project,
+        question,
+        depth,
+        mode: "local",
+        sessionId: result?.sessionId ?? null,
+        contextInput:
+          clipboardContent && clipboardConsent
+            ? { clipboard: { content: clipboardContent, consentId: clipboardConsent.id } }
+            : undefined,
+      });
       setResult(response.data);
       setContextPreview(null);
       setMemorySaved(false);
+      if (clipboardConsent) {
+        setClipboardContent("");
+        setClipboardPreview(null);
+        setClipboardConsent(null);
+      }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -1573,6 +1708,71 @@ function AskPage(): ReactNode {
             <option value="shallow">Shallow</option>
             <option value="deep">Deep</option>
           </select>
+          <label className="stack">
+            Optional one-use clipboard context
+            <textarea
+              value={clipboardContent}
+              onChange={(event) => {
+                setClipboardContent(event.currentTarget.value);
+                setClipboardPreview(null);
+                setClipboardConsent(null);
+              }}
+              placeholder={
+                result
+                  ? "Paste untrusted evidence, preview its redactions, then approve it for one Ask."
+                  : "Run the first Ask to create a project-scoped session before adding clipboard context."
+              }
+              disabled={!result}
+            />
+          </label>
+          {result && clipboardContent ? (
+            <div className="stack">
+              <div className="row">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void api
+                      .previewClipboardContext(result.sessionId, clipboardContent)
+                      .then((response) => {
+                        setClipboardPreview(response.data);
+                        setClipboardConsent(null);
+                      })
+                      .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+                  }
+                >
+                  Preview clipboard safety
+                </button>
+                {clipboardPreview ? (
+                  <button
+                    type="button"
+                    disabled={clipboardConsent !== null}
+                    onClick={() =>
+                      void api
+                        .recordSessionContextConsent(result.sessionId, {
+                          sourceHash: clipboardPreview.sourceHash,
+                          decision: "approved",
+                          purpose: "one Ask request",
+                          decidedBy: "workbench-web",
+                        })
+                        .then((response) => setClipboardConsent(response.data))
+                        .catch((cause) => setError(cause instanceof Error ? cause.message : String(cause)))
+                    }
+                  >
+                    {clipboardConsent ? "Approved once" : "Approve for next Ask"}
+                  </button>
+                ) : null}
+              </div>
+              {clipboardPreview ? (
+                <div className="list-item">
+                  <div className="tiny">
+                    Untrusted · not persisted · ~{clipboardPreview.estimatedTokens} tokens ·{" "}
+                    {clipboardPreview.redactionCount} redaction(s)
+                  </div>
+                  <pre>{clipboardPreview.redactedPreview}</pre>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <button type="submit" disabled={submitting}>
             {submitting ? "Asking..." : "Ask"}
           </button>
@@ -3504,13 +3704,21 @@ function WorkflowExecutionReviewPage(): ReactNode {
   const { executionId = "" } = useParams();
   const navigate = useNavigate();
   const resource = useResource(
-    () => Promise.all([api.getActionExecution(executionId), api.getActionExecutionArtifacts(executionId)]),
+    () =>
+      Promise.all([
+        api.getActionExecution(executionId),
+        api.getActionExecutionArtifacts(executionId),
+        api
+          .getActionExecutionArtifactDiff(executionId)
+          .catch((cause) => ({ status: "ok" as const, data: { unavailable: true, reason: String(cause) } })),
+      ]),
     [executionId]
   );
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const detail = resource.data?.[0].data ?? null;
   const artifactDetail = resource.data?.[1].data ?? null;
+  const artifactDiff = (resource.data?.[2].data as Record<string, unknown> | undefined) ?? null;
   const execution = (detail?.execution as Record<string, unknown> | undefined) ?? null;
   const command = (detail?.command as Record<string, unknown> | undefined) ?? null;
   const approval = (detail?.approval as Record<string, unknown> | undefined) ?? null;
@@ -3518,6 +3726,7 @@ function WorkflowExecutionReviewPage(): ReactNode {
   const recoveryOptions = (detail?.recoveryOptions as string[] | undefined) ?? [];
   const recoveries = (detail?.recoveries as Array<Record<string, unknown>> | undefined) ?? [];
   const artifacts = (artifactDetail?.artifacts as Array<Record<string, unknown>> | undefined) ?? [];
+  const cleanup = (detail?.artifactCleanup as Record<string, unknown> | undefined) ?? null;
   const state = String(execution?.state ?? "loading");
 
   const mutate = async (action: "approve" | "reject" | "cancel", workflowId?: string) => {
@@ -3533,6 +3742,25 @@ function WorkflowExecutionReviewPage(): ReactNode {
       } else if (action === "approve") await api.approveActionExecution(executionId);
       else if (action === "reject") await api.rejectActionExecution(executionId);
       else await api.cancelActionExecution(executionId);
+      resource.refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const mutateArtifacts = async (action: "request" | "approve" | "reject") => {
+    setBusy(`cleanup:${action}`);
+    setError(null);
+    try {
+      if (action === "request") await api.requestActionArtifactCleanup(executionId);
+      else {
+        const cleanupId = String(cleanup?.id ?? "");
+        if (!cleanupId) throw new Error("cleanup approval is unavailable");
+        if (action === "approve") await api.approveActionArtifactCleanup(executionId, cleanupId);
+        else await api.rejectActionArtifactCleanup(executionId, cleanupId);
+      }
       resource.refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -3643,6 +3871,61 @@ function WorkflowExecutionReviewPage(): ReactNode {
             <EmptyState title="No artifacts" body="This workflow did not retain review artifacts." />
           )}
         </div>
+        {artifactDiff && artifactDiff.unavailable !== true ? (
+          <div className="stack">
+            <div className="row">
+              <Badge
+                tone={cleanup?.status === "completed" ? "good" : cleanup?.status === "pending" ? "warn" : "neutral"}
+              >
+                cleanup {String(cleanup?.status ?? "not requested")}
+              </Badge>
+              {!cleanup || ["rejected", "expired", "failed"].includes(String(cleanup.status)) ? (
+                <button type="button" disabled={busy !== null} onClick={() => void mutateArtifacts("request")}>
+                  {busy === "cleanup:request" ? "Requesting..." : "Request cleanup approval"}
+                </button>
+              ) : null}
+              {cleanup?.status === "pending" ? (
+                <>
+                  <button type="button" disabled={busy !== null} onClick={() => void mutateArtifacts("approve")}>
+                    {busy === "cleanup:approve" ? "Cleaning..." : "Approve reviewed cleanup"}
+                  </button>
+                  <button
+                    className="secondary"
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => void mutateArtifacts("reject")}
+                  >
+                    {busy === "cleanup:reject" ? "Rejecting..." : "Keep workspace"}
+                  </button>
+                </>
+              ) : null}
+            </div>
+            <div className="tiny">Cleanup deletes only this execution's validated retained runtime workspace.</div>
+          </div>
+        ) : null}
+      </Panel>
+
+      <Panel title="Isolated workspace diff" span={12}>
+        {artifactDiff && artifactDiff.unavailable !== true ? (
+          <div className="stack">
+            <div className="row">
+              <Badge>{Array.isArray(artifactDiff.filesChanged) ? artifactDiff.filesChanged.length : 0} changed</Badge>
+              <Badge>{Array.isArray(artifactDiff.filesAdded) ? artifactDiff.filesAdded.length : 0} added</Badge>
+              <Badge>{Array.isArray(artifactDiff.filesRemoved) ? artifactDiff.filesRemoved.length : 0} removed</Badge>
+              {artifactDiff.truncated ? <Badge tone="warn">truncated</Badge> : null}
+            </div>
+            {artifactDiff.diff ? (
+              <pre className="diff-view">{String(artifactDiff.diff)}</pre>
+            ) : (
+              <EmptyState title="No isolated changes" body="The retained workspace matches the canonical project." />
+            )}
+          </div>
+        ) : (
+          <EmptyState
+            title="No retained workspace diff"
+            body={String(artifactDiff?.reason ?? "This execution did not run in an isolated workspace.")}
+          />
+        )}
       </Panel>
 
       <Panel title="Step evidence" span={12}>

@@ -485,6 +485,7 @@ export type EventType =
   | "workflow.blocked"
   | "workflow.cancelled"
   | "workflow.launch_ready"
+  | "workflow.artifacts_cleaned"
   | "handoff.created"
   | "handoff.archived"
   | "review.reflected"
@@ -1117,6 +1118,8 @@ export type ContextPackItemKind =
   | "check_failure"
   | "skill"
   | "explicit_file"
+  | "active_file"
+  | "changed_file"
   | "clipboard";
 
 export interface ContextPackItemRecord {

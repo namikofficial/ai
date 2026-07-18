@@ -15,7 +15,7 @@ import { existsSync } from "node:fs";
 import { cp, lstat, mkdir, readdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { IGNORED_DIRECTORIES, isIgnoredDirectory, normalizeSlashes } from "./files.ts";
+import { IGNORED_DIRECTORIES, isIgnoredDirectory, isSecretFile, normalizeSlashes } from "./files.ts";
 
 function execFileAsync(
   file: string,
@@ -220,6 +220,7 @@ export interface CollectDiffInput {
   originalRoot: string;
   paths: string[];
   maxBytesPerFile?: number;
+  preferManual?: boolean;
 }
 
 export interface CollectDiffResult {
@@ -234,7 +235,7 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
   const maxBytes = input.maxBytesPerFile ?? 256 * 1024;
 
   // Try git diff first for quality.
-  const gitDiffResult = await tryGitDiff(input);
+  const gitDiffResult = input.preferManual ? null : await tryGitDiff(input);
   if (gitDiffResult != null) return gitDiffResult;
 
   // Fallback: manual per-file comparison.
@@ -295,6 +296,172 @@ export async function collectDiff(input: CollectDiffInput): Promise<CollectDiffR
     filesRemoved: removed,
     truncated,
   };
+}
+
+export interface RetainedWorkspaceInput {
+  executionId: string;
+  runtimeDir: string;
+  projectRoot: string;
+  workspacePath: string;
+  workingDirectory: string;
+}
+
+export interface RetainedWorkspaceInspection {
+  workspace: WorkspaceRecord;
+  runDirectory: string;
+}
+
+export async function inspectRetainedWorkspace(input: RetainedWorkspaceInput): Promise<RetainedWorkspaceInspection> {
+  const expectedRunDirectory = path.resolve(workspaceRootFor(input.runtimeDir), shortId(input.executionId, "run"));
+  const expectedWorkspace = path.join(expectedRunDirectory, "workspace");
+  if (path.resolve(input.workspacePath) !== expectedWorkspace) {
+    throw new Error("retained workspace does not match the canonical execution path");
+  }
+  const [runtimeRoot, projectRoot, workspacePath, workingDirectory] = await Promise.all([
+    realpath(workspaceRootFor(input.runtimeDir)),
+    realpath(input.projectRoot),
+    realpath(input.workspacePath),
+    realpath(input.workingDirectory),
+  ]);
+  const runDirectory = await realpath(expectedRunDirectory);
+  const [runInfo, workspaceInfo] = await Promise.all([lstat(expectedRunDirectory), lstat(expectedWorkspace)]);
+  if (
+    !runInfo.isDirectory() ||
+    runInfo.isSymbolicLink() ||
+    !workspaceInfo.isDirectory() ||
+    workspaceInfo.isSymbolicLink()
+  ) {
+    throw new Error("retained workspace path contains an unsafe filesystem object");
+  }
+  if (!isWithin(runtimeRoot, runDirectory) || !isWithin(runDirectory, workspacePath)) {
+    throw new Error("retained workspace escapes the canonical runtime root");
+  }
+  if (!isWithin(workspacePath, workingDirectory)) {
+    throw new Error("workflow working directory is outside its retained workspace");
+  }
+  if (projectRoot === workspacePath || isWithin(workspacePath, projectRoot)) {
+    throw new Error("retained workspace overlaps the canonical project");
+  }
+  const gitMarker = await lstat(path.join(workspacePath, ".git")).catch(() => null);
+  const isGitWorktree = gitMarker?.isFile() === true;
+  return {
+    runDirectory,
+    workspace: {
+      id: `ws_${shortId(input.executionId, "run")}`,
+      path: workspacePath,
+      strategy: isGitWorktree ? "git_worktree" : "safe_copy",
+      branch: isGitWorktree ? await getCurrentBranch(workspacePath) : null,
+      baseCommit: isGitWorktree ? await getCurrentCommit(workspacePath) : null,
+      originalBranch: await getCurrentBranch(projectRoot),
+      isGitWorktree,
+      originalRoot: projectRoot,
+    },
+  };
+}
+
+async function listRegularFiles(root: string, current = root, output: string[] = []): Promise<string[]> {
+  if (output.length > 5_000) throw new Error("retained workspace contains too many files to diff safely");
+  const entries = (await readdir(current, { withFileTypes: true })) as Array<{
+    name: string;
+    isDirectory(): boolean;
+    isFile(): boolean;
+  }>;
+  for (const entry of entries) {
+    if (entry.name === ".git" || (entry.isDirectory() && isIgnoredDirectory(entry.name))) continue;
+    const absolute = path.join(current, entry.name);
+    if (entry.isDirectory()) await listRegularFiles(root, absolute, output);
+    else if (entry.isFile()) {
+      const relativePath = normalizeSlashes(path.relative(root, absolute));
+      if (!isSecretFile(relativePath)) output.push(relativePath);
+    }
+  }
+  return output;
+}
+
+async function gitChangedPaths(workspacePath: string): Promise<{ tracked: string[]; untracked: string[] }> {
+  const { stdout } = await execFileAsync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all"], {
+    cwd: workspacePath,
+    timeout: 30_000,
+  });
+  const tracked: string[] = [];
+  const untracked: string[] = [];
+  const records = stdout.split("\0");
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (record.length < 4) continue;
+    const status = record.slice(0, 2);
+    const candidate = normalizeSlashes(record.slice(3));
+    if (!isSecretFile(candidate)) {
+      if (status === "??") untracked.push(candidate);
+      else tracked.push(candidate);
+    }
+    if (status.includes("R") || status.includes("C")) {
+      const destination = records[index + 1];
+      if (destination && !isSecretFile(destination)) tracked.push(normalizeSlashes(destination));
+      index += 1;
+    }
+  }
+  return { tracked: [...new Set(tracked)], untracked: [...new Set(untracked)] };
+}
+
+export async function collectRetainedWorkspaceDiff(
+  inspection: RetainedWorkspaceInspection
+): Promise<CollectDiffResult> {
+  let result: CollectDiffResult;
+  if (inspection.workspace.isGitWorktree) {
+    const paths = await gitChangedPaths(inspection.workspace.path);
+    const tracked = await collectDiff({
+      workspace: inspection.workspace,
+      originalRoot: inspection.workspace.originalRoot,
+      paths: paths.tracked,
+    });
+    const untracked = await collectDiff({
+      workspace: inspection.workspace,
+      originalRoot: inspection.workspace.originalRoot,
+      paths: paths.untracked,
+      preferManual: true,
+    });
+    result = {
+      diff: [tracked.diff, untracked.diff].filter(Boolean).join("\n"),
+      filesChanged: [...new Set([...tracked.filesChanged, ...untracked.filesChanged])],
+      filesAdded: [...new Set([...tracked.filesAdded, ...untracked.filesAdded])],
+      filesRemoved: [...new Set([...tracked.filesRemoved, ...untracked.filesRemoved])],
+      truncated: tracked.truncated || untracked.truncated,
+    };
+  } else {
+    const paths = [
+      ...new Set([
+        ...(await listRegularFiles(inspection.workspace.originalRoot)),
+        ...(await listRegularFiles(inspection.workspace.path)),
+      ]),
+    ].sort();
+    result = await collectDiff({
+      workspace: inspection.workspace,
+      originalRoot: inspection.workspace.originalRoot,
+      paths,
+      preferManual: true,
+    });
+  }
+  const maxDiffBytes = 2 * 1024 * 1024;
+  if (new TextEncoder().encode(result.diff).byteLength <= maxDiffBytes) return result;
+  return { ...result, diff: result.diff.slice(0, maxDiffBytes), truncated: true };
+}
+
+export async function cleanupRetainedWorkspace(inspection: RetainedWorkspaceInspection): Promise<void> {
+  if (inspection.workspace.isGitWorktree) {
+    await execFileAsync("git", ["worktree", "remove", "--force", inspection.workspace.path], {
+      cwd: inspection.workspace.originalRoot,
+      timeout: 30_000,
+    });
+    const expectedBranch = `ai/dev/${path.basename(inspection.runDirectory)}`;
+    if (inspection.workspace.branch === expectedBranch) {
+      await execFileAsync("git", ["branch", "-D", expectedBranch], {
+        cwd: inspection.workspace.originalRoot,
+        timeout: 30_000,
+      }).catch(() => undefined);
+    }
+  }
+  await rm(inspection.runDirectory, { recursive: true, force: false });
 }
 
 async function tryGitDiff(input: CollectDiffInput): Promise<CollectDiffResult | null> {

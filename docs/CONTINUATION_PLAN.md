@@ -37,6 +37,10 @@ lists concrete remaining gates rather than treating compatibility slices as fini
 - Workflow review now presents canonical policy, DAG evidence, redacted output, safe artifact metadata, approval
   controls, recovery history, and recovery actions. `ActiveWork` projects workflow execution/recovery identity into
   the shared status cache, and Rofi uses only those fields plus the canonical API for review and recovery.
+- Sessions now own a durable context scope used by preview and Ask. Browser and CLI can edit it, MCP can inspect it,
+  explicit files pass root/secret/exclusion checks, and retrieval/memory/rules/conversation flags and token ceilings
+  are enforced during packing. Clipboard context requires a redacted preview and exact-hash one-use consent; raw
+  clipboard and clipboard-derived answers are omitted from durable prompts, calls, events, messages, and caches.
 
 ## Priority 1 — Complete workflow modes
 
@@ -51,9 +55,9 @@ wrong-project invocation, secret redaction, process-tree cleanup, and restart re
 
 ## Priority 2 — Explicit context consent and retrieval scope
 
-Add durable per-session retrieval scope and explicit-file/clipboard inputs. Clipboard ingestion must require per-use
-consent, show a redacted preview and token estimate, record only the consent decision/source hash by default, and
-never enter desktop caches or logs. Add adversarial prompt-injection fixtures with untrusted-source labels.
+Add broader adversarial repository prompt-injection fixtures and expose clearer untrusted-source labels throughout
+context rendering. The durable scope, active/changed/explicit-file enforcement, one-use clipboard preview/consent,
+browser controls, CLI controls, and read-only MCP scope inspection are implemented and covered by integration tests.
 
 ## Priority 3 — Live desktop end-to-end proof
 

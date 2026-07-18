@@ -1391,15 +1391,23 @@ test("isolated workflows retain review artifacts without mutating the canonical 
   const outside = await mkdtemp(join(tmpdir(), "ai-workflow-artifact-redaction-"));
   const outsideArtifact = join(outside, "private-result.txt");
   await writeFile(join(workspace, "app.py"), "value = 1\n");
+  await writeFile(
+    join(workspace, "generate.py"),
+    [
+      "from pathlib import Path",
+      'Path("app.py").write_text("value = 2\\n")',
+      'Path("generated.txt").write_text("isolated artifact\\n")',
+    ].join("\n")
+  );
   await writeFile(outsideArtifact, "must not expose this path\n");
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
   const project = store.createProject({
     path: workspace,
     name: "Isolated Project",
   });
-  const isolated = command("compile", "python3", ["-m", "compileall", "app.py"], "workspace_write");
+  const isolated = command("compile", "python3", ["generate.py"], "workspace_write");
   isolated.executionMode = "isolated";
-  isolated.expectedArtifacts = [{ id: "bytecode", path: "__pycache__", kind: "directory", required: true }];
+  isolated.expectedArtifacts = [{ id: "generated", path: "generated.txt", kind: "file", required: true }];
   const manifest: ProjectManifest = {
     ...fixture.ProjectManifest,
     id: project.id,
@@ -1442,7 +1450,7 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     });
     assert.equal(pending.statusCode, 202);
     const executionId = JSON.parse(pending.body).data.execution.id as string;
-    await assert.rejects(access(join(workspace, "__pycache__")));
+    await assert.rejects(access(join(workspace, "generated.txt")));
 
     const approved = await handle.inject({
       method: "POST",
@@ -1461,9 +1469,10 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     assert.equal(completed.execution.state, "completed");
     assert.equal(completed.execution.artifacts.length, 2);
     assert.equal(completed.command.workingDirectory, completed.execution.artifacts[0]);
-    assert.equal(completed.execution.artifacts[1], join(completed.execution.artifacts[0] ?? "", "__pycache__"));
+    assert.equal(completed.execution.artifacts[1], join(completed.execution.artifacts[0] ?? "", "generated.txt"));
     await access(completed.execution.artifacts[1] ?? "");
-    await assert.rejects(access(join(workspace, "__pycache__")));
+    await assert.rejects(access(join(workspace, "generated.txt")));
+    assert.equal(await readFile(join(workspace, "app.py"), "utf8"), "value = 1\n");
 
     const artifactsResponse = await handle.inject({
       method: "GET",
@@ -1481,7 +1490,7 @@ test("isolated workflows retain review artifacts without mutating the canonical 
     assert.ok(artifacts.every((artifact) => artifact.exists && artifact.safe));
     assert.deepEqual(
       artifacts.map((artifact) => artifact.kind),
-      ["directory", "directory"]
+      ["directory", "file"]
     );
     assert.ok(artifacts.every((artifact) => artifact.path?.startsWith(join(workspace, "runtime"))));
 
@@ -1510,6 +1519,78 @@ test("isolated workflows retain review artifacts without mutating the canonical 
       { path: null, exists: true, safe: false }
     );
     assert.match(redacted.reason, /outside approved roots/);
+
+    const diffResponse = await handle.inject({
+      method: "GET",
+      url: `/actions/executions/${executionId}/artifacts/diff`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(diffResponse.statusCode, 200, diffResponse.body);
+    const diff = JSON.parse(diffResponse.body).data as {
+      diff: string;
+      filesChanged: string[];
+      filesAdded: string[];
+      targetHash: string;
+    };
+    assert.ok(diff.filesChanged.includes("app.py"));
+    assert.ok(diff.filesAdded.includes("generated.txt"));
+    assert.match(diff.diff, /value = 2/);
+    assert.match(diff.targetHash, /^[a-f0-9]{64}$/);
+
+    const cleanupRequest = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/artifacts/cleanup/request`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(cleanupRequest.statusCode, 202, cleanupRequest.body);
+    const firstCleanupId = JSON.parse(cleanupRequest.body).data.cleanup.id as string;
+    const retainedWorkspace = completed.execution.artifacts[0] ?? "";
+    await writeFile(join(retainedWorkspace, "generated.txt"), "changed after cleanup review\n");
+    const staleApproval = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/artifacts/cleanup/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { cleanupId: firstCleanupId, decidedBy: "test" },
+    });
+    assert.equal(staleApproval.statusCode, 409, staleApproval.body);
+    assert.match(staleApproval.body, /stale/);
+    await access(retainedWorkspace);
+
+    const secondRequest = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/artifacts/cleanup/request`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(secondRequest.statusCode, 202, secondRequest.body);
+    const cleanupId = JSON.parse(secondRequest.body).data.cleanup.id as string;
+    assert.notEqual(cleanupId, firstCleanupId);
+    const confusedApproval = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/artifacts/cleanup/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { cleanupId: "cleanup_from_another_execution", decidedBy: "test" },
+    });
+    assert.equal(confusedApproval.statusCode, 409);
+
+    const cleanupApproval = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/artifacts/cleanup/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { cleanupId, decidedBy: "test" },
+    });
+    assert.equal(cleanupApproval.statusCode, 200, cleanupApproval.body);
+    assert.equal(JSON.parse(cleanupApproval.body).data.cleanup.status, "completed");
+    await assert.rejects(access(retainedWorkspace));
+    assert.equal(await readFile(join(workspace, "app.py"), "utf8"), "value = 1\n");
+
+    const replayCleanup = await handle.inject({
+      method: "POST",
+      url: `/actions/executions/${executionId}/artifacts/cleanup/approve`,
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: { cleanupId, decidedBy: "test" },
+    });
+    assert.equal(replayCleanup.statusCode, 409);
+    assert.ok(store.listEvents(undefined, 100).some((event) => event.type === "workflow.artifacts_cleaned"));
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });

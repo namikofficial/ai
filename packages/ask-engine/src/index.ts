@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import { relative } from "node:path";
 import { buildContextPack } from "../../context-engine/src/index.ts";
+import { isSecretFile } from "../../execution-engine/src/index.ts";
 import type {
   ModelInvokeOptions,
   ModelInvokeRequest,
   ModelInvokeResult,
   ModelRuntime,
 } from "../../model-runtime/src/index.ts";
+import { collectGitChangedPaths } from "../../project-status/src/index.ts";
 import {
   buildAnswerFromCompiledPrompt,
   type CompilePromptInput,
@@ -15,7 +19,7 @@ import {
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
 import { analyzeQuery, classifyIntent, rewriteQuery, runRetrievalPipeline } from "../../retrieval-engine/src/index.ts";
 import { buildRetrievalPipelineInput, type RetrievalPipelineSource } from "../../retrieval-engine/src/pipeline.ts";
-import { redactSecrets } from "../../safety/src/index.ts";
+import { checkPathPolicy, redactSecrets } from "../../safety/src/index.ts";
 import type {
   AskRequest,
   AskResponse,
@@ -37,6 +41,7 @@ import type {
   RetrievalQueryRecord,
   RetrievalResultRecord,
   RetrievalSelectedContextRecord,
+  SessionContextScope,
   SessionRecord,
   SkillRecord,
 } from "../../shared/src/index.ts";
@@ -471,7 +476,55 @@ export interface AskWorkflowStore extends RetrievalPipelineSource {
   invokeModel(profileId: string, request: ModelInvokeRequest, options?: ModelInvokeOptions): Promise<ModelInvokeResult>;
   enqueueJob(input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }): { id: string };
   listEvents(sessionId?: string, limit?: number): EventEnvelope[];
+  activeContext?: {
+    getContext(): { project: { id: string } | null; activeFile: string | null } | null;
+  };
+  getSessionContextScope?(sessionId: string): SessionContextScope | null;
   consumeSessionContextConsent?(input: { consentId: string; sessionId: string; sourceHash: string }): boolean;
+}
+
+const DEFAULT_CONTEXT_SCOPE = {
+  includeActiveFile: true,
+  includeChangedFiles: true,
+  includeConversation: true,
+  includeMemory: true,
+  includeRetrieval: true,
+  includeRules: true,
+  explicitFiles: [] as string[],
+  excludedPaths: [] as string[],
+  tokenBudget: 4096,
+};
+
+function isExcludedContextPath(path: string, excludedPaths: string[]): boolean {
+  const normalized = path.replaceAll("\\", "/").replace(/^\.\//, "");
+  return excludedPaths.some((entry) => {
+    const excluded = entry.replaceAll("\\", "/").replace(/^\.\//, "").replace(/\/$/, "");
+    return excluded.length > 0 && (normalized === excluded || normalized.startsWith(`${excluded}/`));
+  });
+}
+
+async function readScopedContextFiles(
+  projectRoot: string,
+  paths: string[],
+  excludedPaths: string[]
+): Promise<Array<{ path: string; content: string }>> {
+  const files = await Promise.all(
+    paths.map(async (candidatePath) => {
+      const policy = checkPathPolicy({ projectRoot, candidatePath });
+      if (!policy.allowed) return null;
+      const projectPath = relative(projectRoot, policy.resolvedPath).replaceAll("\\", "/");
+      if (isExcludedContextPath(projectPath, excludedPaths) || isSecretFile(projectPath)) return null;
+      try {
+        if ((await stat(policy.resolvedPath)).size > 1_000_000) return null;
+        const content = (await readFile(policy.resolvedPath, "utf8")).slice(0, 32_000);
+        if (content.includes("\0")) return null;
+        return { path: projectPath, content: redactSecrets(content).text };
+      } catch {
+        return null;
+      }
+    })
+  );
+  return files.filter((file): file is { path: string; content: string } => file !== null);
 }
 
 export interface RunAskWorkflowInput {
@@ -562,6 +615,32 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
         modelProfile: selectedAnswerProfile,
         source: "cli",
       });
+  const storedContextScope = input.store.getSessionContextScope?.(session.id);
+  const contextScope = storedContextScope
+    ? {
+        ...DEFAULT_CONTEXT_SCOPE,
+        ...storedContextScope,
+        explicitFiles: storedContextScope.explicitFiles,
+        excludedPaths: storedContextScope.excludedPaths,
+      }
+    : DEFAULT_CONTEXT_SCOPE;
+  const explicitContextFiles = await readScopedContextFiles(
+    project.path,
+    contextScope.explicitFiles,
+    contextScope.excludedPaths
+  );
+  const activeContext = contextScope.includeActiveFile ? input.store.activeContext?.getContext() : null;
+  const activeContextFiles = await readScopedContextFiles(
+    project.path,
+    activeContext?.project?.id === project.id && activeContext.activeFile ? [activeContext.activeFile] : [],
+    contextScope.excludedPaths
+  );
+  const changedPaths = contextScope.includeChangedFiles ? (await collectGitChangedPaths(project.path)).paths : [];
+  const changedContextFiles = await readScopedContextFiles(
+    project.path,
+    changedPaths.slice(0, 12),
+    contextScope.excludedPaths
+  );
   input.store.models.recordRoute({
     taskPattern: "ask",
     mode,
@@ -824,22 +903,25 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   const ftsLimit = input.input.depth === "deep" ? 12 : input.input.depth === "shallow" ? 4 : 8;
   const embeddingProfileId = input.store.models.getProfile("embedding-local")?.id ?? "embedding-local";
   const embeddingProfile = input.store.models.getProfile(embeddingProfileId);
-  const queryEmbedding = await input.runtime.embed(
-    embeddingProfileId,
-    {
-      input: selectedRewriteVariant,
-      modelName: embeddingProfile?.modelName ?? "embedding-local",
-    },
-    {
-      sessionId: session.id,
-      taskId: retrievalAgentRun.id,
-      retrievalQueryId: retrievalQuery.id,
-      recordCall: (call) => {
-        input.store.models.recordCall(call);
-      },
-    }
-  );
-  const queryVector = queryEmbedding.embeddings[0] ?? [];
+  const queryVector = contextScope.includeRetrieval
+    ? ((
+        await input.runtime.embed(
+          embeddingProfileId,
+          {
+            input: selectedRewriteVariant,
+            modelName: embeddingProfile?.modelName ?? "embedding-local",
+          },
+          {
+            sessionId: session.id,
+            taskId: retrievalAgentRun.id,
+            retrievalQueryId: retrievalQuery.id,
+            recordCall: (call) => {
+              input.store.models.recordCall(call);
+            },
+          }
+        )
+      ).embeddings[0] ?? [])
+    : [];
   const pipelineInput = buildRetrievalPipelineInput(input.store, {
     projectId: project.id,
     query: selectedRewriteVariant,
@@ -849,6 +931,26 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     ftsLimit,
     queryVector,
   });
+  if (!contextScope.includeRetrieval) {
+    pipelineInput.ftsChunks = [];
+    pipelineInput.vectorChunks = [];
+    pipelineInput.heuristicChunks = [];
+  } else if (contextScope.excludedPaths.length > 0) {
+    pipelineInput.ftsChunks = pipelineInput.ftsChunks.filter(
+      (chunk) => !isExcludedContextPath(chunk.path, contextScope.excludedPaths)
+    );
+    pipelineInput.vectorChunks = pipelineInput.vectorChunks.filter(
+      (chunk) => !isExcludedContextPath(chunk.path, contextScope.excludedPaths)
+    );
+    pipelineInput.heuristicChunks = pipelineInput.heuristicChunks.filter(
+      (chunk) => !isExcludedContextPath(chunk.path, contextScope.excludedPaths)
+    );
+  }
+  if (!contextScope.includeMemory) {
+    pipelineInput.memoryEntries = [];
+    pipelineInput.facts = [];
+  }
+  if (!contextScope.includeRules) pipelineInput.rules = [];
   const pipelineOutput = runRetrievalPipeline(pipelineInput);
   const ranked = pipelineOutput.ranked;
   const selected = pipelineOutput.selected;
@@ -880,11 +982,13 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
     }))
   );
-  const memoryEntries = input.store.memory.listEntries(project.id, undefined, 20);
-  const facts = input.store.memory.listFacts(project.id, 20);
-  const rules = input.store.memory.listProjectRules(project.id, 20);
+  const memoryEntries = contextScope.includeMemory ? input.store.memory.listEntries(project.id, undefined, 20) : [];
+  const facts = contextScope.includeMemory ? input.store.memory.listFacts(project.id, 20) : [];
+  const rules = contextScope.includeRules ? input.store.memory.listProjectRules(project.id, 20) : [];
   const skills = input.store.skills.listSkills("active", 20);
-  const previousMessages = input.store.conversation.listMessages(session.id).slice(-8);
+  const previousMessages = contextScope.includeConversation
+    ? input.store.conversation.listMessages(session.id).slice(-8)
+    : [];
   const contextAgentRun = input.store.agents.createRun({
     sessionId: session.id,
     projectId: project.id,
@@ -906,18 +1010,45 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
     sessionId: session.id,
     projectId: project.id,
     retrievalQueryId: retrievalQuery.id,
-    budgetTokens: 4096,
+    budgetTokens: contextScope.tokenBudget,
     ranked: selected,
     memoryEntries,
     facts,
     rules,
     previousMessages,
     skills,
-    extraCandidates:
-      clipboardPersistentMarker && clipboardSourceHash
+    extraCandidates: [
+      ...activeContextFiles.map((file) => ({
+        kind: "active_file" as const,
+        sourceId: file.path,
+        excerpt: file.content,
+        priority: 1.4,
+        pinned: true,
+        reason: "active file in the canonical desktop context",
+        reference: { path: file.path, active: true },
+      })),
+      ...explicitContextFiles.map((file) => ({
+        kind: "explicit_file" as const,
+        sourceId: file.path,
+        excerpt: file.content,
+        priority: 1.25,
+        pinned: true,
+        reason: "explicitly selected in the durable session context scope",
+        reference: { path: file.path, explicit: true },
+      })),
+      ...changedContextFiles.map((file) => ({
+        kind: "changed_file" as const,
+        sourceId: file.path,
+        excerpt: file.content,
+        priority: 1.1,
+        pinned: false,
+        reason: "changed file in the current Git worktree",
+        reference: { path: file.path, changed: true },
+      })),
+      ...(clipboardPersistentMarker && clipboardSourceHash
         ? [
             {
-              kind: "clipboard",
+              kind: "clipboard" as const,
               sourceId: `clipboard:${clipboardSourceHash}`,
               excerpt: clipboardPersistentMarker,
               priority: 1.5,
@@ -926,7 +1057,8 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
               reference: { untrusted: true, ephemeral: true, sourceHash: clipboardSourceHash },
             },
           ]
-        : [],
+        : []),
+    ],
   });
   const contextPack = input.store.context.recordPack({
     sessionId: session.id,
@@ -1346,7 +1478,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
       previousMessages,
       sessionId: session.id,
       retrievalQueryId: retrievalQuery.id,
-      tokenBudget: 4096,
+      tokenBudget: contextScope.tokenBudget,
     })
   );
   const compiledAnswerForRecord =
@@ -1375,7 +1507,13 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   });
   let answer: string;
   let answerCallId: string | null = null;
-  if (selected.length === 0 && !clipboardForModel) {
+  if (
+    selected.length === 0 &&
+    activeContextFiles.length === 0 &&
+    explicitContextFiles.length === 0 &&
+    changedContextFiles.length === 0 &&
+    !clipboardForModel
+  ) {
     answer = buildAskFallbackAnswer(project.name, input.input.question);
     input.store.appendEvent(
       createEvent(

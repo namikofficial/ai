@@ -260,8 +260,13 @@ rejects cross-project reuse. The inspectable compiler includes active/changed fi
 commit context, failed checks, active runs, handoffs, memory and retrieval with deduplication, token budgeting and
 whole-envelope secret redaction. Explicit results can be saved as project memory. See `docs/SHARED_SESSIONS.md`.
 
+Session context scope is durable in SQLite and enforced by both preview and Ask for retrieval, memory, rules,
+conversation, explicit/excluded paths and token ceilings. Clipboard evidence uses redacted preview plus exact-hash,
+one-use consent and remains ephemeral at durable model/session boundaries. Browser and CLI edit scope; MCP reads it
+without receiving a clipboard self-approval capability.
+
 ## Next coherent slice
 
-Add durable per-session retrieval-scope fields and richer explicit-file/clipboard consent, then continue to Phase 9
-runtime supervision. Legacy Python RAG session data remains untouched until the Phase 10 dry-run importer and parity
-report exist.
+Finish adversarial context evaluations, then complete the live desktop and Python RAG parity gates in
+`docs/CONTINUATION_PLAN.md`. Legacy Python RAG data remains untouched until real-database parity and rollback evidence
+pass.

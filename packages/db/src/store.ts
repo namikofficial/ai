@@ -228,6 +228,14 @@ function rowToSession(row: Row): SessionRecord {
   };
 }
 
+function parseJsonValue(value: unknown): unknown {
+  try {
+    return JSON.parse(asString(value));
+  } catch {
+    return null;
+  }
+}
+
 function rowToSessionContextScope(row: Row): SessionContextScope {
   return {
     sessionId: asString(row.session_id),
@@ -238,8 +246,8 @@ function rowToSessionContextScope(row: Row): SessionContextScope {
     includeMemory: toNumber(row.include_memory) === 1,
     includeRetrieval: toNumber(row.include_retrieval) === 1,
     includeRules: toNumber(row.include_rules) === 1,
-    explicitFiles: safeParseStringArray(JSON.parse(asString(row.explicit_files_json))),
-    excludedPaths: safeParseStringArray(JSON.parse(asString(row.excluded_paths_json))),
+    explicitFiles: safeParseStringArray(parseJsonValue(row.explicit_files_json)),
+    excludedPaths: safeParseStringArray(parseJsonValue(row.excluded_paths_json)),
     tokenBudget: toNumber(row.token_budget),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),

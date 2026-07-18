@@ -60,6 +60,10 @@ function printUsage(): void {
   ai action run <workflow-id> [--project <project-id>] [--session <session-id>] [--task <task-id>] [--execution-mode terminal|tmux]
   ai action show <execution-id>
   ai action artifacts <execution-id>
+  ai action diff <execution-id>
+  ai action cleanup-request <execution-id>
+  ai action cleanup-approve <execution-id> <cleanup-id> [--notes <text>]
+  ai action cleanup-reject <execution-id> <cleanup-id> [--notes <text>]
   ai action approve <execution-id> [--notes <text>]
   ai action reject <execution-id> [--notes <text>]
   ai action cancel <execution-id>
@@ -75,6 +79,8 @@ function printUsage(): void {
   ai sessions show <session-id>
   ai sessions append <session-id> "<message>" [--role user|assistant|agent]
   ai sessions context <session-id> [--query <query>] [--token-budget <tokens>]
+  ai sessions scope <session-id>
+  ai sessions scope <session-id> --set [--active-file true|false] [--changed-files true|false] [--conversation true|false] [--memory true|false] [--retrieval true|false] [--rules true|false] [--files <comma-list>] [--exclude <comma-list>] [--token-budget <tokens>]
   ai sessions resume <session-id>
   ai sessions close <session-id> [--cancelled] [--summary <summary>]
   ai sessions memory <session-id> "<outcome>" [--title <title>] [--tags <comma-list>]
@@ -743,7 +749,21 @@ async function run(): Promise<void> {
       return;
     }
     const executionId = positionals.shift();
-    if (["show", "artifacts", "approve", "reject", "cancel", "recover"].includes(subcommand ?? "") && !executionId) {
+    if (
+      [
+        "show",
+        "artifacts",
+        "diff",
+        "cleanup-request",
+        "cleanup-approve",
+        "cleanup-reject",
+        "approve",
+        "reject",
+        "cancel",
+        "recover",
+      ].includes(subcommand ?? "") &&
+      !executionId
+    ) {
       throw new Error(`action ${subcommand} requires an execution id`);
     }
     if (subcommand === "show") {
@@ -752,6 +772,24 @@ async function run(): Promise<void> {
     }
     if (subcommand === "artifacts") {
       printJson(await client.getActionExecutionArtifacts(executionId as string));
+      return;
+    }
+    if (subcommand === "diff") {
+      printJson(await client.getActionExecutionArtifactDiff(executionId as string));
+      return;
+    }
+    if (subcommand === "cleanup-request") {
+      printJson(await client.requestActionArtifactCleanup(executionId as string));
+      return;
+    }
+    if (subcommand === "cleanup-approve" || subcommand === "cleanup-reject") {
+      const cleanupId = positionals.shift();
+      if (!cleanupId) throw new Error(`action ${subcommand} requires a cleanup id`);
+      printJson(
+        subcommand === "cleanup-approve"
+          ? await client.approveActionArtifactCleanup(executionId as string, cleanupId, options.notes)
+          : await client.rejectActionArtifactCleanup(executionId as string, cleanupId, options.notes)
+      );
       return;
     }
     if (subcommand === "approve") {
@@ -772,7 +810,9 @@ async function run(): Promise<void> {
       printJson(await client.recoverActionExecution(executionId as string, workflowId, "cli"));
       return;
     }
-    throw new Error("action requires list, run, show, artifacts, approve, reject, cancel, or recover");
+    throw new Error(
+      "action requires list, run, show, artifacts, diff, cleanup-request, cleanup-approve, cleanup-reject, approve, reject, cancel, or recover"
+    );
   }
 
   if (command === "config") {
@@ -946,6 +986,46 @@ async function run(): Promise<void> {
         await client.getSessionContext(sessionId, {
           query: options.query,
           tokenBudget: options["token-budget"] ? Number(options["token-budget"]) : undefined,
+        })
+      );
+      return;
+    }
+    if (subcommand === "scope") {
+      if (options.set !== "true") {
+        printJson(await client.getSessionContextScope(sessionId));
+        return;
+      }
+      const current = (await client.getSessionContextScope(sessionId)).data;
+      const booleanOption = (name: string, fallback: boolean): boolean => {
+        const value = options[name];
+        if (value === undefined) return fallback;
+        if (value === "true") return true;
+        if (value === "false") return false;
+        throw new Error(`--${name} must be true or false`);
+      };
+      printJson(
+        await client.updateSessionContextScope(sessionId, {
+          includeActiveFile: booleanOption("active-file", current.includeActiveFile),
+          includeChangedFiles: booleanOption("changed-files", current.includeChangedFiles),
+          includeConversation: booleanOption("conversation", current.includeConversation),
+          includeMemory: booleanOption("memory", current.includeMemory),
+          includeRetrieval: booleanOption("retrieval", current.includeRetrieval),
+          includeRules: booleanOption("rules", current.includeRules),
+          explicitFiles:
+            options.files === undefined
+              ? current.explicitFiles
+              : options.files
+                  .split(",")
+                  .map((entry) => entry.trim())
+                  .filter(Boolean),
+          excludedPaths:
+            options.exclude === undefined
+              ? current.excludedPaths
+              : options.exclude
+                  .split(",")
+                  .map((entry) => entry.trim())
+                  .filter(Boolean),
+          tokenBudget: options["token-budget"] ? Number(options["token-budget"]) : current.tokenBudget,
         })
       );
       return;

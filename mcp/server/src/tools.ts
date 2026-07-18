@@ -192,6 +192,16 @@ function toolDescriptors(): ToolDescriptor[] {
       },
     },
     {
+      name: "ai_get_session_context_scope",
+      description:
+        "Read the canonical per-session context policy enforced by preview and Ask, including source flags, paths, and token budget (read-only).",
+      inputSchema: {
+        type: "object",
+        properties: { sessionId: { type: "string" } },
+        required: ["sessionId"],
+      },
+    },
+    {
       name: "ai_resume_session",
       description: "Resume a canonical shared session while preserving its project scope (mutating).",
       inputSchema: {
@@ -746,6 +756,14 @@ async function handleTool(
       });
       if (!preview) throw new Error(`Unknown session: ${sessionId}`);
       return preview;
+    }
+    case "ai_get_session_context_scope": {
+      const sessionId = asString(args.sessionId);
+      const session = store.getSession(sessionId);
+      if (!session) throw new Error(`Unknown session: ${sessionId}`);
+      const scope = store.getSessionContextScope(sessionId);
+      if (!scope) throw new Error(`Session context scope unavailable: ${sessionId}`);
+      return scope;
     }
     case "ai_resume_session": {
       const sessionId = asString(args.sessionId);

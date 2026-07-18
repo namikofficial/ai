@@ -17,7 +17,10 @@ import {
   runDevWorkflow,
 } from "../../../../../packages/dev-agent/src/index.ts";
 import {
+  cleanupRetainedWorkspace,
+  collectRetainedWorkspaceDiff,
   createTaskWorkspace,
+  inspectRetainedWorkspace,
   isSecretFile,
   readProjectChecksConfig,
   resolveManifestWorkflowEnvironment,
@@ -95,6 +98,45 @@ export function registerWorkflowRoutes(
       arguments: workflow.spec.args,
       workingDirectory: workflow.cwd,
     };
+  }
+
+  async function artifactReviewContext(record: NonNullable<ReturnType<Store["workflows"]["get"]>>) {
+    if (
+      !record.execution.finishedAt ||
+      !["completed", "failed", "blocked", "cancelled"].includes(record.execution.state)
+    ) {
+      throw new Error("retained artifacts can be reviewed only after workflow execution is terminal");
+    }
+    const project = deps.store.getProject(record.execution.projectId);
+    const workspacePath = record.execution.artifacts[0];
+    if (!project || !workspacePath || !record.command.workingDirectory) {
+      throw new Error("workflow execution has no retained isolated workspace");
+    }
+    const inspection = await inspectRetainedWorkspace({
+      executionId: record.execution.id,
+      runtimeDir: deps.config.runtimeDir,
+      projectRoot: project.path,
+      workspacePath,
+      workingDirectory: record.command.workingDirectory,
+    });
+    const diff = await collectRetainedWorkspaceDiff(inspection);
+    const targetHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          executionId: record.execution.id,
+          projectId: record.execution.projectId,
+          workspacePath: inspection.workspace.path,
+          workingDirectory: record.command.workingDirectory,
+          artifacts: [...record.execution.artifacts].sort(),
+          diffHash: createHash("sha256").update(diff.diff).digest("hex"),
+          filesChanged: diff.filesChanged,
+          filesAdded: diff.filesAdded,
+          filesRemoved: diff.filesRemoved,
+          truncated: diff.truncated,
+        })
+      )
+      .digest("hex");
+    return { inspection, diff, targetHash };
   }
 
   function createWorkflowExecution(input: {
@@ -1151,6 +1193,7 @@ export function registerWorkflowRoutes(
         recoveryOptions: execution.execution.recoveryWorkflowIds,
         recoveries: deps.store.workflows.listRecoveries(executionId),
         approval: deps.store.workflows.getApprovalForExecution(executionId),
+        artifactCleanup: deps.store.workflows.getLatestArtifactCleanup(executionId),
         launch: publicLaunch(deps.store.workflows.getLaunchForExecution(executionId)),
       })
     );
@@ -1201,6 +1244,219 @@ export function registerWorkflowRoutes(
         })
       );
       sendJson(res, json("ok", { executionId, artifacts }));
+    })
+  );
+
+  router.get(
+    "/actions/executions/:executionId/artifacts/diff",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const record = deps.store.workflows.get(executionId);
+      if (!record) {
+        sendJson(res, json("error", undefined, { message: "workflow execution not found" }), 404);
+        return;
+      }
+      try {
+        const review = await artifactReviewContext(record);
+        sendJson(
+          res,
+          json("ok", {
+            executionId,
+            workspaceAvailable: true,
+            filesChanged: review.diff.filesChanged,
+            filesAdded: review.diff.filesAdded,
+            filesRemoved: review.diff.filesRemoved,
+            truncated: review.diff.truncated,
+            diff: review.diff.diff,
+            targetHash: review.targetHash,
+          })
+        );
+      } catch (error) {
+        sendJson(
+          res,
+          json("error", undefined, { message: error instanceof Error ? error.message : String(error) }),
+          409
+        );
+      }
+    })
+  );
+
+  router.post(
+    "/actions/executions/:executionId/artifacts/cleanup/request",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const record = deps.store.workflows.get(executionId);
+      if (!record) {
+        sendJson(res, json("error", undefined, { message: "workflow execution not found" }), 404);
+        return;
+      }
+      let review: Awaited<ReturnType<typeof artifactReviewContext>>;
+      try {
+        review = await artifactReviewContext(record);
+      } catch (error) {
+        sendJson(
+          res,
+          json("error", undefined, { message: error instanceof Error ? error.message : String(error) }),
+          409
+        );
+        return;
+      }
+      const cleanup = deps.store.workflows.requestArtifactCleanup({
+        executionId,
+        projectId: record.execution.projectId,
+        targetPath: review.inspection.workspace.path,
+        targetHash: review.targetHash,
+      });
+      if (cleanup.status === "pending") {
+        const event = createEvent(
+          "approval.required",
+          { approvalId: cleanup.id, executionId, kind: "workflow_artifact_cleanup" },
+          {
+            projectId: record.execution.projectId,
+            sessionId: record.execution.sessionId,
+            taskId: record.execution.taskId,
+            agent: "workflow-artifact-cleanup",
+            sourceService: "workbench-api",
+            severity: "warning",
+            summary: `Cleanup approval requested for retained workspace from ${record.execution.workflowId}`,
+            correlationId: executionId,
+          }
+        );
+        deps.store.appendEvent(event);
+        deps.publish(event);
+      }
+      sendJson(
+        res,
+        json("ok", {
+          cleanup,
+          review: {
+            filesChanged: review.diff.filesChanged,
+            filesAdded: review.diff.filesAdded,
+            filesRemoved: review.diff.filesRemoved,
+            truncated: review.diff.truncated,
+          },
+        }),
+        cleanup.status === "pending" ? 202 : 200
+      );
+    })
+  );
+
+  router.post(
+    "/actions/executions/:executionId/artifacts/cleanup/approve",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const record = deps.store.workflows.get(executionId);
+      if (!record) {
+        sendJson(res, json("error", undefined, { message: "workflow execution not found" }), 404);
+        return;
+      }
+      const body = (await readJsonBody(req)) as { cleanupId?: unknown; decidedBy?: unknown; notes?: unknown };
+      const cleanupId = typeof body.cleanupId === "string" ? body.cleanupId : "";
+      const cleanup = deps.store.workflows.getLatestArtifactCleanup(executionId);
+      if (!cleanup || cleanup.id !== cleanupId || cleanup.projectId !== record.execution.projectId) {
+        sendJson(res, json("error", undefined, { message: "artifact cleanup approval does not match execution" }), 409);
+        return;
+      }
+      if (cleanup.status !== "pending") {
+        sendJson(res, json("error", undefined, { message: "artifact cleanup approval is not pending" }), 409);
+        return;
+      }
+      const decidedBy = typeof body.decidedBy === "string" && body.decidedBy.trim() ? body.decidedBy.trim() : "api";
+      if (Date.parse(cleanup.expiresAt) <= Date.now()) {
+        deps.store.workflows.transitionArtifactCleanup({
+          id: cleanup.id,
+          expectedStatus: "pending",
+          status: "expired",
+          decidedBy,
+          notes: "cleanup approval expired",
+        });
+        sendJson(res, json("error", undefined, { message: "artifact cleanup approval expired" }), 409);
+        return;
+      }
+      let review: Awaited<ReturnType<typeof artifactReviewContext>>;
+      try {
+        review = await artifactReviewContext(record);
+      } catch (error) {
+        sendJson(
+          res,
+          json("error", undefined, { message: error instanceof Error ? error.message : String(error) }),
+          409
+        );
+        return;
+      }
+      if (review.targetHash !== cleanup.targetHash || review.inspection.workspace.path !== cleanup.targetPath) {
+        deps.store.workflows.transitionArtifactCleanup({
+          id: cleanup.id,
+          expectedStatus: "pending",
+          status: "expired",
+          decidedBy,
+          notes: "retained workspace changed after cleanup review",
+        });
+        sendJson(res, json("error", undefined, { message: "artifact cleanup approval is stale" }), 409);
+        return;
+      }
+      deps.store.workflows.transitionArtifactCleanup({
+        id: cleanup.id,
+        expectedStatus: "pending",
+        status: "running",
+        decidedBy,
+        notes: typeof body.notes === "string" ? body.notes : null,
+      });
+      try {
+        await cleanupRetainedWorkspace(review.inspection);
+        const completedAt = new Date().toISOString();
+        const completed = deps.store.workflows.transitionArtifactCleanup({
+          id: cleanup.id,
+          expectedStatus: "running",
+          status: "completed",
+          completedAt,
+        });
+        const event = createEvent(
+          "workflow.artifacts_cleaned",
+          { cleanupId: completed.id, executionId, targetHash: completed.targetHash },
+          {
+            projectId: record.execution.projectId,
+            sessionId: record.execution.sessionId,
+            taskId: record.execution.taskId,
+            agent: "workflow-artifact-cleanup",
+            sourceService: "workbench-api",
+            summary: `Retained workspace for ${record.execution.workflowId} cleaned`,
+            correlationId: executionId,
+          }
+        );
+        deps.store.appendEvent(event);
+        deps.publish(event);
+        sendJson(res, json("ok", { cleanup: completed }));
+      } catch (error) {
+        const failed = deps.store.workflows.transitionArtifactCleanup({
+          id: cleanup.id,
+          expectedStatus: "running",
+          status: "failed",
+          errorSummary: error instanceof Error ? error.message : String(error),
+        });
+        sendJson(res, json("error", { cleanup: failed }, { message: "retained workspace cleanup failed" }), 500);
+      }
+    })
+  );
+
+  router.post(
+    "/actions/executions/:executionId/artifacts/cleanup/reject",
+    asyncRoute(async (req, res) => {
+      const executionId = decodeURIComponent(String(req.params.executionId ?? ""));
+      const body = (await readJsonBody(req)) as { cleanupId?: unknown; decidedBy?: unknown; notes?: unknown };
+      const cleanup = deps.store.workflows.getLatestArtifactCleanup(executionId);
+      if (!cleanup || cleanup.id !== body.cleanupId || cleanup.status !== "pending") {
+        sendJson(res, json("error", undefined, { message: "artifact cleanup approval is not pending" }), 409);
+        return;
+      }
+      const rejected = deps.store.workflows.transitionArtifactCleanup({
+        id: cleanup.id,
+        expectedStatus: "pending",
+        status: "rejected",
+        decidedBy: typeof body.decidedBy === "string" && body.decidedBy.trim() ? body.decidedBy.trim() : "api",
+        notes: typeof body.notes === "string" ? body.notes : null,
+      });
+      sendJson(res, json("ok", { cleanup: rejected }));
     })
   );
 
@@ -2346,7 +2602,17 @@ export function registerWorkflowRoutes(
         );
         return;
       }
-      const result = await deps.store.ask(normalized);
+      let result: Awaited<ReturnType<typeof deps.store.ask>>;
+      try {
+        result = await deps.store.ask(normalized);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.startsWith("clipboard context")) {
+          sendJson(res, json("error", undefined, { message }), 409);
+          return;
+        }
+        throw error;
+      }
       deps.store.listEvents(result.sessionId).forEach(deps.publish);
       if (isHtmlRequest(req)) {
         sendHtml(res, renderAskPage(deps.store, { result, question: normalized.question }));
