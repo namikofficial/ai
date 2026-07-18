@@ -787,6 +787,22 @@ async function executeQueuedWorkflowPlan(input: {
       errorCode: stepState === "completed" ? null : stepState === "cancelled" ? "command_cancelled" : "command_failed",
       errorSummary: stepState === "completed" ? null : (result.blockedReason ?? result.stderr.slice(0, 1_000)),
     });
+    if (runnable.command.category === "check") {
+      store.createCheckRun({
+        name: `${plan.definition.id}:${entry.step.id}`,
+        projectId: execution.projectId,
+        status: stepState === "completed" ? "completed" : stepState === "blocked" ? "blocked" : "failed",
+        command: result.command,
+        output: result.stdout || null,
+        errorOutput: result.stderr || result.blockedReason,
+        exitCode: result.exitCode,
+        durationMs: stepDuration,
+        parsedErrors: result.parsedErrors,
+        affectedFiles: result.affectedFiles,
+        startedAt: result.startedAt,
+        finishedAt: result.finishedAt,
+      });
+    }
     execution = {
       ...execution,
       updatedAt: result.finishedAt,
