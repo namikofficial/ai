@@ -62,6 +62,19 @@ export function registerWorkflowRoutes(
 ) {
   const activeWorkflowControllers = new Map<string, AbortController>();
 
+  function withCanonicalWorkflowDefinitions(manifest: NonNullable<ReturnType<Store["projectRegistry"]["getManifest"]>>) {
+    const definitions = deps.store.workflows.listDefinitions(manifest.id);
+    if (definitions.length === 0) return manifest;
+    return {
+      ...manifest,
+      commands: Object.fromEntries(
+        definitions
+          .filter((definition) => definition.enabled && definition.command !== null && definition.steps.length === 0)
+          .map((definition) => [definition.id, definition.command as NonNullable<typeof definition.command>])
+      ),
+    };
+  }
+
   function commandRecord(workflow: { spec: { binary: string; args: string[] }; cwd: string }): {
     executable: string;
     arguments: string[];
@@ -554,7 +567,7 @@ export function registerWorkflowRoutes(
       sendJson(res, json("error", undefined, { message: `project ${projectId} has no approved manifest` }), 404);
       return;
     }
-    sendJson(res, json("ok", recommendedActionsFromManifest(manifest)));
+    sendJson(res, json("ok", recommendedActionsFromManifest(withCanonicalWorkflowDefinitions(manifest))));
   });
 
   router.get("/actions/executions/:executionId", (req, res) => {
@@ -602,10 +615,14 @@ export function registerWorkflowRoutes(
         sendJson(res, json("error", undefined, { message: "canonical project or approved manifest changed" }), 409);
         return;
       }
-      const prepared = await prepareManifestWorkflow(manifest, record.execution.workflowId, {
+      const prepared = await prepareManifestWorkflow(
+        withCanonicalWorkflowDefinitions(manifest),
+        record.execution.workflowId,
+        {
         allowMutating: true,
         allowInteractive: true,
-      });
+        }
+      );
       if (!prepared.ok) {
         sendJson(res, json("error", undefined, { message: prepared.rejection.summary }), 409);
         return;
@@ -1066,7 +1083,7 @@ export function registerWorkflowRoutes(
         sendJson(res, json("error", undefined, { message: "executionMode must be terminal or tmux" }), 400);
         return;
       }
-      const prepared = await prepareManifestWorkflow(manifest, workflowId, {
+      const prepared = await prepareManifestWorkflow(withCanonicalWorkflowDefinitions(manifest), workflowId, {
         allowMutating: true,
         allowInteractive: true,
       });

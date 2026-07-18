@@ -618,7 +618,24 @@ export async function processNextJob(
       if (!project || !manifest || manifest.path !== project.path) {
         throw new Error("canonical project or approved manifest changed before background execution");
       }
-      const prepared = await prepareManifestWorkflow(manifest, record.execution.workflowId, {
+      const definitions = store.workflows.listDefinitions(manifest.id);
+      const canonicalManifest =
+        definitions.length === 0
+          ? manifest
+          : {
+              ...manifest,
+              commands: Object.fromEntries(
+                definitions
+                  .filter(
+                    (definition) => definition.enabled && definition.command !== null && definition.steps.length === 0
+                  )
+                  .map((definition) => [
+                    definition.id,
+                    definition.command as NonNullable<typeof definition.command>,
+                  ])
+              ),
+            };
+      const prepared = await prepareManifestWorkflow(canonicalManifest, record.execution.workflowId, {
         allowMutating: true,
         allowInteractive: true,
       });

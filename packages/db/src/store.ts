@@ -368,6 +368,9 @@ export function createStore(db: DatabaseSync) {
   const projectRegistryRepo = createProjectRegistryRepo(db, (manifest) => {
     workflowsRepo.syncManifestDefinitions(manifest);
   });
+  for (const manifest of projectRegistryRepo.listManifests()) {
+    workflowsRepo.syncManifestDefinitions(manifest);
+  }
   const devRunsRepo = createDevRunsRepo(db);
   const executionRepo = createExecutionRepo(db);
   const embeddingCacheRepo = createEmbeddingCacheRepo(db);
