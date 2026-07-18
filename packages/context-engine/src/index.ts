@@ -46,6 +46,7 @@ export interface BuildContextPackInput {
   gitState?: { branch: string; dirty: boolean; recentFiles: string[] } | null;
   freshFactTtlDays?: number;
   systemInstructions?: string[];
+  extraCandidates?: ContextCandidate[];
 }
 
 export interface BuildContextPackOutput {
@@ -155,6 +156,14 @@ export function buildContextPack(input: BuildContextPackInput): BuildContextPack
       pinned: true,
       reason: "system",
     });
+  }
+
+  for (const candidate of input.extraCandidates ?? []) {
+    const redacted = redactSecrets(candidate.excerpt);
+    if (redacted.redactions.length > 0) {
+      redactionNotes.push(`${candidate.kind}:${candidate.sourceId ?? "anonymous"} redacted secret(s)`);
+    }
+    candidates.push({ ...candidate, excerpt: redacted.text });
   }
 
   for (const rule of input.rules ?? []) {

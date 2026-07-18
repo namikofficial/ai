@@ -120,6 +120,8 @@ export interface ModelInvokeOptions {
   retrievalQueryId?: string | null;
   recordCall?: ModelCallRecordedHook;
   fallbackProfileId?: string | null;
+  recordedRequest?: ModelInvokeRequest;
+  sensitive?: boolean;
 }
 
 export interface ModelRuntime {
@@ -158,6 +160,15 @@ function redactMetadata(metadata: Record<string, unknown> | undefined): Record<s
   } catch {
     return { redacted: true };
   }
+}
+
+function requestForRecord(request: ModelInvokeRequest, options: ModelInvokeOptions | undefined): ModelInvokeRequest {
+  const recorded = options?.recordedRequest ?? request;
+  return { ...recorded, metadata: redactMetadata(recorded.metadata) ?? undefined };
+}
+
+function responseForRecord(response: Record<string, unknown>, options: ModelInvokeOptions | undefined): Record<string, unknown> {
+  return options?.sensitive ? { sensitive: true, contentOmitted: true } : response;
 }
 
 function readModelTimeoutMs(): number {
@@ -346,8 +357,8 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
               completionTokens: 0,
               latencyMs: 0,
               status: "blocked",
-              request: { ...request, metadata: redactMetadata(request.metadata) },
-              response: { blocked: true, reason: guard.reason },
+              request: requestForRecord(request, options),
+              response: responseForRecord({ blocked: true, reason: guard.reason }, options),
               error: guard.reason,
               sessionId: options?.sessionId,
               taskId: options?.taskId,
@@ -379,8 +390,8 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
             completionTokens: result.completionTokens,
             latencyMs,
             status: "ok",
-            request: { ...request, metadata: redactMetadata(request.metadata) },
-            response: { text: result.text.slice(0, 1000), usage: result.usage },
+            request: requestForRecord(request, options),
+            response: responseForRecord({ text: result.text.slice(0, 1000), usage: result.usage }, options),
             sessionId: options?.sessionId,
             taskId: options?.taskId,
             retrievalQueryId: options?.retrievalQueryId,
@@ -413,12 +424,12 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
                 completionTokens: fallbackResult.completionTokens,
                 latencyMs: Date.now() - fallbackStarted,
                 status: "fallback",
-                request: { ...request, metadata: redactMetadata(request.metadata) },
-                response: {
+                request: requestForRecord(request, options),
+                response: responseForRecord({
                   text: fallbackResult.text.slice(0, 1000),
                   usage: fallbackResult.usage,
                   fallbackFrom: message,
-                },
+                }, options),
                 error: message,
                 sessionId: options?.sessionId,
                 taskId: options?.taskId,
@@ -444,8 +455,8 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
               completionTokens: 0,
               latencyMs,
               status: "failed",
-              request: { ...request, metadata: redactMetadata(request.metadata) },
-              response: { error: message },
+              request: requestForRecord(request, options),
+              response: responseForRecord({ error: message }, options),
               error: message,
               sessionId: options?.sessionId,
               taskId: options?.taskId,
@@ -463,8 +474,8 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
             completionTokens: 0,
             latencyMs,
             status: "failed",
-            request: { ...request, metadata: redactMetadata(request.metadata) },
-            response: { error: message },
+            request: requestForRecord(request, options),
+            response: responseForRecord({ error: message }, options),
             error: message,
             sessionId: options?.sessionId,
             taskId: options?.taskId,
@@ -487,12 +498,12 @@ export function createModelRuntime(input: ModelRuntimeInput): ModelRuntime {
               completionTokens: fallbackResult.completionTokens,
               latencyMs: Date.now() - fallbackStarted,
               status: "fallback",
-              request: { ...request, metadata: redactMetadata(request.metadata) },
-              response: {
+              request: requestForRecord(request, options),
+              response: responseForRecord({
                 text: fallbackResult.text.slice(0, 1000),
                 usage: fallbackResult.usage,
                 fallbackFrom: message,
-              },
+              }, options),
               error: message,
               sessionId: options?.sessionId,
               taskId: options?.taskId,

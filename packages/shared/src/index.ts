@@ -106,6 +106,12 @@ export interface AskRequest {
   sessionId?: string | null;
   mode?: AskMode;
   depth?: "shallow" | "standard" | "deep";
+  contextInput?: {
+    clipboard?: {
+      content: string;
+      consentId: string;
+    };
+  };
 }
 
 export interface AskResponse {
@@ -657,12 +663,28 @@ export function parseProjectCreateInput(value: unknown): ProjectCreateInput {
 
 export function parseAskRequest(value: unknown): AskRequest {
   const input = requireObject(value, "ask request");
+  const rawContextInput = input.contextInput === undefined ? null : requireObject(input.contextInput, "contextInput");
+  const rawClipboard = rawContextInput?.clipboard === undefined
+    ? null
+    : requireObject(rawContextInput.clipboard, "contextInput.clipboard");
+  const clipboardContent = rawClipboard ? requireString(rawClipboard.content, "contextInput.clipboard.content") : null;
+  if (clipboardContent && clipboardContent.length > 100_000) {
+    throw new Error("contextInput.clipboard.content exceeds 100000 characters");
+  }
   return {
     project: requireString(input.project, "project"),
     question: requireString(input.question, "question"),
     sessionId: optionalString(input.sessionId),
     mode: input.mode === "local" || input.mode === "cloud" || input.mode === "hybrid" ? input.mode : undefined,
     depth: input.depth === "shallow" || input.depth === "standard" || input.depth === "deep" ? input.depth : undefined,
+    contextInput: rawClipboard
+      ? {
+          clipboard: {
+            content: clipboardContent as string,
+            consentId: requireString(rawClipboard.consentId, "contextInput.clipboard.consentId"),
+          },
+        }
+      : undefined,
   };
 }
 
@@ -1092,7 +1114,9 @@ export type ContextPackItemKind =
   | "system"
   | "git_state"
   | "check_failure"
-  | "skill";
+  | "skill"
+  | "explicit_file"
+  | "clipboard";
 
 export interface ContextPackItemRecord {
   id: string;
