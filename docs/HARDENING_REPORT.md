@@ -75,3 +75,21 @@ The following cannot be claimed from a headless/inactive Hyprland observer and r
 Use the procedure in [RUNTIME_SUPERVISION.md](./RUNTIME_SUPERVISION.md) during the next active graphical session,
 attach the raw JSON and timestamps, and record repository size and revision. Do not mark the complete Phase 11
 performance gate finished until those desktop measurements pass.
+
+## Live graphical-session preflight — 2026-07-18
+
+A non-disruptive preflight was run from an active Hyprland session at approximately 21:02 Asia/Kolkata. The focused
+window was a Kitty terminal in workspace 1. No focus was changed and no project workflow was started.
+
+- `HYPRLAND_INSTANCE_SIGNATURE` and `WAYLAND_DISPLAY=wayland-1` were present, and the Hyprland process was alive.
+- `ai-workbench.target`, `ai-workbench-api.service`, and `ai-workbench-desktop-observer.service` were not installed in
+  the active user manager.
+- No Workbench API or desktop observer process was running, and no desktop-observation cache existed.
+- The old project-status cache remained schema-valid and readable offline (2,788 bytes; 4 ms median across ten
+  process-level `jq` reads), but it had no selected project and was explicitly stale/unknown.
+- `AI_PERFORMANCE_SAMPLES=10 ./scripts/measure-runtime.sh` correctly reported `api.ready=false`, null API/status
+  latency, no process PID/RSS, and a valid cache without malformed output.
+
+This is positive evidence for offline read-only fallback, not evidence for focus correlation or latency. The live
+acceptance sequence still requires explicit service installation/startup and deliberate editor/terminal/tmux focus
+changes; those external-state steps were not performed automatically in an active user session.

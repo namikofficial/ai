@@ -75,6 +75,10 @@ editor, terminal, correlated tmux, transient windows, pinning, Rofi actions, scr
 links, failed checks, Ask→Plan→Dev→Review→Memory, MCP/OpenCode resume, and Workbench/model/Qdrant/Docker offline
 states. Record raw evidence in `HARDENING_REPORT.md`.
 
+The 2026-07-18 live preflight found an active Hyprland session but no installed Workbench/observer user units and no
+selected project. It verified schema-valid stale cache fallback only. Focus correlation and latency remain unproven;
+see `HARDENING_REPORT.md` before running the deliberate service-install and focus-switch rehearsal.
+
 ## Priority 4 — Python compatibility parity decisions
 
 Exercise the importer against a real Python RAG database when one exists. Decide and test historical
