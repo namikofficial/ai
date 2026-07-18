@@ -1388,7 +1388,10 @@ test("interactive workflows use token-bound terminal and tmux launch handoffs", 
 
 test("isolated workflows retain review artifacts without mutating the canonical project", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-workflow-isolated-"));
+  const outside = await mkdtemp(join(tmpdir(), "ai-workflow-artifact-redaction-"));
+  const outsideArtifact = join(outside, "private-result.txt");
   await writeFile(join(workspace, "app.py"), "value = 1\n");
+  await writeFile(outsideArtifact, "must not expose this path\n");
   const store = createStore(initializeStore(join(workspace, "workbench.db")));
   const project = store.createProject({
     path: workspace,
@@ -1481,8 +1484,35 @@ test("isolated workflows retain review artifacts without mutating the canonical 
       ["directory", "directory"]
     );
     assert.ok(artifacts.every((artifact) => artifact.path?.startsWith(join(workspace, "runtime"))));
+
+    const persisted = store.workflows.get(executionId);
+    assert.ok(persisted);
+    store.workflows.save({
+      ...persisted,
+      execution: {
+        ...persisted.execution,
+        artifacts: [...persisted.execution.artifacts, outsideArtifact],
+      },
+    });
+    const redactedResponse = await handle.inject({
+      method: "GET",
+      url: `/actions/executions/${executionId}/artifacts`,
+      headers: { accept: "application/json" },
+    });
+    const redacted = JSON.parse(redactedResponse.body).data.artifacts.at(-1) as {
+      path: string | null;
+      exists: boolean;
+      safe: boolean;
+      reason: string;
+    };
+    assert.deepEqual(
+      { path: redacted.path, exists: redacted.exists, safe: redacted.safe },
+      { path: null, exists: true, safe: false }
+    );
+    assert.match(redacted.reason, /outside approved roots/);
   } finally {
     await handle.close();
     await rm(workspace, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });
