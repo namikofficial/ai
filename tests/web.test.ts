@@ -136,13 +136,18 @@ test("defines the Vite React shell and router surface", async () => {
 test("project deep links synchronize canonical selection and flow into work surfaces", async () => {
   const appSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/App.tsx", "utf8");
   const pagesSource = await readFile("/home/namik/Documents/code/ai/apps/web/src/pages.tsx", "utf8");
-  for (const suffix of ["work", "ask", "planner", "checks", "dev"]) {
+  for (const suffix of ["work", "ask", "planner", "handoff", "checks", "dev", "retrieval"]) {
     assert.ok(appSource.includes(`/projects/:projectId/${suffix}`), `missing project deep link for ${suffix}`);
   }
   assert.match(appSource, /api\.selectProject\(routeProjectId, null, "workbench_route"\)/);
   assert.match(appSource, /api\.getRegistry\(\)/);
   assert.match(appSource, /className="context-strip"/);
   assert.match(appSource, /path="\/runs\/:runId" element=\{<RunReviewPage \/>\}/);
+  assert.match(appSource, /path="\/handoffs\/:handoffId" element=\{<HandoffDetailPage \/>\}/);
+  assert.match(appSource, /path="\/retrieval\/explanations\/:queryId" element=\{<RetrievalQueryDetailPage \/>\}/);
+  assert.match(pagesSource, /Why these sources\?/);
+  assert.match(pagesSource, /api\.explainRetrieval/);
+  assert.match(pagesSource, /contains untrusted project evidence/);
   assert.match(appSource, /path="\/workflow-executions\/:executionId" element=\{<WorkflowExecutionReviewPage \/>\}/);
   assert.ok((pagesSource.match(/projectId: routeProjectId/g) ?? []).length >= 4);
   assert.match(pagesSource, /routeProjectId \?\? selectedProjectId/);

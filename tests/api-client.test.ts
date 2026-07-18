@@ -167,3 +167,36 @@ test("api client exposes workflow artifact inspection and recovery origin", asyn
     globalThis.fetch = originalFetch;
   }
 });
+
+test("api client exposes project retrieval explanation and encodes trace IDs", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({
+      url: typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
+      init,
+    });
+    return new Response(JSON.stringify({ status: "ok", data: { ranked: [], selected: [], dropped: [] } }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+
+  try {
+    const api = createApiClient({ baseUrl: "http://127.0.0.1:4242" });
+    await api.explainRetrieval({ project: "project-1", query: "why auth", mode: "local", depth: "deep", limit: 12 });
+    await api.getRetrievalQuery("query one");
+    assert.equal(calls[0]?.url, "http://127.0.0.1:4242/retrieval/explain");
+    assert.equal(calls[0]?.init?.method, "POST");
+    assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
+      project: "project-1",
+      query: "why auth",
+      mode: "local",
+      depth: "deep",
+      limit: 12,
+    });
+    assert.equal(calls[1]?.url, "http://127.0.0.1:4242/retrieval/queries/query%20one");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
