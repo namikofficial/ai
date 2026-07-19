@@ -55,6 +55,7 @@ test("active context precedence prefers explicit override and persistent pin", (
 test("unverified tmux is rejected and cannot override focused process context", () => {
   const context = resolveActiveContext({
     observation: observation({
+      window: { ...fixtures.DesktopObservation.window, className: "kitty", role: "terminal" },
       process: { pid: 10, parentPid: null, cwd: manifest.path, command: "zsh" },
       tmux: { clientPid: 99, session: "unrelated", paneId: "%1", cwd: "/tmp/other", associationVerified: false },
     }),
@@ -63,7 +64,22 @@ test("unverified tmux is rejected and cannot override focused process context", 
     previous: null,
   });
   assert.equal(context.source, "process_cwd");
+  assert.equal(context.evidence[0]?.reason, "process-cwd matched a registered project");
   assert.ok(context.rejectedCandidates.some((entry) => entry.reason.includes("not proven")));
+});
+
+test("editor process cwd cannot impersonate an active file or workspace", () => {
+  const context = resolveActiveContext({
+    observation: observation({
+      process: { pid: 10, parentPid: null, cwd: manifest.path, command: "code" },
+    }),
+    manifests: [manifest],
+    selection: null,
+    previous: null,
+  });
+  assert.equal(context.source, "unresolved");
+  assert.equal(context.project, null);
+  assert.ok(context.rejectedCandidates.some((entry) => entry.reason.includes("not proof")));
 });
 
 test("editor beats terminal and exposes rejected lower-precedence evidence", () => {
