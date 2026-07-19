@@ -27,6 +27,15 @@ export function registerControlPlaneRoutes(
     deps.publish(event);
   };
 
+  const writeStatusCacheIfActive = async (status: Awaited<ReturnType<typeof buildProjectStatus>>): Promise<boolean> => {
+    const selection = deps.store.projectRegistry.getSelection();
+    const context = deps.store.activeContext.getContext();
+    const activeProjectId = selection?.projectId ?? context?.project?.id ?? null;
+    if ((status.project?.id ?? null) !== activeProjectId) return false;
+    await writeProjectStatusCache(status, deps.cachePaths?.projectStatus);
+    return true;
+  };
+
   router.get("/registry", (_req, res) => {
     sendJson(
       res,
@@ -232,7 +241,7 @@ export function registerControlPlaneRoutes(
     asyncRoute(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
       const status = await buildProjectStatus(deps.store, { projectId });
-      await writeProjectStatusCache(status, deps.cachePaths?.projectStatus);
+      await writeStatusCacheIfActive(status);
       sendJson(res, json("ok", status));
     })
   );
@@ -242,7 +251,7 @@ export function registerControlPlaneRoutes(
     asyncRoute(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
       const status = await buildProjectStatus(deps.store, { projectId });
-      await writeProjectStatusCache(status, deps.cachePaths?.projectStatus);
+      await writeStatusCacheIfActive(status);
       sendJson(res, json("ok", compactProjectStatus(status)));
     })
   );
