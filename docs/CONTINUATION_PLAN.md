@@ -91,8 +91,9 @@ row-count/content-hash parity and rollback rehearsal pass. Do not delete Python 
 The documented and legacy source locations were rechecked on 2026-07-18; no Python RAG SQLite database exists, so a
 real-data dry run remains unavailable and is not claimed. Dedicated handoff and retrieval-explanation routes are now
 implemented independently, including project synchronization and a readable why-selected/ranked/dropped view.
-Embedded and ephemeral Workbench servers now isolate all registry/context/status caches beneath their runtime
-directory, preventing tests or client rehearsals from overwriting the real desktop fallback cache.
+Ephemeral Workbench servers now isolate all registry/context/status caches beneath their runtime directory, and
+embedded callers can supply an explicit desktop cache directory. This prevents tests and client rehearsals from
+overwriting the real desktop fallback cache without changing normal XDG production behavior.
 
 ## Priority 5 — Retire duplicate desktop ownership
 

@@ -516,8 +516,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
 
   const controlPlaneRouter = express.Router();
   const isolatedDesktopCacheDir =
-    options.desktopCacheDir ??
-    (options.store || config.apiPort === 0 ? path.join(config.runtimeDir, "cache", "desktop") : null);
+    options.desktopCacheDir ?? (config.apiPort === 0 ? path.join(config.runtimeDir, "cache", "desktop") : null);
   registerControlPlaneRoutes(controlPlaneRouter, {
     store,
     publish,
