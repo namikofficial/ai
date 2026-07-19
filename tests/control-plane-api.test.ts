@@ -117,6 +117,23 @@ test("control-plane API approves manifests, persists selection, and resolves des
     const cached = await readFile(join(workspace, "cache", "ai-workbench", "project-status-v1.json"), "utf8");
     assert.match(cached, /API Project/);
 
+    const otherPath = join(workspace, "other-project");
+    await mkdir(otherPath);
+    const otherProject = store.createProject({ path: otherPath, name: "Background Project" });
+    const backgroundStatus = await handle.inject({
+      method: "GET",
+      url: `/project-status/compact?projectId=${encodeURIComponent(otherProject.id)}`,
+      headers: { accept: "application/json" },
+    });
+    assert.equal(backgroundStatus.statusCode, 200);
+    assert.match(backgroundStatus.body, /Background Project/);
+    const cacheAfterBackgroundRead = await readFile(
+      join(workspace, "cache", "ai-workbench", "project-status-v1.json"),
+      "utf8"
+    );
+    assert.match(cacheAfterBackgroundRead, /API Project/);
+    assert.doesNotMatch(cacheAfterBackgroundRead, /Background Project/);
+
     const approvalResponse = await handle.inject({
       method: "GET",
       url: `/approvals/${approval.id}`,
