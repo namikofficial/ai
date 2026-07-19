@@ -115,3 +115,56 @@ Filesystem inspection provided definitive installation evidence instead:
 This preflight proves test-cache isolation and a safe pre-install state. It does not prove editor/terminal/tmux focus
 correlation, Wayle latency, bridge CPU/RSS, or restart recovery. Legacy Kage therefore remains an explicit rollback
 watcher until the graphical service set is installed and the complete live acceptance sequence passes.
+
+## Live graphical-session rehearsal — 2026-07-20
+
+The Workbench and graphical bridge units were installed through their explicit reversible installers in the active
+Hyprland session. This rehearsal used the canonical `runtime/ai.db`, then registered and explicitly approved a
+minimal Dotfiles manifest as the representative real project. The temporary persistent pin was removed at the end;
+the approved registry entry remains canonical.
+
+Live startup exposed and fixed defects that isolated tests had not exercised:
+
+- systemd could not resolve the interactive NVM `pnpm`; API and worker units now invoke the repository CLI through
+  stable `/usr/bin/node` directly;
+- the `web` CLI started the API twice and failed with `EADDRINUSE`; `startWorkbenchWeb` is now the single embedded API
+  owner, and source-level supervision tests prevent a second `startWorkbenchServer` call in the web command;
+- a worker whose initial API dependency job failed stayed inactive after API recovery; every API activation now
+  wants and orders the worker, and a deliberate target restart returned both services to `active (running)`;
+- the project watcher spun when no project cache existed; the empty-target path now sleeps, with a regression test,
+  and live CPU fell from one saturated core to 58 ms over its first six seconds;
+- the observer depended on absent `socat`, lacked the Hyprland signature in the user-manager environment, and emitted
+  a locale-incompatible timestamp. It now uses Python's standard Unix socket client, discovers the newest live
+  Hyprland socket, and emits explicit UTC millisecond timestamps;
+- repeated title-driven Hyprland events caused unnecessary process/API work. Stable `activewindowv2` and
+  `workspacev2` payloads are deduplicated and real changes are debounced before observation;
+- arbitrary project-status reads could replace the singleton active desktop cache. The API now writes only a status
+  whose project still matches canonical selection/context;
+- clearing a pin could leave an old project displayed. An unresolved observation now regenerates the cache with a
+  null project, and Wayle immediately renders the low-confidence no-project state;
+- VS Code's long-lived process CWD pointed at Dotfiles while the focused workspace title was `noxorigin`. The resolver
+  now rejects editor process CWD as active-file/workspace proof, preventing cross-project confused-deputy selection.
+
+Verified live behavior:
+
+- API readiness, SQLite and worker were ready; MCP was available, SSE reported one connected client, and the desktop
+  bridge was ready. Model manager and embeddings were explicitly offline and Qdrant explicitly disabled/unknown,
+  while core readiness remained true.
+- Persistent pinning selected Dotfiles at confidence `1.0` across an unrelated focused editor and exposed the stale
+  editor CWD as rejected evidence. Removing the pin returned context to unresolved and cleared the active status
+  cache rather than preserving the wrong project.
+- A harmless tracked-file mtime event refreshed `project-status-v1.json` in **405 ms**, including the configured
+  350 ms debounce; `git status --short` remained empty after the probe. A direct canonical compact-status request
+  completed in **31.423 ms**.
+- The compact Wayle cluster rendered human-readable state from one cache: `Dotfiles ●`, the real Git branch/change
+  counts, `No active task`, and `AI !` for the offline local runtime. After unpinning it rendered `—` with 0%/low
+  confidence rather than stale project identity.
+- Observer, watcher, and notification bridge were all `active (running)` after fixes. Representative resident memory
+  observed from the service/PID views was approximately 5–6 MiB, 13–29 MiB, and 14–39 MiB respectively; the ranges
+  distinguish main-process RSS from cgroup accounting.
+
+The full desktop acceptance gate is still open. A quiet-session observer CPU sample was invalidated by real rapid
+focus changes (the socket sample showed three distinct addresses), and editor active-file hints, a positively
+correlated tmux client, scratchpad follow/pin behavior, deep-link navigation, failed-check propagation, and the full
+Ask→Plan→Dev→Review→Memory→OpenCode/MCP sequence still require deliberate interaction. Kage remains the rollback
+watcher until those checks pass.

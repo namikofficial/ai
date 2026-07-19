@@ -1,6 +1,8 @@
 # Canonical project status
 
-Phase 4 adds one project-scoped status aggregation path for Workbench, CLI, and future desktop consumers. It composes canonical registry/context/work records with bounded Git and Docker Compose probes. Wayle and Kage are not migrated in this phase.
+One project-scoped status aggregation path serves Workbench, CLI, Wayle, Rofi, Kage compatibility, and desktop
+scripts. It composes canonical registry/context/work records with bounded Git, Docker Compose, and normalized runtime
+health.
 
 ## Data flow
 
@@ -36,7 +38,11 @@ The cache is a projection, not a durable state owner. Canonical mutations still 
 | `POST /actions/<workflow-id>/run` | Policy-gated canonical workflow execution |
 | `ai action list` / `ai action run <id>` | CLI action discovery and execution |
 
-Successful requests atomically refresh `${XDG_CACHE_HOME:-~/.cache}/ai-workbench/project-status-v1.json`. The payload records `generatedAt` and `staleAfter`. CLI fallback explicitly wraps cached data with `status: offline` and `stale: true`; it never fabricates a successful mutation.
+Successful selected/active-project requests atomically refresh
+`${XDG_CACHE_HOME:-~/.cache}/ai-workbench/project-status-v1.json`. An explicit read for a background project returns
+that status but cannot replace the singleton active desktop cache. The payload records `generatedAt` and a five-minute
+fallback `staleAfter`; file/focus events normally refresh it sooner. CLI fallback explicitly wraps cached data with
+`status: offline` and `stale: true`; it never fabricates a successful mutation.
 
 The compact payload provides four stable presentation concepts for the Phase 5 Work cluster: project, Git/checks, active work, and AI/runtime. Its tooltip is newline-delimited human text rather than raw JSON.
 
@@ -66,8 +72,8 @@ Explicit `ProjectManifest.packageManager` always wins. Bounded root-marker detec
 
 Recommended actions are projected only from approved canonical manifest commands. The status layer does not invent
 `npm run dev` or execute a command. Rofi uses this projection for labels and disabled reasons, while all mutation is
-submitted back to Workbench. The current executor accepts only non-interactive, read-only direct workflows and
-persists their structured result; every other mode fails closed pending its approval/terminal adapter. See
+submitted back to Workbench. Direct, terminal, tmux, isolated, background, check-pipeline, and multi-step DAG modes
+all use the shared policy/execution system; unavailable capabilities and unapproved mutation fail closed. See
 [WORKFLOW_EXECUTION.md](./WORKFLOW_EXECUTION.md).
 
 ## Active work and check scoping
@@ -77,7 +83,8 @@ The status builder scopes sessions, tasks, development runs, and checks to the s
 The runtime section uses the normalized `RuntimeHealth` projection for API/database readiness plus worker, model
 manager, embeddings, optional Qdrant, MCP, desktop bridge, and event-stream state. Optional offline components
 degrade capabilities without making the canonical registry unavailable; an open port alone is never considered
-readiness.
+readiness. Runtime probes are coalesced behind a five-second server-side snapshot so bursts of file events do not
+repeat optional network probes.
 
 ## Verification
 

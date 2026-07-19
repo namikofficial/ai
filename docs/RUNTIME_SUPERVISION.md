@@ -111,6 +111,10 @@ one debounced project-scoped status refresh from the loopback API. It never perf
 or a canonical mutation on the desktop side. Its default API endpoint is the same central `127.0.0.1:4417` contract
 used by the other clients when `runtime.env` is absent.
 
+Project status caches use a five-minute fallback freshness window. File/focus events refresh meaningful changes in
+hundreds of milliseconds; the longer window prevents an otherwise healthy idle desktop from forcing Git, Compose,
+and runtime aggregation every 30 seconds merely to avoid a stale badge.
+
 ## Rollback and uninstall
 
 ```bash

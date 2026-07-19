@@ -75,11 +75,13 @@ editor, terminal, correlated tmux, transient windows, pinning, Rofi actions, scr
 links, failed checks, Ask→Plan→Dev→Review→Memory, MCP/OpenCode resume, and Workbench/model/Qdrant/Docker offline
 states. Record raw evidence in `HARDENING_REPORT.md`.
 
-The 2026-07-20 live preflight found an active Hyprland session but no linked graphical Workbench bridge units and no
-valid selected-project cache after quarantining test-contaminated XDG files. Ephemeral test servers now isolate all
-desktop caches below their runtime directory, and a full suite did not recreate the real cache. Focus correlation and
-latency remain unproven; see `HARDENING_REPORT.md` before running the deliberate service-install and focus-switch
-rehearsal.
+The 2026-07-20 live rehearsal installed all six user units, registered an approved representative Dotfiles manifest,
+proved persistent pin/unpin and wrong-editor-CWD rejection, measured a 405 ms file-event-to-cache update, rendered
+all four Wayle chips, verified optional-runtime degradation, and recovered API plus worker after a target restart.
+The rehearsal also fixed systemd shell-path, duplicate API ownership, worker recovery, watcher spin, Hyprland socket,
+timestamp, event-noise, active-cache race, and unresolved-cache defects. Editor active-file hints, positively
+correlated tmux, scratchpad/deep-link/check propagation, quiet observer CPU, and the complete 15-step AI workflow
+remain unproven; see `HARDENING_REPORT.md`.
 
 ## Priority 4 — Python compatibility parity decisions
 

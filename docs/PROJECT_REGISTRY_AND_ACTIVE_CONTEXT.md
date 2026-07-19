@@ -119,7 +119,9 @@ hypr/scripts/ai-workbench-observer
 systemd/user/ai-workbench-desktop-observer.service
 ```
 
-It subscribes to the Hyprland event socket through `socat`. It does not poll Git, Docker, models or Workbench. On a relevant focus/workspace event it:
+It subscribes to the Hyprland Unix event socket through Python's standard library, discovers the newest live socket
+when the user manager lacks `HYPRLAND_INSTANCE_SIGNATURE`, deduplicates stable v2 payloads, and debounces real
+focus/workspace changes. It does not poll Git, Docker, models or Workbench. On a relevant event it:
 
 1. Reads the focused Hyprland window once.
 2. Reads the focused PID and, for terminals, selects a descendant shell from that focused process tree.
@@ -127,7 +129,13 @@ It subscribes to the Hyprland event socket through `socat`. It does not poll Git
 4. Atomically writes an offline observation cache.
 5. Posts the normalized observation with a one-second HTTP timeout.
 
+An editor's long-lived process CWD is not accepted as active-file/workspace evidence. Editors must supply an actual
+file/workspace hint, match a higher-precedence route/pin, or remain unresolved; this prevents a reused VS Code process
+from selecting whichever repository originally launched it.
+
 Workbench downtime does not create divergent canonical state; only the observation cache is updated.
+
+See [PROJECT_MANIFEST.md](./PROJECT_MANIFEST.md) for the schema and the reviewed add/import/approve/export workflow.
 
 Enable after the dotfiles bootstrap links the unit:
 
