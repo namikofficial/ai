@@ -359,21 +359,13 @@ async function run(): Promise<void> {
     const webPort = Number(options.port ?? 4317);
     const apiOnlyPort = Number(options["api-port"] ?? 4417);
     const apiOnlyUrl = options["api-url"] ?? process.env.AI_API_URL ?? `http://127.0.0.1:${apiOnlyPort}`;
-    const apiHandle = await startWorkbenchServer({
-      config: {
-        apiUrl: apiOnlyUrl,
-        webPort: apiOnlyPort,
-        apiPort: apiOnlyPort,
-      },
-    });
     const webHandle = await startWorkbenchWeb({
       config: { apiUrl: apiOnlyUrl, webPort, apiPort: apiOnlyPort },
     });
-    console.log(`AI Workbench api listening at ${apiHandle.url}`);
+    console.log(`AI Workbench api listening at ${apiOnlyUrl}`);
     console.log(`AI Workbench web listening at ${webHandle.url}`);
     process.on?.("SIGINT", async () => {
       await webHandle.close();
-      await apiHandle.close();
       process.exit(0);
     });
     return;

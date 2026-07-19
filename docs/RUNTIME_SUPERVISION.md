@@ -21,7 +21,11 @@ flowchart LR
 
 ## Ownership and readiness
 
-`ai-workbench.service` runs `pnpm web`. The current web server embeds the API, so there is deliberately no second API service that could compete for port 4417. `ai-workbench-worker.service` starts after and requires that control-plane process.
+`ai-workbench.service` runs the repository CLI's `web` command directly through `/usr/bin/node`. The service does not
+depend on an interactive NVM or pnpm shell path. The current web server embeds the API, so there is deliberately no
+second API service that could compete for port 4417. `ai-workbench-worker.service` starts after and requires that
+control-plane process. The API unit also wants and orders the worker, so an API restart pulls a worker whose initial
+dependency job failed back into the supervised graph instead of leaving it inactive.
 
 The endpoints have different meanings:
 

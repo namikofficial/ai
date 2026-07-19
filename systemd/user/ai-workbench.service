@@ -2,14 +2,16 @@
 Description=AI Workbench web and API control plane
 Documentation=file:%h/Documents/code/ai/docs/RUNTIME_SUPERVISION.md
 After=network.target
+Wants=ai-workbench-worker.service
+Before=ai-workbench-worker.service
 PartOf=ai-workbench.target
 
 [Service]
 Type=simple
 WorkingDirectory=%h/Documents/code/ai
 EnvironmentFile=-%h/.config/ai-workbench/runtime.env
-Environment=PATH=%h/.local/share/pnpm:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/env pnpm web
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node --experimental-strip-types cli/ai/src/main.ts web
 ExecStartPost=/usr/bin/env bash scripts/wait-ready.sh
 Restart=on-failure
 RestartSec=2

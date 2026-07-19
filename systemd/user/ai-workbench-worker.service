@@ -9,8 +9,8 @@ PartOf=ai-workbench.target
 Type=simple
 WorkingDirectory=%h/Documents/code/ai
 EnvironmentFile=-%h/.config/ai-workbench/runtime.env
-Environment=PATH=%h/.local/share/pnpm:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
-ExecStart=/usr/bin/env pnpm worker
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/node --experimental-strip-types cli/ai/src/main.ts worker
 Restart=on-failure
 RestartSec=2
 TimeoutStartSec=20
