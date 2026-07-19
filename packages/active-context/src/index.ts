@@ -111,6 +111,16 @@ function projectById(manifests: ProjectManifest[], id: string | null): ProjectMa
   return id ? (manifests.find((manifest) => manifest.id === id) ?? null) : null;
 }
 
+function isEditorWindow(observation: DesktopObservation): boolean {
+  const className = observation.window?.className?.toLowerCase() ?? "";
+  const role = observation.window?.role?.toLowerCase() ?? "";
+  return (
+    role === "editor" ||
+    ["code", "code-oss", "codium", "vscodium", "zed", "sublime_text"].includes(className) ||
+    className.startsWith("jetbrains-")
+  );
+}
+
 function makeEvidence(
   kind: string,
   value: string,
@@ -129,11 +139,12 @@ function candidate(
   priority: number,
   kind: string,
   value: string,
-  reason: string,
-  rejected: ContextEvidence[]
+  rejectedReason: string,
+  rejected: ContextEvidence[],
+  acceptedReason = `${kind} matched a registered project`
 ): Candidate | null {
   if (!project) {
-    if (value) rejected.push(makeEvidence(kind, value, source, confidence, false, reason));
+    if (value) rejected.push(makeEvidence(kind, value, source, confidence, false, rejectedReason));
     return null;
   }
   return {
@@ -141,7 +152,7 @@ function candidate(
     source,
     confidence,
     priority,
-    evidence: makeEvidence(kind, value, source, confidence, true, reason),
+    evidence: makeEvidence(kind, value, source, confidence, true, acceptedReason),
   };
 }
 
@@ -274,18 +285,32 @@ export function resolveActiveContext(input: ResolveActiveContextInput): ActiveCo
     }
   }
 
-  add(
-    candidate(
-      projectForPath(input.manifests, observation.process?.cwd ?? null),
-      "process_cwd",
-      0.82,
-      7,
-      "process-cwd",
-      observation.process?.cwd ?? "",
-      "process cwd is outside registered roots",
-      rejected
-    )
-  );
+  const processCwd = observation.process?.cwd ?? null;
+  if (processCwd && isEditorWindow(observation) && !observation.editor) {
+    rejected.push(
+      makeEvidence(
+        "process-cwd",
+        processCwd,
+        "process_cwd",
+        0,
+        false,
+        "editor process cwd is not proof of the active file or workspace"
+      )
+    );
+  } else {
+    add(
+      candidate(
+        projectForPath(input.manifests, processCwd),
+        "process_cwd",
+        0.82,
+        7,
+        "process-cwd",
+        processCwd ?? "",
+        "process cwd is outside registered roots",
+        rejected
+      )
+    );
+  }
   add(
     candidate(
       projectById(input.manifests, observation.browser?.projectId ?? null),
@@ -327,8 +352,9 @@ export function resolveActiveContext(input: ResolveActiveContextInput): ActiveCo
         10,
         "previous-context",
         input.previous.project.id,
-        observation.transientWindow ? "preserved across a transient window" : "preserved during resolver hysteresis",
-        rejected
+        "previous context project is not registered",
+        rejected,
+        observation.transientWindow ? "preserved across a transient window" : "preserved during resolver hysteresis"
       )
     );
   }
