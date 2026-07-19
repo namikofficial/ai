@@ -109,11 +109,12 @@ test("control-plane API approves manifests, persists selection, and resolves des
     });
     assert.equal(status.statusCode, 200);
     const statusBody = JSON.parse(status.body) as {
-      data: { project: { id: string }; tooltip: string; generatedAt: string };
+      data: { project: { id: string }; tooltip: string; generatedAt: string; ai: { state: string } };
     };
     assert.equal(statusBody.data.project.id, project.id);
     assert.match(statusBody.data.tooltip, /API Project/);
     assert.ok(statusBody.data.generatedAt);
+    assert.equal(statusBody.data.ai.state, "offline");
     const cached = await readFile(join(workspace, "cache", "ai-workbench", "project-status-v1.json"), "utf8");
     assert.match(cached, /API Project/);
 

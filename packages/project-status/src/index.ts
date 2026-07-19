@@ -532,6 +532,8 @@ export interface BuildProjectStatusOptions {
   staleAfterMs?: number;
 }
 
+export const DEFAULT_STATUS_STALE_AFTER_MS = 5 * 60 * 1_000;
+
 export async function buildProjectStatus(
   store: Store,
   options: BuildProjectStatusOptions = {}
@@ -583,7 +585,9 @@ export async function buildProjectStatus(
         ? "ready"
         : "unknown";
   const generated = new Date(now);
-  const staleAfter = new Date(generated.getTime() + (options.staleAfterMs ?? 30_000)).toISOString();
+  const staleAfter = new Date(
+    generated.getTime() + (options.staleAfterMs ?? DEFAULT_STATUS_STALE_AFTER_MS)
+  ).toISOString();
   return {
     schemaVersion: CONTROL_PLANE_SCHEMA_VERSION,
     id: projectId ? `project-status:${projectId}` : "project-status:unresolved",

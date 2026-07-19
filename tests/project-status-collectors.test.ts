@@ -13,6 +13,7 @@ import {
   collectGitChangedPaths,
   collectGitStatus,
   compactProjectStatus,
+  DEFAULT_STATUS_STALE_AFTER_MS,
   defaultProjectStatusCachePath,
   detectPackageManager,
   parseGitChangedPaths,
@@ -334,6 +335,7 @@ test("aggregated project status scopes checks and actions to the canonical selec
     },
   };
   const status = await buildProjectStatus(store, { runner, now: "2026-07-18T00:00:00.000Z" });
+  assert.equal(Date.parse(status.staleAfter) - Date.parse(status.generatedAt), DEFAULT_STATUS_STALE_AFTER_MS);
   assert.equal(projectStatusSchema.parse(status).project?.id, project.id);
   assert.equal(status.checks.failed, 1);
   assert.equal(

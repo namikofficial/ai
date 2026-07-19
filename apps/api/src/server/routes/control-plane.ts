@@ -1,5 +1,6 @@
 import type { Router } from "express";
 import { resolveActiveContext, writeActiveContextCache } from "../../../../../packages/active-context/src/index.ts";
+import type { RuntimeHealth } from "../../../../../packages/contracts/src/index.ts";
 import type { createStore } from "../../../../../packages/db/src/store.ts";
 import { diffProjectManifests, refreshRegistryCache } from "../../../../../packages/project-registry/src/index.ts";
 import {
@@ -19,6 +20,7 @@ export function registerControlPlaneRoutes(
   deps: {
     store: Store;
     publish: (event: EventEnvelope) => void;
+    buildRuntimeHealth: () => Promise<RuntimeHealth>;
     cachePaths?: { registry?: string; activeContext?: string; projectStatus?: string };
   }
 ) {
@@ -34,6 +36,14 @@ export function registerControlPlaneRoutes(
     if ((status.project?.id ?? null) !== activeProjectId) return false;
     await writeProjectStatusCache(status, deps.cachePaths?.projectStatus);
     return true;
+  };
+
+  const buildStatus = async (projectId: string | null) => {
+    const [status, runtime] = await Promise.all([
+      buildProjectStatus(deps.store, { projectId }),
+      deps.buildRuntimeHealth(),
+    ]);
+    return { ...status, runtime };
   };
 
   router.get("/registry", (_req, res) => {
@@ -240,7 +250,7 @@ export function registerControlPlaneRoutes(
     "/project-status",
     asyncRoute(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
-      const status = await buildProjectStatus(deps.store, { projectId });
+      const status = await buildStatus(projectId);
       await writeStatusCacheIfActive(status);
       sendJson(res, json("ok", status));
     })
@@ -250,7 +260,7 @@ export function registerControlPlaneRoutes(
     "/project-status/compact",
     asyncRoute(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
-      const status = await buildProjectStatus(deps.store, { projectId });
+      const status = await buildStatus(projectId);
       await writeStatusCacheIfActive(status);
       sendJson(res, json("ok", compactProjectStatus(status)));
     })

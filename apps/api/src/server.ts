@@ -463,6 +463,21 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   };
   const unsubscribeEvents = store.subscribeEvents(publish);
 
+  let runtimeHealthCache: { value: RuntimeHealth; expiresAt: number } | null = null;
+  let runtimeHealthPending: Promise<RuntimeHealth> | null = null;
+  const readRuntimeHealth = async (): Promise<RuntimeHealth> => {
+    if (runtimeHealthCache && runtimeHealthCache.expiresAt > Date.now()) return runtimeHealthCache.value;
+    if (runtimeHealthPending) return runtimeHealthPending;
+    runtimeHealthPending = buildRuntimeHealth(store, config, listeners.size);
+    try {
+      const value = await runtimeHealthPending;
+      runtimeHealthCache = { value, expiresAt: Date.now() + 5_000 };
+      return value;
+    } finally {
+      runtimeHealthPending = null;
+    }
+  };
+
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "10mb", type: "application/json" }));
@@ -489,7 +504,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   registerHealthRoutes(healthRouter, {
     buildHealthSnapshot: () => buildHealthSnapshot(store, config),
     buildDeepHealthSnapshot: () => buildDeepHealthSnapshot(store, config),
-    buildRuntimeHealth: () => buildRuntimeHealth(store, config, listeners.size),
+    buildRuntimeHealth: readRuntimeHealth,
     config,
     listProjects: () => store.listProjects(),
     dashboardSnapshot: () => store.dashboardSnapshot(),
@@ -520,6 +535,7 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   registerControlPlaneRoutes(controlPlaneRouter, {
     store,
     publish,
+    buildRuntimeHealth: readRuntimeHealth,
     ...(isolatedDesktopCacheDir
       ? {
           cachePaths: {
