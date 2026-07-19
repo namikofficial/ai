@@ -112,6 +112,11 @@ prunes dependency/build/index trees, debounces file bursts and requests project-
 running Git or Docker on the desktop. The remaining duplicate is the explicitly retained Kage rollback watcher,
 pending live desktop parity.
 
+The graphical observer/watcher/notification set now has a narrow dry-run/install/enable/status/uninstall helper, so
+the live gate no longer requires running the full workstation bootstrap. Its regression test installs into an
+isolated XDG configuration, verifies exact unit copies and daemon reload, then proves rollback removes only the three
+known units.
+
 ## Required release commands
 
 ```bash
@@ -124,6 +129,7 @@ cd /home/namik/Documents/code/dotfiles
 ./setup/check-local.sh
 ./setup/test-project-profile.sh
 ./setup/test-workbench-desktop.sh
+./setup/test-workbench-desktop-services.sh
 ./setup/test-workbench-actions.sh
 python3 -m unittest setup/test-workbench-project-watch.py
 python3 -m unittest setup/test-workbench-notification-bridge.py

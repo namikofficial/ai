@@ -92,16 +92,13 @@ The desktop launcher first asks systemd to start the target. If the target is no
 
 Dotfiles separately provides graphical-session units for the Hyprland observation, active-project file-event, and
 notification bridges. They reconnect independently and do not make the Workbench control plane depend on a running
-desktop session. The dotfiles bootstrap links these units but deliberately does not enable or start them:
+desktop session. Use the narrow installer when only this service set should change; the general dotfiles bootstrap
+also links the units but deliberately does not enable or start them:
 
 ```bash
 cd /home/namik/Documents/code/dotfiles
-./setup/bootstrap.sh
-systemctl --user daemon-reload
-systemctl --user enable --now \
-  ai-workbench-desktop-observer.service \
-  ai-workbench-project-watch.service \
-  ai-workbench-notification-bridge.service
+./setup/install-workbench-desktop-services.sh --dry-run
+./setup/install-workbench-desktop-services.sh install --enable
 ```
 
 `ai-workbench-project-watch.service` reads only the canonical status cache to choose a registered project, watches
@@ -118,13 +115,12 @@ used by the other clients when `runtime.env` is absent.
 
 Uninstall stops and removes only the three known Workbench units. It preserves `~/.config/ai-workbench/runtime.env`, the SQLite database, caches and project data. The tmux launcher remains available immediately after rollback.
 
-The graphical desktop bridges belong to dotfiles and are rolled back independently without deleting their caches:
+The graphical desktop bridges belong to dotfiles and are rolled back independently without deleting their caches
+or runtime configuration:
 
 ```bash
-systemctl --user disable --now \
-  ai-workbench-desktop-observer.service \
-  ai-workbench-project-watch.service \
-  ai-workbench-notification-bridge.service
+cd /home/namik/Documents/code/dotfiles
+./setup/install-workbench-desktop-services.sh uninstall
 ```
 
 ## Troubleshooting
