@@ -81,19 +81,33 @@ see `HARDENING_REPORT.md` before running the deliberate service-install and focu
 
 ## Priority 4 — Python compatibility parity decisions
 
-Exercise the importer against a real Python RAG database when one exists. Decide and test historical
-`execution_runs` mapping, expose equivalent TypeScript MCP capability, compare retrieval evaluations, and retain the
-Python store until row-count/content-hash parity and rollback rehearsal pass. Do not delete Python or Qdrant data.
+Exercise the importer against a real Python RAG database when one exists. Historical `execution_runs` now have a
+tested provenance-only mapping because the legacy schema cannot prove canonical workspace, diff, approval or apply
+semantics. The 27 legacy Python MCP tools now have an explicit canonical capability map, and a real JSON-RPC client
+test covers project selection, active context, status, runtime health, memory and retrieval explanation. Rehearse the
+mapping through installed OpenCode/Codex clients, compare retrieval evaluations, and retain the Python store until
+row-count/content-hash parity and rollback rehearsal pass. Do not delete Python or Qdrant data.
 
 The documented and legacy source locations were rechecked on 2026-07-18; no Python RAG SQLite database exists, so a
 real-data dry run remains unavailable and is not claimed. Dedicated handoff and retrieval-explanation routes are now
 implemented independently, including project synchronization and a readable why-selected/ranked/dropped view.
+Embedded and ephemeral Workbench servers now isolate all registry/context/status caches beneath their runtime
+directory, preventing tests or client rehearsals from overwriting the real desktop fallback cache.
 
 ## Priority 5 — Retire duplicate desktop ownership
 
 Only after priorities 1–4 pass, disable legacy Kage status probes and hard-coded action cases by default. Preserve a
 documented offline rollback switch for one release, verify no canonical mutation can occur through the legacy path,
 then remove obsolete adapters in a separate change.
+
+The standalone `project-profile` duplicate has now been removed: the desktop command resolves IDs, names, aliases,
+paths and tmux session names from the canonical registry/API or its read-only XDG cache. Development and verification
+commands resolve approved Workbench actions and fail closed while offline; the adapter no longer owns project paths,
+commands or pane layouts. Its regression test covers offline reads, canonical pinning, workflow routing and manifest
+tmux naming. A separately supervised, read-only inotify bridge now watches only the canonical cached project path,
+prunes dependency/build/index trees, debounces file bursts and requests project-scoped status refreshes without
+running Git or Docker on the desktop. The remaining duplicate is the explicitly retained Kage rollback watcher,
+pending live desktop parity.
 
 ## Required release commands
 
@@ -105,8 +119,10 @@ pnpm test:fast
 
 cd /home/namik/Documents/code/dotfiles
 ./setup/check-local.sh
+./setup/test-project-profile.sh
 ./setup/test-workbench-desktop.sh
 ./setup/test-workbench-actions.sh
+python3 -m unittest setup/test-workbench-project-watch.py
 python3 -m unittest setup/test-workbench-notification-bridge.py
 python3 -m unittest setup/test-workbench-workflow-launch.py
 ```

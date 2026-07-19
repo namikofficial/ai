@@ -122,6 +122,71 @@ function assertExecutionProject(output: unknown, projectId: string): void {
 function toolDescriptors(): ToolDescriptor[] {
   return [
     {
+      name: "ai_list_projects",
+      description: "List projects from the canonical Workbench registry (read-only).",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "ai_select_project",
+      description: "Select or pin a canonical Workbench project (mutating and audit logged).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: { type: "string" },
+          pinScope: { type: "string", enum: ["workspace", "session", "persistent"] },
+        },
+        required: ["projectId"],
+      },
+    },
+    {
+      name: "ai_get_active_context",
+      description: "Return canonical active context and durable project selection (read-only).",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "ai_explain_active_context",
+      description: "Explain active-context evidence, rejected candidates, confidence and selection (read-only).",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "ai_get_project_status",
+      description: "Return canonical project, Git, work, check, service, index and runtime status (read-only).",
+      inputSchema: {
+        type: "object",
+        properties: { projectId: { type: "string" } },
+        required: ["projectId"],
+      },
+    },
+    {
+      name: "ai_get_runtime_health",
+      description: "Return normalized Workbench runtime health and component readiness (read-only).",
+      inputSchema: { type: "object", properties: {} },
+    },
+    {
+      name: "ai_get_project_memory",
+      description: "Return canonical project memory, lessons and rules (read-only).",
+      inputSchema: {
+        type: "object",
+        properties: { projectId: { type: "string" } },
+        required: ["projectId"],
+      },
+    },
+    {
+      name: "ai_explain_retrieval",
+      description: "Run inspectable project retrieval and return ranked, selected and dropped evidence (read-only).",
+      inputSchema: {
+        type: "object",
+        properties: {
+          projectId: { type: "string" },
+          query: { type: "string" },
+          mode: { type: "string", enum: ["local", "hybrid", "cloud"] },
+          depth: { type: "string", enum: ["shallow", "standard", "deep"] },
+          limit: { type: "number" },
+        },
+        required: ["projectId", "query"],
+      },
+    },
+    {
       name: "ai_search_project",
       description: "Search a project for relevant chunks.",
       inputSchema: {
@@ -630,6 +695,65 @@ async function handleTool(
   args: Record<string, unknown>
 ): Promise<unknown> {
   switch (name) {
+    case "ai_list_projects":
+      return store.listProjects();
+    case "ai_select_project": {
+      const projectId = asString(args.projectId).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      const pinScope =
+        args.pinScope === "workspace" || args.pinScope === "session" || args.pinScope === "persistent"
+          ? args.pinScope
+          : null;
+      return requestWorkbenchApi(config, "/context/selection", {
+        method: "POST",
+        body: { projectId, source: "mcp", pinScope },
+      });
+    }
+    case "ai_get_active_context":
+      return {
+        context: store.activeContext.getContext(),
+        selection: store.projectRegistry.getSelection(),
+      };
+    case "ai_explain_active_context": {
+      const context = store.activeContext.getContext();
+      return {
+        context,
+        selection: store.projectRegistry.getSelection(),
+        winningEvidence: context?.evidence ?? [],
+        rejectedCandidates: context?.rejectedCandidates ?? [],
+        confirmationRecommended: context?.confirmationRecommended ?? true,
+      };
+    }
+    case "ai_get_project_status": {
+      const projectId = asString(args.projectId).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      return requestWorkbenchApi(config, `/project-status?projectId=${encodeURIComponent(projectId)}`);
+    }
+    case "ai_get_runtime_health": {
+      const diagnostics = asRecord(await requestWorkbenchApi(config, "/diagnostics"));
+      return diagnostics.runtime ?? null;
+    }
+    case "ai_get_project_memory": {
+      const projectId = asString(args.projectId).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      return requestWorkbenchApi(config, `/projects/${encodeURIComponent(projectId)}/memory`);
+    }
+    case "ai_explain_retrieval": {
+      const projectId = asString(args.projectId).trim();
+      const query = asString(args.query).trim();
+      if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);
+      if (!query) throw new Error("query is required");
+      return requestWorkbenchApi(config, "/retrieval/explain", {
+        method: "POST",
+        body: {
+          projectId,
+          query,
+          mode: args.mode === "cloud" || args.mode === "hybrid" ? args.mode : "local",
+          depth: args.depth === "shallow" || args.depth === "deep" ? args.depth : "standard",
+          limit: Math.max(1, Math.min(50, Math.trunc(asNumber(args.limit, 8)))),
+        },
+      });
+    }
     case "ai_list_actions": {
       const projectId = asString(args.projectId).trim();
       if (!projectId || !store.getProject(projectId)) throw new Error(`Unknown project: ${projectId}`);

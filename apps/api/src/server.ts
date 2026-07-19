@@ -46,6 +46,7 @@ export interface IntelligenceStack {
 
 export interface ServerOptions {
   config?: Partial<ConfigSnapshot>;
+  desktopCacheDir?: string;
   inProcess?: boolean;
   intelligenceStack?: IntelligenceStack;
   store?: ReturnType<typeof createStore>;
@@ -514,7 +515,22 @@ export async function startWorkbenchServer(options: ServerOptions = {}): Promise
   app.use(projectRouter);
 
   const controlPlaneRouter = express.Router();
-  registerControlPlaneRoutes(controlPlaneRouter, { store, publish });
+  const isolatedDesktopCacheDir =
+    options.desktopCacheDir ??
+    (options.store || config.apiPort === 0 ? path.join(config.runtimeDir, "cache", "desktop") : null);
+  registerControlPlaneRoutes(controlPlaneRouter, {
+    store,
+    publish,
+    ...(isolatedDesktopCacheDir
+      ? {
+          cachePaths: {
+            registry: path.join(isolatedDesktopCacheDir, "project-registry-v1.json"),
+            activeContext: path.join(isolatedDesktopCacheDir, "active-context-v1.json"),
+            projectStatus: path.join(isolatedDesktopCacheDir, "project-status-v1.json"),
+          },
+        }
+      : {}),
+  });
   app.use(controlPlaneRouter);
 
   const sessionRouter = express.Router();

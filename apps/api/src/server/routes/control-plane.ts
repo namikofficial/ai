@@ -16,7 +16,11 @@ type Store = ReturnType<typeof createStore>;
 
 export function registerControlPlaneRoutes(
   router: Router,
-  deps: { store: Store; publish: (event: EventEnvelope) => void; cachePath?: string }
+  deps: {
+    store: Store;
+    publish: (event: EventEnvelope) => void;
+    cachePaths?: { registry?: string; activeContext?: string; projectStatus?: string };
+  }
 ) {
   const publish = (event: EventEnvelope): void => {
     deps.store.appendEvent(event);
@@ -47,7 +51,7 @@ export function registerControlPlaneRoutes(
   router.post(
     "/registry/cache/refresh",
     asyncRoute(async (_req, res) => {
-      const cache = await refreshRegistryCache(deps.store.projectRegistry, deps.cachePath);
+      const cache = await refreshRegistryCache(deps.store.projectRegistry, deps.cachePaths?.registry);
       sendJson(res, json("ok", cache));
     })
   );
@@ -99,7 +103,7 @@ export function registerControlPlaneRoutes(
         resolution === "approve" ? "approved" : "rejected",
         "api"
       );
-      if (resolution === "approve") await refreshRegistryCache(deps.store.projectRegistry, deps.cachePath);
+      if (resolution === "approve") await refreshRegistryCache(deps.store.projectRegistry, deps.cachePaths?.registry);
       publish(
         createEvent(
           resolution === "approve" ? "project.manifest_approved" : "project.manifest_rejected",
@@ -138,7 +142,7 @@ export function registerControlPlaneRoutes(
             body.pinScope === "session" ? deps.store.activeContext.getLatestObservation()?.origin.instanceId : null,
         }
       );
-      await refreshRegistryCache(deps.store.projectRegistry, deps.cachePath);
+      await refreshRegistryCache(deps.store.projectRegistry, deps.cachePaths?.registry);
       publish(
         createEvent(
           body.pinScope ? "project.pinned" : "project.selected",
@@ -154,7 +158,7 @@ export function registerControlPlaneRoutes(
     "/context/selection",
     asyncRoute(async (req, res) => {
       const selection = deps.store.projectRegistry.clearSelection(String(req.query.source ?? "api"));
-      await refreshRegistryCache(deps.store.projectRegistry, deps.cachePath);
+      await refreshRegistryCache(deps.store.projectRegistry, deps.cachePaths?.registry);
       publish(createEvent("project.unpinned", {}, { agent: "registry" }));
       sendJson(res, json("ok", selection));
     })
@@ -173,7 +177,7 @@ export function registerControlPlaneRoutes(
         ? deps.store.projectRegistry.clearSelection("pin-boundary-changed")
         : currentSelection;
       if (selectionExpired) {
-        await refreshRegistryCache(deps.store.projectRegistry, deps.cachePath);
+        await refreshRegistryCache(deps.store.projectRegistry, deps.cachePaths?.registry);
         publish(
           createEvent(
             "project.unpinned",
@@ -189,7 +193,7 @@ export function registerControlPlaneRoutes(
         previous,
       });
       deps.store.activeContext.saveContext(context, observation.id);
-      await writeActiveContextCache(context);
+      await writeActiveContextCache(context, deps.cachePaths?.activeContext);
       publish(
         createEvent(
           "desktop.observed",
@@ -228,7 +232,7 @@ export function registerControlPlaneRoutes(
     asyncRoute(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
       const status = await buildProjectStatus(deps.store, { projectId });
-      await writeProjectStatusCache(status);
+      await writeProjectStatusCache(status, deps.cachePaths?.projectStatus);
       sendJson(res, json("ok", status));
     })
   );
@@ -238,7 +242,7 @@ export function registerControlPlaneRoutes(
     asyncRoute(async (req, res) => {
       const projectId = typeof req.query.projectId === "string" ? req.query.projectId : null;
       const status = await buildProjectStatus(deps.store, { projectId });
-      await writeProjectStatusCache(status);
+      await writeProjectStatusCache(status, deps.cachePaths?.projectStatus);
       sendJson(res, json("ok", compactProjectStatus(status)));
     })
   );

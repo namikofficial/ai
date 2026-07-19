@@ -19,6 +19,7 @@ The Python RAG database remains a supported compatibility source while the TypeS
 | Task graphs and outcomes | `task_runs`, `task_outcomes` | sessions, tasks, DAG edges and structured outcomes | Import after node, reference and cycle validation |
 | Retrieval diagnostics | `retrieval_runs`, `retrieval_outcomes` | retrieval queries, feedback and misses | Import without fabricating chunk results |
 | Retrieval evaluation | `eval_cases`, `eval_runs` | eval cases and typed evaluation memory | Import; aggregate runs remain summaries because they have no case IDs |
+| Historical execution runs | `execution_runs` | row-level `legacy_import_items` provenance | Reference only; never fabricate canonical dev-run safety semantics |
 | Chunks, symbols, FTS, vectors | SQLite/Qdrant index data | Workbench index | Regenerate; never copy |
 | Python MCP tools | Python MCP server | Workbench MCP | Dual-run until client parity passes |
 
@@ -78,6 +79,26 @@ Every imported row receives:
 
 Running the same source again reports exact rows as duplicates and does not create duplicate tasks, sessions, memories, candidates, lessons, context packs, handoffs, retrieval history or evaluation cases. Changed source rows have a new content hash and remain separately auditable.
 
+Historical `execution_runs` are deliberately not imported as Workbench development runs. The legacy rows have an
+agent plan, output and modified-file list, but no canonical isolated workspace, reviewed diff hash, approval binding,
+apply lifecycle or recovery evidence. Apply mode instead records one duplicate-safe `legacy_import_items` row per
+source record, attaches a canonical project when the repository match is unambiguous, and leaves destination fields
+null with status `deferred`. This preserves auditability without claiming safety guarantees that did not exist.
+
+## MCP compatibility
+
+The 27 legacy Python MCP tools are covered by tested canonical Workbench capabilities rather than name-for-name
+wrappers. Search/deep/context tools map to project search, Ask, session context and retrieval explanation; task-graph
+tools map to canonical plans/tasks; outcome and learning tools map to task transitions, reflection and explicit
+memory; Git, command, performance and memory helpers map to project status, approved actions, checks, retrieval
+history and project memory. Control-plane tools additionally expose the canonical project list, selection/pinning,
+active-context explanation and normalized runtime health.
+
+The client-level parity test starts the real Workbench API, uses MCP JSON-RPC calls to select a project, then reads
+active context, project status, runtime health, project memory and live ranked/selected/dropped retrieval evidence.
+All calls use SQLite/API ownership and MCP audit logging; none reads Python state or a desktop cache. Python MCP must
+still remain available until a real client rehearsal confirms OpenCode/Codex configuration and rollback behavior.
+
 Each row is imported behind a SQLite savepoint. Rows with unmatched projects, invalid JSON, malformed dependency references, dependency cycles or oversized handoffs are reported as conflicts, and a failed row cannot leave a partial graph or context pack. The original database is never changed.
 
 Documented task graphs are capped at 256 subtasks, require unique IDs, validate every dependency, reject self-dependencies and cycles, and preserve task/outcome source IDs through stable provenance. Retrieval runs become canonical retrieval queries; legacy selected-file data remains in the query analysis rather than fabricating canonical chunk IDs.
@@ -109,7 +130,7 @@ Do not delete the Python database, handoff files, or Qdrant storage during compa
 
 - Add a reviewed real-data dry run when a Python SQLite database is available.
 - Link imported lessons to imported task outcomes where the legacy IDs provide unambiguous evidence.
-- Decide whether historical `execution_runs` should map to dev runs or remain provenance-only; they are deliberately deferred today.
-- Run client-level MCP parity tests before retiring Python MCP tools.
+- Revisit provenance-only historical `execution_runs` only if a future, documented source format can prove canonical workspace, diff, approval and apply semantics.
+- Rehearse the tested MCP parity surface through real OpenCode and Codex client configurations before retiring Python tools.
 - Reindex imported projects and verify retrieval quality instead of copying legacy FTS/Qdrant data.
 - Retire each duplicate capability only after its acceptance test and rollback drill passes.

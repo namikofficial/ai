@@ -142,6 +142,15 @@ const CAPABILITIES: PythonRagCapabilityMapping[] = [
     notes: "Import cases directly; preserve aggregate legacy run metrics as typed retrieval-evaluation memory.",
   },
   {
+    capability: "historical execution runs",
+    source: "execution_runs",
+    destination: "legacy_import_items provenance",
+    parity: "partially_present",
+    migration: "reference",
+    notes:
+      "Retain row-level, project-scoped provenance only. Legacy runs lack canonical isolated-workspace, diff-review, approval and apply semantics, so importing them as development runs would fabricate safety guarantees.",
+  },
+  {
     capability: "task graphs and subtask outcomes",
     source: "task_runs + task_outcomes",
     destination: "plans + agent_tasks + execution outcomes",

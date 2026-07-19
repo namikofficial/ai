@@ -48,6 +48,12 @@ interface ImportSpec {
     | "task_outcome";
 }
 
+interface ReferenceSpec {
+  table: string;
+  idColumn: string;
+  summary: string;
+}
+
 const IMPORT_SPECS: ImportSpec[] = [
   { table: "task_sessions", idColumn: "session_id", destinationType: "agent_session" },
   { table: "task_todos", idColumn: "todo_id", destinationType: "agent_task" },
@@ -67,6 +73,15 @@ const IMPORT_SPECS: ImportSpec[] = [
   { table: "task_runs", idColumn: "run_id", destinationType: "task_graph" },
   { table: "task_outcomes", idColumn: "outcome_id", destinationType: "task_outcome" },
   { table: "task_lessons", idColumn: "lesson_id", destinationType: "lesson" },
+];
+
+const REFERENCE_SPECS: ReferenceSpec[] = [
+  {
+    table: "execution_runs",
+    idColumn: "id",
+    summary:
+      "Retained as provenance only; legacy execution lacks canonical workspace, reviewed diff, approval and apply semantics",
+  },
 ];
 
 function stableHash(value: unknown): string {
@@ -711,6 +726,67 @@ export async function applyPythonRagMigration(input: {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(runId, "python-rag", sourceDatabase, sourceFingerprint, backup.path, "running", "{}", generatedAt, null);
+    for (const spec of REFERENCE_SPECS) {
+      if (!present.has(spec.table)) continue;
+      const rows = source.prepare(`SELECT * FROM "${spec.table}"`).all() as SourceRow[];
+      for (const row of rows) {
+        const sourceId = text(row, spec.idColumn);
+        const sourceHash = stableHash(row);
+        const sourceRef = `${spec.table}:${sourceId}`;
+        const existing = input.destination
+          .prepare(
+            `SELECT project_id, error_message FROM legacy_import_items
+             WHERE source_system = ? AND source_database = ? AND source_table = ? AND source_id = ? AND source_hash = ?`
+          )
+          .get("python-rag", sourceDatabase, spec.table, sourceId, sourceHash) as
+          | { project_id: string | null; error_message: string | null }
+          | undefined;
+        if (existing) {
+          items.push({
+            source: sourceRef,
+            status: "deferred",
+            destinationType: null,
+            destinationId: null,
+            summary: existing.error_message ?? spec.summary,
+          });
+          continue;
+        }
+        const repo = optionalText(row, "repo");
+        const projectId = repo ? (map.get(repo) ?? null) : null;
+        const summary =
+          repo && !projectId ? `${spec.summary}; no canonical project matches source repo ${repo}` : spec.summary;
+        const itemId = stableId("legacy_item", { runId, sourceRef, sourceHash });
+        input.destination
+          .prepare(
+            `INSERT INTO legacy_import_items (
+              id, run_id, source_system, source_database, source_table, source_id, source_hash,
+              project_id, destination_type, destination_id, status, error_message, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          )
+          .run(
+            itemId,
+            runId,
+            "python-rag",
+            sourceDatabase,
+            spec.table,
+            sourceId,
+            sourceHash,
+            projectId,
+            null,
+            null,
+            "deferred",
+            summary,
+            generatedAt
+          );
+        items.push({
+          source: sourceRef,
+          status: "deferred",
+          destinationType: null,
+          destinationId: null,
+          summary,
+        });
+      }
+    }
     for (const spec of IMPORT_SPECS) {
       if (!present.has(spec.table)) continue;
       const rows = source.prepare(`SELECT * FROM "${spec.table}"`).all() as SourceRow[];

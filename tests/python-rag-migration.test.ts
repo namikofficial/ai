@@ -32,6 +32,18 @@ test("Python RAG migration dry run inventories documented data without destinati
       content TEXT, metadata_json TEXT, created_at REAL, updated_at REAL
     );
     INSERT INTO context_packs VALUES (1, 'matched', 'pack', 'generic', 'generated', 'text', '{}', 1, 1);
+    CREATE TABLE execution_runs (
+      id TEXT PRIMARY KEY, session_id TEXT, repo TEXT, target TEXT NOT NULL, profile_id TEXT,
+      intent TEXT, mode TEXT, risk_level TEXT, query TEXT NOT NULL, prompt_hash TEXT,
+      agent_plan_json TEXT NOT NULL, status TEXT NOT NULL, stdout TEXT, stderr TEXT,
+      exit_code INTEGER, duration_ms INTEGER, files_modified TEXT NOT NULL,
+      started_at REAL, finished_at REAL
+    );
+    INSERT INTO execution_runs VALUES (
+      'execution-1', 'session-1', 'matched', 'codex', 'coding', 'implement', 'edit', 'medium',
+      'change importer', 'prompt-hash', '{"steps":["edit"]}', 'completed', 'done', NULL,
+      0, 100, '["src/migrate.ts"]', 1, 2
+    );
     CREATE TABLE task_runs (
       run_id TEXT PRIMARY KEY, repo TEXT, task TEXT, task_fingerprint TEXT, mode TEXT,
       max_subtasks INTEGER, graph_json TEXT, status TEXT, current_subtask_id TEXT,
@@ -222,7 +234,7 @@ test("Python RAG migration dry run inventories documented data without destinati
     assert.ok(report.conflicts.some((conflict) => conflict.code === "unmatched_project"));
     assert.ok(report.conflicts.some((conflict) => conflict.code === "invalid_json"));
     assert.ok(report.totals.importableRows >= 1);
-    assert.equal(report.totals.referenceRows, 0);
+    assert.equal(report.totals.referenceRows, 1);
     assert.equal(report.totals.regenerableRows, 2);
     assert.equal(after.mtimeMs, before.mtimeMs, "read-only inventory must not modify the Python database");
 
@@ -240,6 +252,7 @@ test("Python RAG migration dry run inventories documented data without destinati
     assert.equal(validateWorkbenchBackup(firstBackup).integrity, "ok");
     assert.equal(firstImport.totals.imported, 10);
     assert.equal(firstImport.totals.conflicted, 2);
+    assert.equal(firstImport.totals.deferred, 3);
     assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM agent_tasks").get() as { count: number }).count, 3);
     assert.equal(
       (store.db.prepare("SELECT COUNT(*) AS count FROM agent_task_dependencies").get() as { count: number }).count,
@@ -269,6 +282,23 @@ test("Python RAG migration dry run inventories documented data without destinati
       ).count,
       10
     );
+    const executionProvenance = store.db
+      .prepare(
+        `SELECT project_id, destination_type, destination_id, status, error_message
+         FROM legacy_import_items WHERE source_table = 'execution_runs' AND source_id = 'execution-1'`
+      )
+      .get() as {
+      project_id: string | null;
+      destination_type: string | null;
+      destination_id: string | null;
+      status: string;
+      error_message: string | null;
+    };
+    assert.equal(executionProvenance.project_id, project.id);
+    assert.equal(executionProvenance.destination_type, null);
+    assert.equal(executionProvenance.destination_id, null);
+    assert.equal(executionProvenance.status, "deferred");
+    assert.match(executionProvenance.error_message ?? "", /provenance only/);
 
     const restoredPath = join(workspace, "restored-workbench.db");
     const displaced = createStore(initializeStore(restoredPath));
@@ -311,6 +341,18 @@ test("Python RAG migration dry run inventories documented data without destinati
     assert.equal(secondImport.totals.imported, 0);
     assert.equal(secondImport.totals.duplicate, 10);
     assert.equal(secondImport.totals.conflicted, 2);
+    assert.equal(secondImport.totals.deferred, 3);
+    assert.equal(secondImport.items.find((item) => item.source === "execution_runs:execution-1")?.status, "deferred");
+    assert.equal(
+      (
+        store.db
+          .prepare("SELECT COUNT(*) AS count FROM legacy_import_items WHERE source_table = 'execution_runs'")
+          .get() as {
+          count: number;
+        }
+      ).count,
+      1
+    );
     assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM agent_tasks").get() as { count: number }).count, 3);
     assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM handoffs").get() as { count: number }).count, 1);
     assert.equal((store.db.prepare("SELECT COUNT(*) AS count FROM lessons").get() as { count: number }).count, 1);
@@ -335,6 +377,7 @@ test("Python RAG parity map covers every required legacy capability", () => {
     "handoffs",
     "retrieval diagnostics",
     "retrieval evaluation",
+    "historical execution runs",
     "task graphs and subtask outcomes",
     "lessons",
     "MCP interfaces",
