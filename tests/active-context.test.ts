@@ -55,7 +55,7 @@ test("active context precedence prefers explicit override and persistent pin", (
 test("unverified tmux is rejected and cannot override focused process context", () => {
   const context = resolveActiveContext({
     observation: observation({
-      window: { ...fixtures.DesktopObservation.window, className: "kitty", role: "terminal" },
+      window: { address: "0xterm", pid: 10, className: "kitty", title: "shell", role: "terminal" },
       process: { pid: 10, parentPid: null, cwd: manifest.path, command: "zsh" },
       tmux: { clientPid: 99, session: "unrelated", paneId: "%1", cwd: "/tmp/other", associationVerified: false },
     }),
