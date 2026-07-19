@@ -13,8 +13,10 @@ flowchart LR
   W -. optional .-> E[Embeddings]
   W -. optional .-> Q[Qdrant]
   D[Desktop observer] --> W
+  F[Project file-event bridge] -->|status refresh request| W
   N[Notification bridge] --> W
   D -. cached fallback .-> C[XDG status cache]
+  C --> F
 ```
 
 ## Ownership and readiness
@@ -88,7 +90,25 @@ migration report with CPU model, repository size, sample count, and Workbench re
 
 The desktop launcher first asks systemd to start the target. If the target is not installed or cannot start, it stops the failed target and starts the established `ai-workbench` tmux scene instead.
 
-Dotfiles separately provides graphical-session units for the Hyprland observation and notification bridges. They reconnect independently and do not make the Workbench control plane depend on a running desktop session.
+Dotfiles separately provides graphical-session units for the Hyprland observation, active-project file-event, and
+notification bridges. They reconnect independently and do not make the Workbench control plane depend on a running
+desktop session. The dotfiles bootstrap links these units but deliberately does not enable or start them:
+
+```bash
+cd /home/namik/Documents/code/dotfiles
+./setup/bootstrap.sh
+systemctl --user daemon-reload
+systemctl --user enable --now \
+  ai-workbench-desktop-observer.service \
+  ai-workbench-project-watch.service \
+  ai-workbench-notification-bridge.service
+```
+
+`ai-workbench-project-watch.service` reads only the canonical status cache to choose a registered project, watches
+that canonical absolute path with bounded inotify subscriptions, prunes dependency/build/index trees, and requests
+one debounced project-scoped status refresh from the loopback API. It never performs Git, Docker, project detection,
+or a canonical mutation on the desktop side. Its default API endpoint is the same central `127.0.0.1:4417` contract
+used by the other clients when `runtime.env` is absent.
 
 ## Rollback and uninstall
 
@@ -98,11 +118,22 @@ Dotfiles separately provides graphical-session units for the Hyprland observatio
 
 Uninstall stops and removes only the three known Workbench units. It preserves `~/.config/ai-workbench/runtime.env`, the SQLite database, caches and project data. The tmux launcher remains available immediately after rollback.
 
+The graphical desktop bridges belong to dotfiles and are rolled back independently without deleting their caches:
+
+```bash
+systemctl --user disable --now \
+  ai-workbench-desktop-observer.service \
+  ai-workbench-project-watch.service \
+  ai-workbench-notification-bridge.service
+```
+
 ## Troubleshooting
 
 - If `/ready` fails, inspect the Workbench journal and verify the database directory is writable.
 - If `/ready` succeeds but `/runtime/health` is `stale`, inspect the specific component and blocker codes; core functionality is still available.
 - A stale worker means its heartbeat is older than 15 seconds. Restart `ai-workbench-worker.service`.
 - A stale desktop bridge means no focus observation arrived for 30 seconds. Check `ai-workbench-desktop-observer.service` and the Hyprland socket.
+- If Git state updates only on the five-second fallback read, inspect `ai-workbench-project-watch.service`; confirm
+  the status cache contains an absolute, canonical, non-symlink project path and check its structured journal.
 - Qdrant being `unknown` while disabled is expected; retrieval falls back to SQLite FTS.
 - The model manager can be `loading` while its models list is empty and becomes `ready` after at least one model is exposed.

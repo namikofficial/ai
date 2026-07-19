@@ -1,6 +1,6 @@
 # Unified Workbench continuation plan
 
-Updated: 2026-07-18
+Updated: 2026-07-20
 
 The repositories are coherent and verified, but the complete product objective is not yet proven. This document
 lists concrete remaining gates rather than treating compatibility slices as finished phases.
@@ -75,9 +75,11 @@ editor, terminal, correlated tmux, transient windows, pinning, Rofi actions, scr
 links, failed checks, Ask→Plan→Dev→Review→Memory, MCP/OpenCode resume, and Workbench/model/Qdrant/Docker offline
 states. Record raw evidence in `HARDENING_REPORT.md`.
 
-The 2026-07-18 live preflight found an active Hyprland session but no installed Workbench/observer user units and no
-selected project. It verified schema-valid stale cache fallback only. Focus correlation and latency remain unproven;
-see `HARDENING_REPORT.md` before running the deliberate service-install and focus-switch rehearsal.
+The 2026-07-20 live preflight found an active Hyprland session but no linked graphical Workbench bridge units and no
+valid selected-project cache after quarantining test-contaminated XDG files. Ephemeral test servers now isolate all
+desktop caches below their runtime directory, and a full suite did not recreate the real cache. Focus correlation and
+latency remain unproven; see `HARDENING_REPORT.md` before running the deliberate service-install and focus-switch
+rehearsal.
 
 ## Priority 4 — Python compatibility parity decisions
 

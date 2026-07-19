@@ -93,3 +93,25 @@ window was a Kitty terminal in workspace 1. No focus was changed and no project 
 This is positive evidence for offline read-only fallback, not evidence for focus correlation or latency. The live
 acceptance sequence still requires explicit service installation/startup and deliberate editor/terminal/tmux focus
 changes; those external-state steps were not performed automatically in an active user session.
+
+## Live graphical-session preflight — 2026-07-20
+
+A second non-disruptive preflight confirmed an active Hyprland environment through
+`HYPRLAND_INSTANCE_SIGNATURE` and `WAYLAND_DISPLAY=wayland-1`. The sandbox could not connect to the host user-systemd
+bus, so `systemctl --user` output was treated as unavailable rather than evidence that a host service was stopped.
+Filesystem inspection provided definitive installation evidence instead:
+
+- the observer, project watcher, and notification bridge units were not linked under
+  `~/.config/systemd/user`, so the new graphical-session bridge set had not been installed;
+- no valid registered-project status cache remained after quarantine of two files contaminated by an ephemeral MCP
+  integration test;
+- the contaminated `project-registry-v1.json` and `project-status-v1.json` were moved recoverably to
+  `~/.cache/ai-workbench/quarantine-20260720-test-pollution/` rather than deleted;
+- ephemeral Workbench servers now default every desktop cache writer to a runtime-local cache directory, and the
+  integration test asserts this boundary. A full 376-test run did not recreate either real XDG cache file;
+- the separately supervised inotify bridge passed its canonical-path, dependency-pruning, project-scoped refresh,
+  loopback-only, and canonical-port tests. It remains uninstalled pending the deliberate live rehearsal.
+
+This preflight proves test-cache isolation and a safe pre-install state. It does not prove editor/terminal/tmux focus
+correlation, Wayle latency, bridge CPU/RSS, or restart recovery. Legacy Kage therefore remains an explicit rollback
+watcher until the graphical service set is installed and the complete live acceptance sequence passes.
