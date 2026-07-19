@@ -114,6 +114,11 @@ prunes dependency/build/index trees, debounces file bursts and requests project-
 running Git or Docker on the desktop. The remaining duplicate is the explicitly retained Kage rollback watcher,
 pending live desktop parity.
 
+The archived legacy profile was exercised against the live canonical database on 2026-07-20. Dry-run recovered all
+six projects; five missing canonical entries were explicitly approved, while the lower-precedence Dotfiles proposal
+was rejected in favor of its richer existing manifest. Wellvantage remains a visible missing-path legacy entry, and
+all imported `zsh -lc` actions remain disabled behind `legacy-shell-approval`. No legacy command was executed.
+
 The graphical observer/watcher/notification set now has a narrow dry-run/install/enable/status/uninstall helper, so
 the live gate no longer requires running the full workstation bootstrap. Its regression test installs into an
 isolated XDG configuration, verifies exact unit copies and daemon reload, then proves rollback removes only the three

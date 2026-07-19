@@ -123,6 +123,13 @@ Hyprland session. This rehearsal used the canonical `runtime/ai.db`, then regist
 minimal Dotfiles manifest as the representative real project. The temporary persistent pin was removed at the end;
 the approved registry entry remains canonical.
 
+The retired `project-profile.sh` from the Git archive was then passed through the non-executing legacy importer.
+Dry-run recovered Dotfiles, Noxcrm, Nox Billings, Nox Tickets, Wellvantage, and Trackme. The lower-precedence Dotfiles
+proposal was rejected because a richer canonical manifest already existed; the other five were explicitly approved.
+Wellvantage is retained as missing-path legacy knowledge instead of silently discarded. All imported shell actions
+remain `waiting` with `Requires capabilities: legacy-shell-approval`, so migration preserves commands without making
+them executable. The registry cache now contains all six original profiles and no active selection.
+
 Live startup exposed and fixed defects that isolated tests had not exercised:
 
 - systemd could not resolve the interactive NVM `pnpm`; API and worker units now invoke the repository CLI through
