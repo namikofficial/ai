@@ -193,21 +193,25 @@ export function buildFtsQuery(question: string): string | null {
   if (terms.length === 0) {
     return null;
   }
-  return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" AND ");
+  return terms.map((term) => `"${term.replaceAll('"', '""')}"`).join(" OR ");
 }
 
 export function rankChunk(question: string, path: string, content: string, startLine: number, endLine: number): number {
   const haystack = `${path}\n${content}`.toLowerCase();
   const terms = tokenize(question);
   let score = 0;
-  if (question.trim().length > 0 && haystack.includes(question.toLowerCase().trim())) {
+  const phraseMatched = question.trim().length > 0 && haystack.includes(question.toLowerCase().trim());
+  if (phraseMatched) {
     score += 5;
   }
+  let matchedTerms = 0;
   for (const term of terms) {
     if (haystack.includes(term)) {
+      matchedTerms += 1;
       score += term.length >= 6 ? 3 : 1;
     }
   }
+  if (!phraseMatched && matchedTerms === 0) return 0;
   const pathParts = path
     .toLowerCase()
     .split(/[^a-z0-9]+/g)
