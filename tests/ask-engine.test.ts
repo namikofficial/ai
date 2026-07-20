@@ -87,7 +87,7 @@ test("ask-engine: citation and fallback helpers are deterministic", () => {
           projectId: "p1",
           documentId: "d1",
           path: "src/recovery.ts",
-          content: "line1\nline2\nline3\nline4\nrecoverInterruptedIndexing();\nline6",
+          content: "unrelated call site\nline2\nline3\nline4\nrecoverInterruptedIndexing();\nline6",
           startLine: 10,
           endLine: 15,
           tokenCount: 6,
