@@ -425,8 +425,10 @@ function buildSessionTimelineForRequest(store: ReturnType<typeof createStore>, s
 export async function startWorkbenchServer(options: ServerOptions = {}): Promise<ServerHandle> {
   const config = resolveConfig(options.config ?? {});
   await mkdir(config.runtimeDir, { recursive: true });
+  const ownsStore = options.store == null;
   const store = options.store ?? createStore(initializeStore(config.databasePath));
   await store.ensureRuntimeDirs(config.runtimeDir);
+  if (ownsStore) store.recoverInterruptedIndexing();
   if (options.intelligenceStack) {
     store.setIntelligenceStack(options.intelligenceStack);
   } else if (process.env.AI_DISABLE_INTELLIGENCE_STACK !== "true") {
