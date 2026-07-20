@@ -543,6 +543,116 @@ export function createStore(db: DatabaseSync) {
       await mkdir(join(runtimeDir, "exports"), { recursive: true });
       await mkdir(join(runtimeDir, "logs"), { recursive: true });
     },
+    recoverInterruptedIndexing(
+      reason = "Workbench restarted before project indexing completed.",
+    ): number {
+      const sessions = db
+        .prepare(
+          `SELECT id, project_id, active_task_id, started_at
+           FROM agent_sessions
+           WHERE mode = 'index' AND status IN ('queued', 'running')
+           ORDER BY created_at ASC`,
+        )
+        .all() as Array<{
+        id: string;
+        project_id: string | null;
+        active_task_id: string | null;
+        started_at: string;
+      }>;
+      if (sessions.length === 0) return 0;
+
+      const finishedAt = now();
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        for (const session of sessions) {
+          const tasks = store
+            .listTasks(session.id, 100)
+            .filter((task) => task.status === "queued" || task.status === "running");
+          for (const task of tasks) {
+            store.updateTask(task.id, {
+              status: "failed",
+              resultJson: JSON.stringify({ error: reason, interrupted: true }),
+            });
+            store.appendEvent(
+              createEvent(
+                "task.failed",
+                { error: reason, interrupted: true },
+                {
+                  sessionId: session.id,
+                  projectId: session.project_id,
+                  taskId: task.id,
+                  agent: "orchestrator",
+                  level: "error",
+                },
+              ),
+            );
+          }
+
+          for (const run of agentsRepo
+            .listRuns(session.id, 200)
+            .filter((entry) => entry.status === "running")) {
+            agentsRepo.updateRun(run.id, {
+              status: "failed",
+              finishedAt,
+              durationMs: Math.max(
+                0,
+                Date.parse(finishedAt) - Date.parse(run.startedAt),
+              ),
+              error: reason,
+              output: { interrupted: true },
+            });
+          }
+
+          store.updateSession(session.id, {
+            status: "failed",
+            finishedAt,
+            durationMs: Math.max(
+              0,
+              Date.parse(finishedAt) - Date.parse(session.started_at),
+            ),
+            activeTaskId: null,
+            errorMessage: reason,
+            finalSummary: "Project indexing was interrupted and was not replayed.",
+          });
+          if (session.project_id) {
+            const project = store.getProject(session.project_id);
+            if (project?.status === "indexing") {
+              store.updateProjectStatus(session.project_id, "error");
+            }
+          }
+          store.appendEvent(
+            createEvent(
+              "index.failed",
+              { error: reason, interrupted: true, manualRequest: true },
+              {
+                sessionId: session.id,
+                projectId: session.project_id,
+                taskId: session.active_task_id,
+                agent: "indexer",
+                level: "error",
+              },
+            ),
+          );
+          store.appendEvent(
+            createEvent(
+              "session.failed",
+              { error: reason, interrupted: true },
+              {
+                sessionId: session.id,
+                projectId: session.project_id,
+                agent: "orchestrator",
+                level: "error",
+              },
+            ),
+          );
+        }
+        db.exec("COMMIT");
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+      return sessions.length;
+    },
     listProjects(): ProjectSummary[] {
       const projects = db
         .prepare("SELECT * FROM projects ORDER BY updated_at DESC")
