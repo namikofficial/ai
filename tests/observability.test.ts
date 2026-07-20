@@ -258,6 +258,49 @@ test("observability: indexProject records an indexer agent run", async () => {
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("observability: failed indexing closes canonical session, task, run, and project state", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-obs-index-failure-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src", "main.ts"), "export const value = 1;\n");
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "index-failure-repo" });
+  store.db.exec(`
+    CREATE TRIGGER fail_embedding_cache_insert
+    BEFORE INSERT ON embedding_cache
+    BEGIN
+      SELECT RAISE(FAIL, 'forced embedding write failure');
+    END;
+  `);
+
+  await assert.rejects(store.indexProject(project.id), /forced embedding write failure/);
+
+  const session = store.listSessions(1)[0];
+  assert.ok(session);
+  assert.equal(session?.status, "failed");
+  assert.equal(session?.activeTaskId, null);
+  assert.match(session?.errorMessage ?? "", /forced embedding write failure/);
+  assert.ok(session?.finishedAt);
+
+  const task = store.listTasks(session?.id ?? "", 1)[0];
+  assert.equal(task?.status, "failed");
+  assert.match(task?.resultJson ?? "", /forced embedding write failure/);
+  assert.equal(store.getProject(project.id)?.status, "error");
+
+  const indexerRun = store.agents.listRuns(session?.id ?? "").find((run) => run.agent === "indexer");
+  assert.equal(indexerRun?.status, "failed");
+  assert.match(indexerRun?.error ?? "", /forced embedding write failure/);
+
+  const eventTypes = new Set(store.listEvents(session?.id, 50).map((event) => event.type));
+  assert.ok(eventTypes.has("task.failed"));
+  assert.ok(eventTypes.has("index.failed"));
+  assert.ok(eventTypes.has("session.failed"));
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("observability: reindex skips unchanged files and avoids extra embedding calls", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-index-reuse-"));
   const repo = join(workspace, "repo");
