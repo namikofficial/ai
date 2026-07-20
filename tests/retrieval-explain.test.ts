@@ -85,7 +85,7 @@ test("buildRetrievalPipelineInput loads FTS+heuristic+feedback+misses+memory+fac
   assert.equal(pipelineInput.query, "alpha");
   assert.equal(pipelineInput.intent, "lookup");
   assert.equal(pipelineInput.ftsChunks.length > 0, true, "FTS should find alpha.ts chunk");
-  assert.equal(pipelineInput.heuristicChunks.length > 0, true, "Heuristic should list recent files");
+  assert.equal(pipelineInput.heuristicChunks.length, 0, "Unrelated recent files must not become retrieval matches");
   assert.equal(pipelineInput.feedback.length, 1);
   assert.equal(pipelineInput.feedback[0]?.rating, "good");
   assert.equal(pipelineInput.missRecords.length, 1);
