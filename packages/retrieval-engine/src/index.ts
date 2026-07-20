@@ -212,6 +212,14 @@ export function rankChunk(question: string, path: string, content: string, start
     }
   }
   if (!phraseMatched && matchedTerms === 0) return 0;
+  const loweredContent = content.toLowerCase();
+  for (const term of terms) {
+    const declaration = new RegExp(
+      `(?:^|\\n)\\s*(?:(?:export|default|declare|public|private|protected|static|readonly|abstract)\\s+)*(?:(?:async|function|class|interface|type|enum|const|let|var)\\s+)?${term}\\s*(?:[<(=:]|\\{)`,
+      "m"
+    );
+    if (declaration.test(loweredContent)) score += 4;
+  }
   const pathParts = path
     .toLowerCase()
     .split(/[^a-z0-9]+/g)
@@ -228,7 +236,7 @@ export function rankChunk(question: string, path: string, content: string, start
   if (/test|spec/i.test(path)) score += 1;
   if (/readme|docs?|notes?/i.test(path)) score += 1;
   if (/index|overview|summary/i.test(path)) score += 0.5;
-  if (terms.some((term) => content.toLowerCase().includes(`${term}(`) || content.toLowerCase().includes(`${term} `))) {
+  if (terms.some((term) => loweredContent.includes(`${term}(`) || loweredContent.includes(`${term} `))) {
     score += 1;
   }
   if (
