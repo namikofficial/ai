@@ -40,6 +40,22 @@ test("retrieval-engine: builds FTS queries and ranks relevant chunks", () => {
     rankChunk("recoverInterruptedIndexing implemented", "docs/session.md", "unrelated session notes", 1, 4),
     0
   );
+  assert.ok(
+    rankChunk(
+      "where is recoverInterruptedIndexing implemented?",
+      "packages/db/src/store.ts",
+      "recoverInterruptedIndexing(): number { return 0; }",
+      1,
+      1
+    ) >
+      rankChunk(
+        "where is recoverInterruptedIndexing implemented?",
+        "apps/api/src/server.ts",
+        "store.recoverInterruptedIndexing();",
+        1,
+        1
+      )
+  );
 });
 
 test("retrieval-engine: searchProjectChunks returns heuristic, FTS, and qdrant-safe results", async () => {
