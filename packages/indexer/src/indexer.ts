@@ -112,9 +112,23 @@ function readExistingDocument(db: DatabaseSync, projectId: string, path: string)
 
 function globMatch(value: string, pattern: string): boolean {
   const normalized = pattern.replaceAll("\\", "/").trim();
-  const escaped = normalized.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-  const regex = escaped.replace(/\*\*/g, ".*").replace(/\*/g, "[^/]*");
-  return new RegExp(`^${regex}$`).test(value.replaceAll("\\", "/").replace(/^\.?\//, ""));
+  let regex = "^";
+  for (let index = 0; index < normalized.length; index += 1) {
+    const char = normalized.charAt(index);
+    const next = normalized[index + 1] ?? "";
+    if (char === "*" && next === "*") {
+      regex += ".*";
+      index += 1;
+      continue;
+    }
+    if (char === "*") {
+      regex += "[^/]*";
+      continue;
+    }
+    regex += /[.+^${}()|[\]\\?]/.test(char) ? `\\${char}` : char;
+  }
+  regex += "$";
+  return new RegExp(regex).test(value.replaceAll("\\", "/").replace(/^\.?\//, ""));
 }
 
 export async function indexProject(options: IndexProjectOptions): Promise<IndexProjectResult> {
