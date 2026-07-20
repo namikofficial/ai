@@ -171,6 +171,53 @@ test("code-intelligence: indexer continues when symbol extraction fails", async 
   await rm(workspace, { recursive: true, force: true });
 });
 
+test("code-intelligence: indexer applies recursive include and ignore globs to monorepo paths", async () => {
+  const workspace = await mkdtemp(join(tmpdir(), "ai-indexer-recursive-glob-"));
+  const repo = join(workspace, "repo");
+  await mkdir(join(repo, "apps", "api", "src"), { recursive: true });
+  await writeFile(join(repo, "apps", "api", "src", "main.ts"), "export const ready = true;\n");
+  await writeFile(join(repo, "apps", "api", "src", "main.test.ts"), "export const fixture = true;\n");
+
+  const store = createStore(initializeStore(join(workspace, "ai.db")));
+  const project = store.createProject({ path: repo, name: "repo" });
+  const result = await indexProject({
+    db: store.db,
+    projectId: project.id,
+    projectPath: repo,
+    projectConfig: {
+      ignore: ["**/*.test.ts"],
+      include: ["apps/**"],
+      chunking: { preferTreeSitter: true, maxChunkTokens: 900 },
+      codeIntelligence: { enabled: false },
+      retrieval: { boostPaths: [], authHints: [] },
+      models: { answer: null, embedding: null },
+    },
+    qdrant: null,
+    embedBatch: async (inputs) => ({
+      embeddings: inputs.map(() => [0, 0, 0]),
+      dimensions: 3,
+      modelName: "mock",
+      providerId: "mock",
+    }),
+    embeddingModel: "mock",
+    embeddingProvider: "mock",
+    embeddingDimension: 3,
+  });
+
+  assert.equal(result.filesIndexed, 1);
+  assert.equal(result.chunksIndexed, 1);
+  const paths = store.db
+    .prepare("SELECT path FROM files WHERE project_id = ? AND is_indexed = 1 ORDER BY path")
+    .all(project.id) as Array<{ path: string }>;
+  assert.deepEqual(
+    paths.map((entry) => entry.path),
+    ["apps/api/src/main.ts"]
+  );
+
+  store.db.close();
+  await rm(workspace, { recursive: true, force: true });
+});
+
 test("code-intelligence: retrieval uses symbol and graph signals", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ai-code-search-"));
   const repo = join(workspace, "repo");
