@@ -43,6 +43,20 @@ function classifyIntentFromQuery(query: string): RetrievalIntentKind {
   return "lookup";
 }
 
+function relevantExcerpt(content: string, needles: string[], lineCount = 4): string {
+  const lines = content.split("\n");
+  const normalizedNeedles = needles
+    .map((needle) => needle.trim().toLowerCase())
+    .filter((needle) => needle.length >= 3)
+    .sort((left, right) => right.length - left.length);
+  const matchIndex = lines.findIndex((line) => {
+    const lowered = line.toLowerCase();
+    return normalizedNeedles.some((needle) => lowered.includes(needle));
+  });
+  const start = matchIndex < 0 ? 0 : Math.max(0, matchIndex - 1);
+  return lines.slice(start, start + lineCount).join("\n");
+}
+
 export interface BuildRetrievalPipelineInputArgs {
   projectId: string;
   query: string;
@@ -69,6 +83,7 @@ export function runRetrievalExplain(store: Store, input: RetrievalExplainInput):
     ftsLimit: input.depth === "deep" ? 12 : input.depth === "shallow" ? 4 : input.limit,
   });
   const output = runRetrievalPipeline(pipelineInput);
+  const excerptNeedles = [...output.analysis.symbolHints, ...output.analysis.terms];
   return {
     query: input.query,
     projectId: input.projectId,
@@ -89,7 +104,7 @@ export function runRetrievalExplain(store: Store, input: RetrievalExplainInput):
     selected: output.selected.map((entry) => ({
       chunkId: entry.chunk.id,
       path: entry.chunk.path,
-      excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
+      excerpt: relevantExcerpt(entry.chunk.content, excerptNeedles),
       finalScore: entry.finalScore,
     })),
     dropped: output.dropped.map((entry) => ({
