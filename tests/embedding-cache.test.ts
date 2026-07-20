@@ -103,6 +103,26 @@ test("embedding-cache: recordHit and stats roll up over multiple lookups", async
   }
 });
 
+test("embedding-cache: repeated miss and bypass batches grow linearly", async () => {
+  const { db, cleanup } = openTestDb();
+  try {
+    const repo = createEmbeddingCacheRepo(db);
+    for (let index = 0; index < 64; index += 1) {
+      repo.recordMiss("provider_llamacpp_local", "nomic-embed-text", 4, 1);
+      repo.recordBypassed("provider_llamacpp_local", "nomic-embed-text", 4, 2);
+    }
+
+    const match = repo
+      .stats()
+      .find((entry) => entry.providerId === "provider_llamacpp_local" && entry.modelName === "nomic-embed-text");
+    assert.ok(match, "stats row should exist");
+    assert.equal(match?.misses, 64);
+    assert.equal(match?.bypassed, 128);
+  } finally {
+    await cleanup();
+  }
+});
+
 test("embedding-cache: embedWithCache returns cache hits without invoking the embedder", async () => {
   const { db, cleanup } = openTestDb();
   try {
