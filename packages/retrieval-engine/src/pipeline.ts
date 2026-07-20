@@ -73,7 +73,12 @@ export function buildRetrievalPipelineInput(
           limit: args.ftsLimit,
         })
       : [];
-  const heuristicChunks = source.searchChunks(args.projectId, "", { limit: 4 });
+  // `searchChunks` already owns the local FTS/symbol/lexical fallback. Do not
+  // inject query-independent recent files here: active and recent files are
+  // separate, explicit context sources and unrelated chunks can otherwise
+  // consume the retrieval token budget with misleadingly positive metadata
+  // boosts.
+  const heuristicChunks: RetrievalChunk[] = [];
   const queries = source.retrieval.listQueriesForProject(args.projectId, 200);
   const feedback: RetrievalFeedbackRecord[] = [];
   const misses: RetrievalMissRecord[] = [];
