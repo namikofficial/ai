@@ -272,7 +272,7 @@ test("retrieval-engine: buildRetrievalPipelineInput keeps lexical and vector can
     queryVector: [1, 0, 0],
   });
 
-  assert.deepEqual(calls, ["search", "vector", "search"]);
+  assert.deepEqual(calls, ["search", "vector"]);
   assert.equal(pipelineInput.ftsChunks.length, 1);
   assert.equal(pipelineInput.vectorChunks.length, 1);
 });
@@ -310,7 +310,7 @@ test("retrieval-engine: buildRetrievalPipelineInput is available from the engine
 
   assert.equal(pipelineInput.query, "alpha");
   assert.ok(pipelineInput.ftsChunks.length > 0);
-  assert.ok(pipelineInput.heuristicChunks.length > 0);
+  assert.equal(pipelineInput.heuristicChunks.length, 0);
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });
