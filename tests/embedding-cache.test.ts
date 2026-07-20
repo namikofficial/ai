@@ -3,8 +3,14 @@ import { rm } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { runMigrations } from "../packages/db/src/migrate.ts";
-import { createEmbeddingCacheRepo, type EmbeddingCacheRepo } from "../packages/db/src/repositories/embedding-cache.ts";
-import { embedWithCache, hashEmbeddingInput } from "../packages/embeddings-cache/src/index.ts";
+import {
+  createEmbeddingCacheRepo,
+  type EmbeddingCacheRepo,
+} from "../packages/db/src/repositories/embedding-cache.ts";
+import {
+  embedWithCache,
+  hashEmbeddingInput,
+} from "../packages/embeddings-cache/src/index.ts";
 
 function openTestDb(): { db: DatabaseSync; cleanup: () => Promise<void> } {
   const dir = "";
@@ -21,12 +27,20 @@ function openTestDb(): { db: DatabaseSync; cleanup: () => Promise<void> } {
   };
 }
 
-function assertCloseTo(actual: number[], expected: number[], epsilon = 1e-5): void {
-  assert.equal(actual.length, expected.length, `vector length mismatch: ${actual.length} != ${expected.length}`);
+function assertCloseTo(
+  actual: number[],
+  expected: number[],
+  epsilon = 1e-5,
+): void {
+  assert.equal(
+    actual.length,
+    expected.length,
+    `vector length mismatch: ${actual.length} != ${expected.length}`,
+  );
   for (let i = 0; i < actual.length; i += 1) {
     assert.ok(
       Math.abs(actual[i] - expected[i]) < epsilon,
-      `index ${i}: ${actual[i]} not within ${epsilon} of ${expected[i]}`
+      `index ${i}: ${actual[i]} not within ${epsilon} of ${expected[i]}`,
     );
   }
 }
@@ -84,7 +98,7 @@ test("embedding-cache: recordHit and stats roll up over multiple lookups", async
         dimension: 4,
         contentHash: hashEmbeddingInput("hi"),
       },
-      [1, 1, 1, 1]
+      [1, 1, 1, 1],
     );
     repo.recordHit(stored.id);
     repo.recordHit(stored.id);
@@ -92,7 +106,9 @@ test("embedding-cache: recordHit and stats roll up over multiple lookups", async
     repo.recordMiss("provider_llamacpp_local", "nomic-embed-text", 4, 5);
     const stats = repo.stats();
     const match = stats.find(
-      (entry) => entry.providerId === "provider_llamacpp_local" && entry.modelName === "nomic-embed-text"
+      (entry) =>
+        entry.providerId === "provider_llamacpp_local" &&
+        entry.modelName === "nomic-embed-text",
     );
     assert.ok(match, "stats row should exist");
     assert.equal(match?.hits, 3);
@@ -114,7 +130,11 @@ test("embedding-cache: repeated miss and bypass batches grow linearly", async ()
 
     const match = repo
       .stats()
-      .find((entry) => entry.providerId === "provider_llamacpp_local" && entry.modelName === "nomic-embed-text");
+      .find(
+        (entry) =>
+          entry.providerId === "provider_llamacpp_local" &&
+          entry.modelName === "nomic-embed-text",
+      );
     assert.ok(match, "stats row should exist");
     assert.equal(match?.misses, 64);
     assert.equal(match?.bypassed, 128);
@@ -134,7 +154,7 @@ test("embedding-cache: embedWithCache returns cache hits without invoking the em
         dimension: 4,
         contentHash: hashEmbeddingInput("a"),
       },
-      [0.1, 0.2, 0.3, 0.4]
+      [0.1, 0.2, 0.3, 0.4],
     );
     let calls = 0;
     const result = await embedWithCache(
@@ -153,9 +173,13 @@ test("embedding-cache: embedWithCache returns cache hits without invoking the em
         modelName: "nomic-embed-text",
         dimension: 4,
         cache: repo,
-      }
+      },
     );
-    assert.equal(calls, 1, "embedder should be called once for the missing input only");
+    assert.equal(
+      calls,
+      1,
+      "embedder should be called once for the missing input only",
+    );
     assert.equal(result.hitCount, 1);
     assert.equal(result.missCount, 1);
     assertCloseTo(result.embeddings[0], [0.1, 0.2, 0.3, 0.4]);
@@ -164,14 +188,16 @@ test("embedding-cache: embedWithCache returns cache hits without invoking the em
     const second = await embedWithCache(
       ["a", "b"],
       async () => {
-        throw new Error("embedder should not be called when everything is cached");
+        throw new Error(
+          "embedder should not be called when everything is cached",
+        );
       },
       {
         providerId: "provider_llamacpp_local",
         modelName: "nomic-embed-text",
         dimension: 4,
         cache: repo,
-      }
+      },
     );
     assert.equal(second.hitCount, 2);
     assert.equal(second.missCount, 0);
@@ -202,7 +228,7 @@ test("embedding-cache: bypass mode skips read-through and records bypass stats",
         dimension: 4,
         cache: repo,
         bypass: true,
-      }
+      },
     );
     assert.equal(calls, 3);
     assert.equal(result.hitCount, 0);
@@ -234,7 +260,7 @@ test("embedding-cache: read-only mode serves hits but never writes", async () =>
         dimension: 4,
         cache: repo,
         readOnly: true,
-      }
+      },
     );
     assert.equal(result.missCount, 1);
     assert.equal(result.hitCount, 0);
@@ -249,11 +275,27 @@ test("embedding-cache: dimension mismatch keys are isolated", async () => {
   try {
     const repo = createEmbeddingCacheRepo(db);
     const hash = hashEmbeddingInput("same-text");
-    repo.put({ providerId: "p", modelName: "m", dimension: 4, contentHash: hash }, [1, 0, 0, 0]);
-    repo.put({ providerId: "p", modelName: "m", dimension: 8, contentHash: hash }, [1, 1, 1, 1, 0, 0, 0, 0]);
+    repo.put(
+      { providerId: "p", modelName: "m", dimension: 4, contentHash: hash },
+      [1, 0, 0, 0],
+    );
+    repo.put(
+      { providerId: "p", modelName: "m", dimension: 8, contentHash: hash },
+      [1, 1, 1, 1, 0, 0, 0, 0],
+    );
     assert.equal(repo.count(), 2);
-    const four = repo.get({ providerId: "p", modelName: "m", dimension: 4, contentHash: hash });
-    const eight = repo.get({ providerId: "p", modelName: "m", dimension: 8, contentHash: hash });
+    const four = repo.get({
+      providerId: "p",
+      modelName: "m",
+      dimension: 4,
+      contentHash: hash,
+    });
+    const eight = repo.get({
+      providerId: "p",
+      modelName: "m",
+      dimension: 8,
+      contentHash: hash,
+    });
     assert.equal(four?.embedding.length, 4);
     assert.equal(eight?.embedding.length, 8);
     assertCloseTo(four?.embedding ?? [], [1, 0, 0, 0]);
@@ -268,16 +310,31 @@ test("embedding-cache: purge by olderThanDays evicts stale rows but keeps recent
   try {
     const repo = createEmbeddingCacheRepo(db);
     const fresh = repo.put(
-      { providerId: "p", modelName: "m", dimension: 4, contentHash: hashEmbeddingInput("fresh") },
-      [0, 0, 0, 0]
+      {
+        providerId: "p",
+        modelName: "m",
+        dimension: 4,
+        contentHash: hashEmbeddingInput("fresh"),
+      },
+      [0, 0, 0, 0],
     );
     const stale = repo.put(
-      { providerId: "p", modelName: "m", dimension: 4, contentHash: hashEmbeddingInput("stale") },
-      [1, 1, 1, 1]
+      {
+        providerId: "p",
+        modelName: "m",
+        dimension: 4,
+        contentHash: hashEmbeddingInput("stale"),
+      },
+      [1, 1, 1, 1],
     );
     // Backdate the stale row's last_used_at to 60 days ago.
-    const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
-    db.prepare("UPDATE embedding_cache SET last_used_at = ? WHERE id = ?").run(sixtyDaysAgo, stale.id);
+    const sixtyDaysAgo = new Date(
+      Date.now() - 60 * 24 * 60 * 60 * 1000,
+    ).toISOString();
+    db.prepare("UPDATE embedding_cache SET last_used_at = ? WHERE id = ?").run(
+      sixtyDaysAgo,
+      stale.id,
+    );
     const removed = repo.purge({ olderThanDays: 30 });
     assert.equal(removed, 1);
     assert.equal(repo.count(), 1);

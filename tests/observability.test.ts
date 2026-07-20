@@ -24,9 +24,12 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
       "}",
       "",
       "export const authNote = 'auth is handled in the auth router';",
-    ].join("\n")
+    ].join("\n"),
   );
-  await writeFile(join(repo, "README.md"), "# Sample\n\nAuth is in src/auth.ts.");
+  await writeFile(
+    join(repo, "README.md"),
+    "# Sample\n\nAuth is in src/auth.ts.",
+  );
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "obs-repo" });
@@ -39,7 +42,9 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
     depth: "standard",
   });
 
-  const retrievalQueries = store.retrieval.listQueriesForSession(answer.sessionId);
+  const retrievalQueries = store.retrieval.listQueriesForSession(
+    answer.sessionId,
+  );
   assert.equal(retrievalQueries.length, 1);
   assert.equal(retrievalQueries[0].originalQuery, "where is auth handled?");
   assert.equal(retrievalQueries[0].projectId, project.id);
@@ -78,7 +83,9 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
   const compiledPrompts = store.listCompiledPrompts(answer.sessionId, 10);
   assert.ok(compiledPrompts.length >= 3);
   assert.ok(compiledPrompts.some((prompt) => prompt.mode === "query_rewrite"));
-  assert.ok(compiledPrompts.some((prompt) => prompt.mode === "retrieval_judge"));
+  assert.ok(
+    compiledPrompts.some((prompt) => prompt.mode === "retrieval_judge"),
+  );
   assert.ok(compiledPrompts.some((prompt) => prompt.mode === "answer"));
 
   const modelRoutes = store.listModelRoutes(10);
@@ -90,8 +97,8 @@ test("observability: ask() populates retrieval, conversation, agent, context, me
       (entry) =>
         entry.modelName === "ask-fast-local" ||
         entry.modelName === "ask-deep-local" ||
-        entry.modelName === "ask-extended-local"
-    )
+        entry.modelName === "ask-extended-local",
+    ),
   );
 
   const contextPacks = store.context.listPacksForSession(answer.sessionId);
@@ -132,7 +139,9 @@ test("observability: low-confidence ask records a retrieval miss", async () => {
     depth: "standard",
   });
 
-  const retrievalQueries = store.retrieval.listQueriesForSession(answer.sessionId);
+  const retrievalQueries = store.retrieval.listQueriesForSession(
+    answer.sessionId,
+  );
   assert.equal(retrievalQueries.length, 1);
   store.retrieval.recordMiss({
     retrievalQueryId: retrievalQueries[0].id,
@@ -173,8 +182,14 @@ test("observability: createHandoff records agent handoff and context pack", asyn
   });
   assert.ok(handoff.prompt.includes("explain the main file"));
 
-  const handoffCalls = store.models.listCalls(answer.sessionId, 100).filter((call) => call.role === "coder_handoff");
-  assert.equal(handoffCalls.length, 1, "handoff should record exactly one runtime-backed model call");
+  const handoffCalls = store.models
+    .listCalls(answer.sessionId, 100)
+    .filter((call) => call.role === "coder_handoff");
+  assert.equal(
+    handoffCalls.length,
+    1,
+    "handoff should record exactly one runtime-backed model call",
+  );
   const handoffRequest = handoffCalls[0]?.request as {
     metadata?: {
       compiledPrompt?: {
@@ -196,7 +211,9 @@ test("observability: createHandoff records agent handoff and context pack", asyn
   assert.ok(handoffs[0].contextPackId);
   const contextPacks = store.context.listPacksForSession(answer.sessionId);
   assert.ok(contextPacks.length >= 1);
-  const handoffPack = contextPacks.find((p) => p.id === handoffs[0].contextPackId);
+  const handoffPack = contextPacks.find(
+    (p) => p.id === handoffs[0].contextPackId,
+  );
   assert.ok(handoffPack, "handoff pack not found");
   assert.equal(handoffPack?.reason, "handoff:opencode");
 
@@ -228,8 +245,13 @@ test("observability: indexProject records an indexer agent run", async () => {
   assert.ok(output && typeof output === "object");
   assert.ok("filesIndexed" in (output as Record<string, unknown>));
 
-  const embeddingCalls = store.models.listCalls(result.session.id, 100).filter((call) => call.role === "embedding");
-  assert.ok(embeddingCalls.length >= 1, "indexing should record runtime-backed embedding calls");
+  const embeddingCalls = store.models
+    .listCalls(result.session.id, 100)
+    .filter((call) => call.role === "embedding");
+  assert.ok(
+    embeddingCalls.length >= 1,
+    "indexing should record runtime-backed embedding calls",
+  );
   const embeddingResponse = embeddingCalls[0]?.response as {
     modelName?: string;
     dimensions?: number;
@@ -241,7 +263,9 @@ test("observability: indexProject records an indexer agent run", async () => {
   assert.ok(embeddingResponse.providerId);
 
   const chunk = store.db
-    .prepare("SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1")
+    .prepare(
+      "SELECT embedding_model, embedding_dim, embedding_provider FROM rag_chunks WHERE project_id = ? LIMIT 1",
+    )
     .get(project.id) as
     | {
         embedding_model: string | null;
@@ -265,7 +289,10 @@ test("observability: failed indexing closes canonical session, task, run, and pr
   await writeFile(join(repo, "src", "main.ts"), "export const value = 1;\n");
 
   const store = createStore(initializeStore(join(workspace, "ai.db")));
-  const project = store.createProject({ path: repo, name: "index-failure-repo" });
+  const project = store.createProject({
+    path: repo,
+    name: "index-failure-repo",
+  });
   store.db.exec(`
     CREATE TRIGGER fail_embedding_cache_insert
     BEFORE INSERT ON embedding_cache
@@ -274,7 +301,10 @@ test("observability: failed indexing closes canonical session, task, run, and pr
     END;
   `);
 
-  await assert.rejects(store.indexProject(project.id), /forced embedding write failure/);
+  await assert.rejects(
+    store.indexProject(project.id),
+    /forced embedding write failure/,
+  );
 
   const session = store.listSessions(1)[0];
   assert.ok(session);
@@ -288,11 +318,15 @@ test("observability: failed indexing closes canonical session, task, run, and pr
   assert.match(task?.resultJson ?? "", /forced embedding write failure/);
   assert.equal(store.getProject(project.id)?.status, "error");
 
-  const indexerRun = store.agents.listRuns(session?.id ?? "").find((run) => run.agent === "indexer");
+  const indexerRun = store.agents
+    .listRuns(session?.id ?? "")
+    .find((run) => run.agent === "indexer");
   assert.equal(indexerRun?.status, "failed");
   assert.match(indexerRun?.error ?? "", /forced embedding write failure/);
 
-  const eventTypes = new Set(store.listEvents(session?.id, 50).map((event) => event.type));
+  const eventTypes = new Set(
+    store.listEvents(session?.id, 50).map((event) => event.type),
+  );
   assert.ok(eventTypes.has("task.failed"));
   assert.ok(eventTypes.has("index.failed"));
   assert.ok(eventTypes.has("session.failed"));
@@ -312,16 +346,29 @@ test("observability: reindex skips unchanged files and avoids extra embedding ca
   const project = store.createProject({ path: repo, name: "repo" });
 
   const first = await store.indexProject(project.id);
-  const firstEmbeddingCalls = store.models.listCalls(first.session.id, 100).filter((call) => call.role === "embedding");
-  assert.ok(firstEmbeddingCalls.length >= 1, "initial index should embed files");
+  const firstEmbeddingCalls = store.models
+    .listCalls(first.session.id, 100)
+    .filter((call) => call.role === "embedding");
+  assert.ok(
+    firstEmbeddingCalls.length >= 1,
+    "initial index should embed files",
+  );
 
   const second = await store.indexProject(project.id);
   const secondEmbeddingCalls = store.models
     .listCalls(second.session.id, 100)
     .filter((call) => call.role === "embedding");
-  assert.equal(secondEmbeddingCalls.length, 0, "unchanged reindex should skip embeddings");
+  assert.equal(
+    secondEmbeddingCalls.length,
+    0,
+    "unchanged reindex should skip embeddings",
+  );
   assert.equal(second.filesIndexed, first.filesIndexed);
-  assert.equal(second.chunksIndexed, 0, "unchanged reindex should not write new chunks");
+  assert.equal(
+    second.chunksIndexed,
+    0,
+    "unchanged reindex should not write new chunks",
+  );
 
   store.db.close();
   await rm(workspace, { recursive: true, force: true });

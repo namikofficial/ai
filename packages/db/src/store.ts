@@ -3,7 +3,10 @@ import { createRequire } from "node:module";
 import { basename, join, normalize, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { runAskWorkflow } from "../../ask-engine/src/index.ts";
-import { boostWeightForPath, resolveProjectConfig } from "../../config/src/index.ts";
+import {
+  boostWeightForPath,
+  resolveProjectConfig,
+} from "../../config/src/index.ts";
 import { buildContextPack } from "../../context-engine/src/index.ts";
 import { embedWithCache } from "../../embeddings-cache/src/index.ts";
 import { readEmbeddingConfig } from "../../indexer/src/config.ts";
@@ -15,7 +18,10 @@ import type {
   ModelInvokeResult,
   ModelRuntime,
 } from "../../model-runtime/src/index.ts";
-import { createModelRuntime, selectModelProfile } from "../../model-runtime/src/index.ts";
+import {
+  createModelRuntime,
+  selectModelProfile,
+} from "../../model-runtime/src/index.ts";
 import type { CompiledPrompt } from "../../prompt-compiler/src/index.ts";
 import { compilePrompt } from "../../prompt-compiler/src/index.ts";
 import type { RankedChunk } from "../../retrieval-engine/src/index.ts";
@@ -63,7 +69,10 @@ import type {
   TaskStatus,
 } from "../../shared/src/index.ts";
 import { createEvent, createId, slugifyName } from "../../shared/src/index.ts";
-import { isLikelyJsonOutput, parseJsonFragment } from "../../shared/src/model-output.ts";
+import {
+  isLikelyJsonOutput,
+  parseJsonFragment,
+} from "../../shared/src/model-output.ts";
 import {
   PROFILE_PLANNER_BALANCED,
   PROFILE_PLANNER_DEEP,
@@ -151,9 +160,14 @@ function asString(value: unknown): string {
 
 function rowToEvent(row: Row): EventEnvelope {
   const ts = asString(row.ts);
-  const sourceService = asString(row.source_service) || asString(row.agent) || "workbench";
+  const sourceService =
+    asString(row.source_service) || asString(row.agent) || "workbench";
   const originSource =
-    sourceService === "mcp" || sourceService === "desktop" || sourceService === "cli" ? sourceService : "workbench";
+    sourceService === "mcp" ||
+    sourceService === "desktop" ||
+    sourceService === "cli"
+      ? sourceService
+      : "workbench";
   const level = asString(row.level) as EventEnvelope["level"];
   const severityValue = asString(row.severity);
   const severity: EventEnvelope["severity"] =
@@ -201,7 +215,8 @@ function rowToProject(row: Row): ProjectRecord {
     language: row.language == null ? null : asString(row.language),
     framework: row.framework == null ? null : asString(row.framework),
     status: asString(row.status) as ProjectStatus,
-    lastIndexedAt: row.last_indexed_at == null ? null : asString(row.last_indexed_at),
+    lastIndexedAt:
+      row.last_indexed_at == null ? null : asString(row.last_indexed_at),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };
@@ -219,10 +234,14 @@ function rowToSession(row: Row): SessionRecord {
     startedAt: asString(row.started_at),
     finishedAt: row.finished_at == null ? null : asString(row.finished_at),
     durationMs: row.duration_ms == null ? null : toNumber(row.duration_ms),
-    activeTaskId: row.active_task_id == null ? null : asString(row.active_task_id),
-    modelProfile: row.model_profile == null ? null : asString(row.model_profile),
-    finalSummary: row.final_summary == null ? null : asString(row.final_summary),
-    errorMessage: row.error_message == null ? null : asString(row.error_message),
+    activeTaskId:
+      row.active_task_id == null ? null : asString(row.active_task_id),
+    modelProfile:
+      row.model_profile == null ? null : asString(row.model_profile),
+    finalSummary:
+      row.final_summary == null ? null : asString(row.final_summary),
+    errorMessage:
+      row.error_message == null ? null : asString(row.error_message),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
   };
@@ -246,8 +265,12 @@ function rowToSessionContextScope(row: Row): SessionContextScope {
     includeMemory: toNumber(row.include_memory) === 1,
     includeRetrieval: toNumber(row.include_retrieval) === 1,
     includeRules: toNumber(row.include_rules) === 1,
-    explicitFiles: safeParseStringArray(parseJsonValue(row.explicit_files_json)),
-    excludedPaths: safeParseStringArray(parseJsonValue(row.excluded_paths_json)),
+    explicitFiles: safeParseStringArray(
+      parseJsonValue(row.explicit_files_json),
+    ),
+    excludedPaths: safeParseStringArray(
+      parseJsonValue(row.excluded_paths_json),
+    ),
     tokenBudget: toNumber(row.token_budget),
     createdAt: asString(row.created_at),
     updatedAt: asString(row.updated_at),
@@ -273,7 +296,8 @@ function rowToTask(row: Row): TaskRecord {
   return {
     id: asString(row.id),
     sessionId: asString(row.session_id),
-    parentTaskId: row.parent_task_id == null ? null : asString(row.parent_task_id),
+    parentTaskId:
+      row.parent_task_id == null ? null : asString(row.parent_task_id),
     title: asString(row.title),
     description: asString(row.description),
     type: asString(row.type),
@@ -291,11 +315,15 @@ function rowToTask(row: Row): TaskRecord {
 
 function enqueueReflectionJob(
   storeRef: {
-    enqueueJob: (input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }) => JobRecord;
+    enqueueJob: (input: {
+      type: string;
+      payload: Record<string, unknown>;
+      availableAt?: string | null;
+    }) => JobRecord;
   },
   sessionId: string,
   source: string,
-  projectId?: string | null
+  projectId?: string | null,
 ): JobRecord {
   return storeRef.enqueueJob({
     type: "session.reflect",
@@ -371,10 +399,17 @@ export function initializeStore(dbPath: string): DatabaseSync {
 export function createStore(db: DatabaseSync) {
   const eventSubscribers = new Set<(event: EventEnvelope) => void>();
   const qdrantBaseSettings = readQdrantRuntimeSettings();
-  let qdrantAvailable = qdrantBaseSettings.enabled && Boolean(qdrantBaseSettings.url);
+  let qdrantAvailable =
+    qdrantBaseSettings.enabled && Boolean(qdrantBaseSettings.url);
 
-  function getActiveQdrantSettings(): ReturnType<typeof readQdrantRuntimeSettings> | null {
-    if (!qdrantBaseSettings.enabled || !qdrantAvailable || !qdrantBaseSettings.url) {
+  function getActiveQdrantSettings(): ReturnType<
+    typeof readQdrantRuntimeSettings
+  > | null {
+    if (
+      !qdrantBaseSettings.enabled ||
+      !qdrantAvailable ||
+      !qdrantBaseSettings.url
+    ) {
       return null;
     }
     return qdrantBaseSettings;
@@ -386,7 +421,12 @@ export function createStore(db: DatabaseSync) {
 
   let intelligenceStack: {
     runtime: ModelRuntime;
-    providers: Array<Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">>;
+    providers: Array<
+      Pick<
+        ModelProviderRecord,
+        "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled"
+      >
+    >;
     profiles: ModelProfileRecord[];
     runtimeOptions?: {
       sessionId?: string | null;
@@ -421,7 +461,10 @@ export function createStore(db: DatabaseSync) {
   seedDefaultModelCatalog(modelsRepo);
 
   function listRuntimeProviders(): Array<
-    Pick<ModelProviderRecord, "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled">
+    Pick<
+      ModelProviderRecord,
+      "id" | "kind" | "displayName" | "baseUrl" | "apiKeyEnv" | "enabled"
+    >
   > {
     return modelsRepo.listProviders().map((provider) => ({
       id: provider.id,
@@ -450,19 +493,23 @@ export function createStore(db: DatabaseSync) {
 
   async function resolveModelProfile(
     routeInput: Parameters<ModelRuntime["route"]>[0],
-    legacyProfileId: string
-  ): Promise<{ decision: Awaited<ReturnType<ModelRuntime["route"]>>; profileId: string }> {
+    legacyProfileId: string,
+  ): Promise<{
+    decision: Awaited<ReturnType<ModelRuntime["route"]>>;
+    profileId: string;
+  }> {
     const decision = await getRuntime().route(routeInput);
     return {
       decision,
-      profileId: decision.profileId ?? decision.fallbackProfileId ?? legacyProfileId,
+      profileId:
+        decision.profileId ?? decision.fallbackProfileId ?? legacyProfileId,
     };
   }
 
   async function invokeModel(
     profileId: string,
     request: ModelInvokeRequest,
-    options: ModelInvokeOptions = {}
+    options: ModelInvokeOptions = {},
   ): Promise<ModelInvokeResult> {
     const runtime = getRuntime();
     return runtime.invoke(profileId, request, {
@@ -497,7 +544,9 @@ export function createStore(db: DatabaseSync) {
       await mkdir(join(runtimeDir, "logs"), { recursive: true });
     },
     listProjects(): ProjectSummary[] {
-      const projects = db.prepare("SELECT * FROM projects ORDER BY updated_at DESC").all() as Row[];
+      const projects = db
+        .prepare("SELECT * FROM projects ORDER BY updated_at DESC")
+        .all() as Row[];
       return projects.map((project) => {
         const counts = db
           .prepare(
@@ -505,7 +554,7 @@ export function createStore(db: DatabaseSync) {
               (SELECT COUNT(*) FROM files WHERE project_id = p.id) AS file_count,
               (SELECT COUNT(*) FROM files WHERE project_id = p.id AND is_indexed = 1) AS indexed_file_count,
               (SELECT COUNT(*) FROM rag_chunks WHERE project_id = p.id) AS chunk_count
-             FROM projects p WHERE p.id = ?`
+             FROM projects p WHERE p.id = ?`,
           )
           .get(project.id) as Row;
         return {
@@ -520,7 +569,9 @@ export function createStore(db: DatabaseSync) {
     },
     getProject(identifier: string): ProjectSummary | null {
       const project = db
-        .prepare("SELECT * FROM projects WHERE id = ? OR name = ? ORDER BY updated_at DESC LIMIT 1")
+        .prepare(
+          "SELECT * FROM projects WHERE id = ? OR name = ? ORDER BY updated_at DESC LIMIT 1",
+        )
         .get(identifier, identifier) as Row | undefined;
       if (!project) return null;
       const counts = db
@@ -529,7 +580,7 @@ export function createStore(db: DatabaseSync) {
             (SELECT COUNT(*) FROM files WHERE project_id = p.id) AS file_count,
             (SELECT COUNT(*) FROM files WHERE project_id = p.id AND is_indexed = 1) AS indexed_file_count,
             (SELECT COUNT(*) FROM rag_chunks WHERE project_id = p.id) AS chunk_count
-           FROM projects p WHERE p.id = ?`
+           FROM projects p WHERE p.id = ?`,
         )
         .get(project.id) as Row;
       return {
@@ -542,17 +593,25 @@ export function createStore(db: DatabaseSync) {
       };
     },
     getProjectByPath(path: string): ProjectSummary | null {
-      const project = db.prepare("SELECT * FROM projects WHERE path = ? LIMIT 1").get(path) as Row | undefined;
+      const project = db
+        .prepare("SELECT * FROM projects WHERE path = ? LIMIT 1")
+        .get(path) as Row | undefined;
       return project ? store.getProject(asString(project.id)) : null;
     },
     createProject(input: ProjectCreateInput): ProjectSummary {
       const resolvedPath = normalize(resolve(input.path));
-      const inferredName = input.name?.trim() || basename(resolvedPath) || slugifyName(resolvedPath);
+      const inferredName =
+        input.name?.trim() ||
+        basename(resolvedPath) ||
+        slugifyName(resolvedPath);
       const existing = db
         .prepare("SELECT * FROM projects WHERE path = ? OR name = ? LIMIT 1")
         .get(resolvedPath, inferredName) as Row | undefined;
       if (existing) {
-        return requireRecord(store.getProject(asString(existing.id)), "existing project");
+        return requireRecord(
+          store.getProject(asString(existing.id)),
+          "existing project",
+        );
       }
       const id = createId("proj");
       const ts = now();
@@ -561,7 +620,7 @@ export function createStore(db: DatabaseSync) {
       db.prepare(
         `INSERT INTO projects (
           id, name, path, repo_url, branch, language, framework, status, last_indexed_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         inferredName,
@@ -573,40 +632,49 @@ export function createStore(db: DatabaseSync) {
         "new",
         null,
         ts,
-        ts
+        ts,
       );
       return requireRecord(store.getProject(id), "project");
     },
-    updateProjectStatus(projectId: string, status: ProjectStatus, lastIndexedAt: string | null = null): void {
+    updateProjectStatus(
+      projectId: string,
+      status: ProjectStatus,
+      lastIndexedAt: string | null = null,
+    ): void {
       const ts = now();
-      db.prepare("UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?").run(
-        status,
-        lastIndexedAt,
-        ts,
-        projectId
-      );
+      db.prepare(
+        "UPDATE projects SET status = ?, last_indexed_at = ?, updated_at = ? WHERE id = ?",
+      ).run(status, lastIndexedAt, ts, projectId);
     },
     listSessions(limit = 50): SessionRecord[] {
-      return (db.prepare("SELECT * FROM agent_sessions ORDER BY started_at DESC LIMIT ?").all(limit) as Row[]).map(
-        rowToSession
-      );
+      return (
+        db
+          .prepare(
+            "SELECT * FROM agent_sessions ORDER BY started_at DESC LIMIT ?",
+          )
+          .all(limit) as Row[]
+      ).map(rowToSession);
     },
     getSession(sessionId: string): SessionRecord | null {
-      const row = db.prepare("SELECT * FROM agent_sessions WHERE id = ? LIMIT 1").get(sessionId) as Row | undefined;
+      const row = db
+        .prepare("SELECT * FROM agent_sessions WHERE id = ? LIMIT 1")
+        .get(sessionId) as Row | undefined;
       return row ? rowToSession(row) : null;
     },
     getSessionContextScope(sessionId: string): SessionContextScope | null {
       const session = store.getSession(sessionId);
       if (!session) return null;
-      const existing = db.prepare("SELECT * FROM session_context_scopes WHERE session_id = ?").get(sessionId) as
-        | Row
-        | undefined;
+      const existing = db
+        .prepare("SELECT * FROM session_context_scopes WHERE session_id = ?")
+        .get(sessionId) as Row | undefined;
       if (existing) return rowToSessionContextScope(existing);
       db.prepare(
         `INSERT INTO session_context_scopes (session_id, project_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?)`,
       ).run(sessionId, session.projectId, session.createdAt, session.updatedAt);
-      const created = db.prepare("SELECT * FROM session_context_scopes WHERE session_id = ?").get(sessionId) as Row;
+      const created = db
+        .prepare("SELECT * FROM session_context_scopes WHERE session_id = ?")
+        .get(sessionId) as Row;
       return rowToSessionContextScope(created);
     },
     updateSessionContextScope(
@@ -624,20 +692,31 @@ export function createStore(db: DatabaseSync) {
           | "excludedPaths"
           | "tokenBudget"
         >
-      >
+      >,
     ): SessionContextScope {
       const current = store.getSessionContextScope(sessionId);
       if (!current) throw new Error(`unknown session: ${sessionId}`);
       const next = { ...current, ...patch, updatedAt: now() };
-      next.tokenBudget = Math.min(32_000, Math.max(1_000, Math.trunc(next.tokenBudget)));
-      next.explicitFiles = [...new Set(next.explicitFiles.map((entry) => entry.trim()).filter(Boolean))].slice(0, 100);
-      next.excludedPaths = [...new Set(next.excludedPaths.map((entry) => entry.trim()).filter(Boolean))].slice(0, 100);
+      next.tokenBudget = Math.min(
+        32_000,
+        Math.max(1_000, Math.trunc(next.tokenBudget)),
+      );
+      next.explicitFiles = [
+        ...new Set(
+          next.explicitFiles.map((entry) => entry.trim()).filter(Boolean),
+        ),
+      ].slice(0, 100);
+      next.excludedPaths = [
+        ...new Set(
+          next.excludedPaths.map((entry) => entry.trim()).filter(Boolean),
+        ),
+      ].slice(0, 100);
       db.prepare(
         `UPDATE session_context_scopes SET
            include_active_file = ?, include_changed_files = ?, include_conversation = ?, include_memory = ?,
            include_retrieval = ?, include_rules = ?, explicit_files_json = ?, excluded_paths_json = ?,
            token_budget = ?, updated_at = ?
-         WHERE session_id = ?`
+         WHERE session_id = ?`,
       ).run(
         next.includeActiveFile ? 1 : 0,
         next.includeChangedFiles ? 1 : 0,
@@ -649,7 +728,7 @@ export function createStore(db: DatabaseSync) {
         JSON.stringify(next.excludedPaths),
         next.tokenBudget,
         next.updatedAt,
-        sessionId
+        sessionId,
       );
       return store.getSessionContextScope(sessionId) as SessionContextScope;
     },
@@ -660,33 +739,58 @@ export function createStore(db: DatabaseSync) {
       purpose: string;
       decidedBy: string;
     }): SessionContextConsent {
-      if (!store.getSession(input.sessionId)) throw new Error(`unknown session: ${input.sessionId}`);
-      if (!/^[a-f0-9]{64}$/.test(input.sourceHash)) throw new Error("context source hash must be SHA-256 hex");
+      if (!store.getSession(input.sessionId))
+        throw new Error(`unknown session: ${input.sessionId}`);
+      if (!/^[a-f0-9]{64}$/.test(input.sourceHash))
+        throw new Error("context source hash must be SHA-256 hex");
       const id = createId("context_consent");
       const ts = now();
       db.prepare(
         `INSERT INTO session_context_consents (
            id, session_id, source_type, source_hash, decision, purpose, decided_by, decided_at, consumed_at, created_at
-         ) VALUES (?, ?, 'clipboard', ?, ?, ?, ?, ?, NULL, ?)`
-      ).run(id, input.sessionId, input.sourceHash, input.decision, input.purpose, input.decidedBy, ts, ts);
+         ) VALUES (?, ?, 'clipboard', ?, ?, ?, ?, ?, NULL, ?)`,
+      ).run(
+        id,
+        input.sessionId,
+        input.sourceHash,
+        input.decision,
+        input.purpose,
+        input.decidedBy,
+        ts,
+        ts,
+      );
       return store.getSessionContextConsent(id) as SessionContextConsent;
     },
     getSessionContextConsent(consentId: string): SessionContextConsent | null {
-      const row = db.prepare("SELECT * FROM session_context_consents WHERE id = ?").get(consentId) as Row | undefined;
+      const row = db
+        .prepare("SELECT * FROM session_context_consents WHERE id = ?")
+        .get(consentId) as Row | undefined;
       return row ? rowToSessionContextConsent(row) : null;
     },
-    listSessionContextConsents(sessionId: string, limit = 50): SessionContextConsent[] {
+    listSessionContextConsents(
+      sessionId: string,
+      limit = 50,
+    ): SessionContextConsent[] {
       return (
         db
-          .prepare("SELECT * FROM session_context_consents WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
-          .all(sessionId, Math.max(1, Math.min(200, Math.trunc(limit)))) as Row[]
+          .prepare(
+            "SELECT * FROM session_context_consents WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+          )
+          .all(
+            sessionId,
+            Math.max(1, Math.min(200, Math.trunc(limit))),
+          ) as Row[]
       ).map(rowToSessionContextConsent);
     },
-    consumeSessionContextConsent(input: { consentId: string; sessionId: string; sourceHash: string }): boolean {
+    consumeSessionContextConsent(input: {
+      consentId: string;
+      sessionId: string;
+      sourceHash: string;
+    }): boolean {
       const result = db
         .prepare(
           `UPDATE session_context_consents SET consumed_at = ?
-           WHERE id = ? AND session_id = ? AND source_hash = ? AND decision = 'approved' AND consumed_at IS NULL`
+           WHERE id = ? AND session_id = ? AND source_hash = ? AND decision = 'approved' AND consumed_at IS NULL`,
         )
         .run(now(), input.consentId, input.sessionId, input.sourceHash);
       return result.changes === 1;
@@ -699,7 +803,7 @@ export function createStore(db: DatabaseSync) {
           id, project_id, title, user_goal, mode, status, source,
           started_at, finished_at, duration_ms, active_task_id, model_profile,
           final_summary, error_message, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.projectId,
@@ -716,15 +820,18 @@ export function createStore(db: DatabaseSync) {
         null,
         null,
         ts,
-        ts
+        ts,
       );
       db.prepare(
         `INSERT OR IGNORE INTO session_context_scopes (session_id, project_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?)`,
       ).run(id, input.projectId, ts, ts);
       return requireRecord(store.getSession(id), "session");
     },
-    updateSession(sessionId: string, patch: Partial<SessionRecord>): SessionRecord {
+    updateSession(
+      sessionId: string,
+      patch: Partial<SessionRecord>,
+    ): SessionRecord {
       const current = store.getSession(sessionId);
       if (!current) {
         throw new Error(`unknown session: ${sessionId}`);
@@ -740,7 +847,7 @@ export function createStore(db: DatabaseSync) {
          SET project_id = ?, title = ?, user_goal = ?, mode = ?, status = ?, source = ?,
              started_at = ?, finished_at = ?, duration_ms = ?, active_task_id = ?, model_profile = ?,
              final_summary = ?, error_message = ?, updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?`,
       ).run(
         next.projectId,
         next.title,
@@ -756,7 +863,7 @@ export function createStore(db: DatabaseSync) {
         next.finalSummary,
         next.errorMessage,
         next.updatedAt,
-        sessionId
+        sessionId,
       );
       return requireRecord(store.getSession(sessionId), "updated session");
     },
@@ -767,7 +874,7 @@ export function createStore(db: DatabaseSync) {
         `INSERT INTO agent_tasks (
           id, session_id, parent_task_id, title, description, type, status, priority, risk,
           expected_files_json, actual_files_json, checks_json, result_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.sessionId,
@@ -783,12 +890,14 @@ export function createStore(db: DatabaseSync) {
         "[]",
         "{}",
         ts,
-        ts
+        ts,
       );
       return requireRecord(store.getTask(id), "task");
     },
     getTask(taskId: string): TaskRecord | null {
-      const row = db.prepare("SELECT * FROM agent_tasks WHERE id = ? LIMIT 1").get(taskId) as Row | undefined;
+      const row = db
+        .prepare("SELECT * FROM agent_tasks WHERE id = ? LIMIT 1")
+        .get(taskId) as Row | undefined;
       return row ? rowToTask(row) : null;
     },
     updateTask(taskId: string, patch: Partial<TaskRecord>): TaskRecord {
@@ -803,7 +912,7 @@ export function createStore(db: DatabaseSync) {
         `UPDATE agent_tasks
          SET session_id = ?, parent_task_id = ?, title = ?, description = ?, type = ?, status = ?, priority = ?, risk = ?,
              expected_files_json = ?, actual_files_json = ?, checks_json = ?, result_json = ?, updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?`,
       ).run(
         next.sessionId,
         next.parentTaskId,
@@ -818,7 +927,7 @@ export function createStore(db: DatabaseSync) {
         next.checksJson,
         next.resultJson,
         next.updatedAt,
-        taskId
+        taskId,
       );
       return requireRecord(store.getTask(taskId), "updated task");
     },
@@ -827,7 +936,7 @@ export function createStore(db: DatabaseSync) {
         `INSERT INTO agent_events (
            id, session_id, task_id, run_id, project_id, type, agent, level, ts, payload_json,
            schema_version, source_service, severity, summary, correlation_id, causation_id
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         event.id,
         event.sessionId,
@@ -844,7 +953,7 @@ export function createStore(db: DatabaseSync) {
         event.severity,
         event.summary,
         event.correlationId,
-        event.causationId
+        event.causationId,
       );
       for (const subscriber of eventSubscribers) {
         try {
@@ -863,17 +972,21 @@ export function createStore(db: DatabaseSync) {
       const rows = sessionId
         ? (db
             .prepare(
-              "SELECT * FROM (SELECT rowid AS event_rowid, * FROM agent_events WHERE session_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?) ORDER BY ts ASC, event_rowid ASC"
+              "SELECT * FROM (SELECT rowid AS event_rowid, * FROM agent_events WHERE session_id = ? ORDER BY ts DESC, rowid DESC LIMIT ?) ORDER BY ts ASC, event_rowid ASC",
             )
             .all(sessionId, limit) as Row[])
         : (db
             .prepare(
-              "SELECT * FROM (SELECT rowid AS event_rowid, * FROM agent_events ORDER BY ts DESC, rowid DESC LIMIT ?) ORDER BY ts ASC, event_rowid ASC"
+              "SELECT * FROM (SELECT rowid AS event_rowid, * FROM agent_events ORDER BY ts DESC, rowid DESC LIMIT ?) ORDER BY ts ASC, event_rowid ASC",
             )
             .all(limit) as Row[]);
       return rows.map(rowToEvent);
     },
-    listEventsSince(since: string, sessionId?: string, limit = 500): EventEnvelope[] {
+    listEventsSince(
+      since: string,
+      sessionId?: string,
+      limit = 500,
+    ): EventEnvelope[] {
       // Cursor can be an event ID or a timestamp.
       // If it looks like an event ID (contains underscore, starts with alpha), look up its ts.
       // Otherwise treat it as a raw timestamp.
@@ -881,9 +994,11 @@ export function createStore(db: DatabaseSync) {
       let rowCursor: number | null = null;
       if (/^[a-zA-Z][a-zA-Z0-9]*_/.test(since)) {
         // Likely an event ID — look up the event's timestamp
-        const row = db.prepare("SELECT ts, rowid AS event_rowid FROM agent_events WHERE id = ?").get(since) as
-          | { ts: string; event_rowid: number }
-          | undefined;
+        const row = db
+          .prepare(
+            "SELECT ts, rowid AS event_rowid FROM agent_events WHERE id = ?",
+          )
+          .get(since) as { ts: string; event_rowid: number } | undefined;
         if (!row) {
           // Cursor event not found; treat as timestamp directly
           tsCursor = since;
@@ -899,21 +1014,23 @@ export function createStore(db: DatabaseSync) {
           ? sessionId
             ? (db
                 .prepare(
-                  "SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC, rowid ASC LIMIT ?"
+                  "SELECT * FROM agent_events WHERE session_id = ? AND ts > ? ORDER BY ts ASC, rowid ASC LIMIT ?",
                 )
                 .all(sessionId, tsCursor, limit) as Row[])
             : (db
-                .prepare("SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC, rowid ASC LIMIT ?")
+                .prepare(
+                  "SELECT * FROM agent_events WHERE ts > ? ORDER BY ts ASC, rowid ASC LIMIT ?",
+                )
                 .all(tsCursor, limit) as Row[])
           : sessionId
             ? (db
                 .prepare(
-                  "SELECT * FROM agent_events WHERE session_id = ? AND (ts > ? OR (ts = ? AND rowid > ?)) ORDER BY ts ASC, rowid ASC LIMIT ?"
+                  "SELECT * FROM agent_events WHERE session_id = ? AND (ts > ? OR (ts = ? AND rowid > ?)) ORDER BY ts ASC, rowid ASC LIMIT ?",
                 )
                 .all(sessionId, tsCursor, tsCursor, rowCursor, limit) as Row[])
             : (db
                 .prepare(
-                  "SELECT * FROM agent_events WHERE ts > ? OR (ts = ? AND rowid > ?) ORDER BY ts ASC, rowid ASC LIMIT ?"
+                  "SELECT * FROM agent_events WHERE ts > ? OR (ts = ? AND rowid > ?) ORDER BY ts ASC, rowid ASC LIMIT ?",
                 )
                 .all(tsCursor, tsCursor, rowCursor, limit) as Row[]);
       return rows.map(rowToEvent);
@@ -927,7 +1044,9 @@ export function createStore(db: DatabaseSync) {
     }> {
       return (
         db
-          .prepare("SELECT id, project_id, title, body, created_at FROM lessons ORDER BY created_at DESC LIMIT ?")
+          .prepare(
+            "SELECT id, project_id, title, body, created_at FROM lessons ORDER BY created_at DESC LIMIT ?",
+          )
           .all(limit) as Row[]
       ).map((row) => ({
         id: asString(row.id),
@@ -937,10 +1056,14 @@ export function createStore(db: DatabaseSync) {
         createdAt: asString(row.created_at),
       }));
     },
-    listRecentChecks(limit = 20): Array<{ id: string; name: string; status: string; createdAt: string }> {
+    listRecentChecks(
+      limit = 20,
+    ): Array<{ id: string; name: string; status: string; createdAt: string }> {
       return (
         db
-          .prepare("SELECT id, name, status, created_at FROM check_runs ORDER BY created_at DESC LIMIT ?")
+          .prepare(
+            "SELECT id, name, status, created_at FROM check_runs ORDER BY created_at DESC LIMIT ?",
+          )
           .all(limit) as Row[]
       ).map((row) => ({
         id: asString(row.id),
@@ -951,7 +1074,7 @@ export function createStore(db: DatabaseSync) {
     },
     listProjectFiles(
       projectId: string,
-      limit = 25
+      limit = 25,
     ): Array<{
       id: string;
       path: string;
@@ -964,7 +1087,7 @@ export function createStore(db: DatabaseSync) {
       return (
         db
           .prepare(
-            "SELECT id, path, language, size_bytes, content_hash, is_indexed, last_seen_at FROM files WHERE project_id = ? ORDER BY last_seen_at DESC LIMIT ?"
+            "SELECT id, path, language, size_bytes, content_hash, is_indexed, last_seen_at FROM files WHERE project_id = ? ORDER BY last_seen_at DESC LIMIT ?",
           )
           .all(projectId, limit) as Row[]
       ).map((row) => ({
@@ -983,30 +1106,36 @@ export function createStore(db: DatabaseSync) {
     listProjectSessions(projectId: string, limit = 10): SessionRecord[] {
       return (
         db
-          .prepare("SELECT * FROM agent_sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT ?")
+          .prepare(
+            "SELECT * FROM agent_sessions WHERE project_id = ? ORDER BY started_at DESC LIMIT ?",
+          )
           .all(projectId, limit) as Row[]
       ).map(rowToSession);
     },
     listTasks(sessionId: string, limit = 20): TaskRecord[] {
       return (
         db
-          .prepare("SELECT * FROM agent_tasks WHERE session_id = ? ORDER BY created_at ASC LIMIT ?")
+          .prepare(
+            "SELECT * FROM agent_tasks WHERE session_id = ? ORDER BY created_at ASC LIMIT ?",
+          )
           .all(sessionId, limit) as Row[]
       ).map(rowToTask);
     },
     listRecentTasks(limit = 20): TaskRecord[] {
-      return (db.prepare("SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(
-        rowToTask
-      );
+      return (
+        db
+          .prepare("SELECT * FROM agent_tasks ORDER BY created_at DESC LIMIT ?")
+          .all(limit) as Row[]
+      ).map(rowToTask);
     },
     listProjectLessons(
       projectId: string,
-      limit = 10
+      limit = 10,
     ): Array<{ id: string; title: string; body: string; createdAt: string }> {
       return (
         db
           .prepare(
-            "SELECT id, title, body, created_at FROM lessons WHERE project_id = ? ORDER BY created_at DESC LIMIT ?"
+            "SELECT id, title, body, created_at FROM lessons WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
           )
           .all(projectId, limit) as Row[]
       ).map((row) => ({
@@ -1018,12 +1147,18 @@ export function createStore(db: DatabaseSync) {
     },
     listProjectRules(
       projectId: string,
-      limit = 20
-    ): Array<{ id: string; title: string; body: string; pinned: boolean; createdAt: string }> {
+      limit = 20,
+    ): Array<{
+      id: string;
+      title: string;
+      body: string;
+      pinned: boolean;
+      createdAt: string;
+    }> {
       return (
         db
           .prepare(
-            "SELECT id, title, body, pinned, created_at FROM project_rules WHERE project_id = ? ORDER BY pinned DESC, created_at DESC LIMIT ?"
+            "SELECT id, title, body, pinned, created_at FROM project_rules WHERE project_id = ? ORDER BY pinned DESC, created_at DESC LIMIT ?",
           )
           .all(projectId, limit) as Row[]
       ).map((row) => ({
@@ -1037,7 +1172,7 @@ export function createStore(db: DatabaseSync) {
     listProjectMemory(projectId: string, limit = 20): MemoryEntry[] {
       const memoryRows = db
         .prepare(
-          "SELECT id, project_id, title, body, source, importance, created_at FROM project_memory WHERE project_id = ? ORDER BY importance DESC, created_at DESC LIMIT ?"
+          "SELECT id, project_id, title, body, source, importance, created_at FROM project_memory WHERE project_id = ? ORDER BY importance DESC, created_at DESC LIMIT ?",
         )
         .all(projectId, limit) as Row[];
       return memoryRows.map((row) => ({
@@ -1053,32 +1188,48 @@ export function createStore(db: DatabaseSync) {
     listHandoffs(sessionId?: string, limit = 20): HandoffResponse[] {
       const rows = sessionId
         ? (db
-            .prepare("SELECT * FROM handoffs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?")
+            .prepare(
+              "SELECT * FROM handoffs WHERE session_id = ? ORDER BY created_at DESC LIMIT ?",
+            )
             .all(sessionId, limit) as Row[])
-        : (db.prepare("SELECT * FROM handoffs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]);
+        : (db
+            .prepare("SELECT * FROM handoffs ORDER BY created_at DESC LIMIT ?")
+            .all(limit) as Row[]);
       return rows.map((row) => ({
         id: asString(row.id),
         sessionId: asString(row.session_id),
         projectId: asString(row.project_id),
         target: asString(row.target) as HandoffRequest["target"],
         prompt: asString(row.prompt),
-        selectedContext: safeParseJson(asString(row.selected_context_json)) as HandoffResponse["selectedContext"],
+        selectedContext: safeParseJson(
+          asString(row.selected_context_json),
+        ) as HandoffResponse["selectedContext"],
       }));
     },
     listCheckRuns(limit = 20, projectId?: string | null): CheckRunSummary[] {
       const rows = projectId
         ? (db
-            .prepare("SELECT * FROM check_runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
+            .prepare(
+              "SELECT * FROM check_runs WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+            )
             .all(projectId, limit) as Row[])
-        : (db.prepare("SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]);
+        : (db
+            .prepare(
+              "SELECT * FROM check_runs ORDER BY created_at DESC LIMIT ?",
+            )
+            .all(limit) as Row[]);
       return rows.map((row) => rowToCheckRun(row));
     },
     listReviews(projectId?: string | null, limit = 20): ReviewRecord[] {
       const rows = projectId
         ? (db
-            .prepare("SELECT * FROM reviews WHERE project_id = ? ORDER BY created_at DESC LIMIT ?")
+            .prepare(
+              "SELECT * FROM reviews WHERE project_id = ? ORDER BY created_at DESC LIMIT ?",
+            )
             .all(projectId, limit) as Row[])
-        : (db.prepare("SELECT * FROM reviews ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]);
+        : (db
+            .prepare("SELECT * FROM reviews ORDER BY created_at DESC LIMIT ?")
+            .all(limit) as Row[]);
       return rows.map((row) => ({
         id: asString(row.id),
         projectId: row.project_id == null ? null : asString(row.project_id),
@@ -1096,7 +1247,9 @@ export function createStore(db: DatabaseSync) {
       }));
     },
     getReview(reviewId: string): ReviewRecord | null {
-      const row = db.prepare("SELECT * FROM reviews WHERE id = ? LIMIT 1").get(reviewId) as Row | undefined;
+      const row = db
+        .prepare("SELECT * FROM reviews WHERE id = ? LIMIT 1")
+        .get(reviewId) as Row | undefined;
       if (!row) return null;
       return {
         id: asString(row.id),
@@ -1119,19 +1272,35 @@ export function createStore(db: DatabaseSync) {
       if (!project) {
         throw new Error(`Unknown project: ${input.project}`);
       }
-      const session = input.sessionId ? store.getSession(input.sessionId) : null;
+      const session = input.sessionId
+        ? store.getSession(input.sessionId)
+        : null;
       const plannedFiles = input.plannedFiles ?? [];
       const editedFiles = input.editedFiles ?? [];
       const checks = input.checks ?? [];
-      const scopeCreep = editedFiles.filter((file) => !plannedFiles.includes(file));
-      const missingTests = checks.some((check) => /tests?|coverage|verify/i.test(check)) ? [] : ["tests"];
-      const riskyChanges = editedFiles.filter((file) => /package\.json|migration|schema|auth|session|db/i.test(file));
+      const scopeCreep = editedFiles.filter(
+        (file) => !plannedFiles.includes(file),
+      );
+      const missingTests = checks.some((check) =>
+        /tests?|coverage|verify/i.test(check),
+      )
+        ? []
+        : ["tests"];
+      const riskyChanges = editedFiles.filter((file) =>
+        /package\.json|migration|schema|auth|session|db/i.test(file),
+      );
       const summaryParts = [
         input.title ?? `Review for ${input.project}`,
         input.notes ? `Notes: ${input.notes}` : null,
-        scopeCreep.length > 0 ? `Scope creep: ${scopeCreep.join(", ")}` : "No obvious scope creep.",
-        missingTests.length > 0 ? `Missing tests: ${missingTests.join(", ")}` : "Checks appear adequate.",
-        riskyChanges.length > 0 ? `Risky changes: ${riskyChanges.join(", ")}` : "No high-risk files detected.",
+        scopeCreep.length > 0
+          ? `Scope creep: ${scopeCreep.join(", ")}`
+          : "No obvious scope creep.",
+        missingTests.length > 0
+          ? `Missing tests: ${missingTests.join(", ")}`
+          : "Checks appear adequate.",
+        riskyChanges.length > 0
+          ? `Risky changes: ${riskyChanges.join(", ")}`
+          : "No high-risk files detected.",
       ].filter(Boolean);
       const summary = summaryParts.join("\n");
       const id = createId("review");
@@ -1140,7 +1309,7 @@ export function createStore(db: DatabaseSync) {
         `INSERT INTO reviews (
           id, project_id, session_id, title, summary, planned_files_json, edited_files_json, checks_json,
           scope_creep_json, missing_tests_json, risky_changes_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         project.id,
@@ -1154,7 +1323,7 @@ export function createStore(db: DatabaseSync) {
         JSON.stringify(missingTests),
         JSON.stringify(riskyChanges),
         ts,
-        ts
+        ts,
       );
       const response: ReviewResponse = {
         id,
@@ -1191,7 +1360,9 @@ export function createStore(db: DatabaseSync) {
       return response;
     },
     getCheckRun(checkId: string): CheckRunSummary | null {
-      const row = db.prepare("SELECT * FROM check_runs WHERE id = ? LIMIT 1").get(checkId) as Row | undefined;
+      const row = db
+        .prepare("SELECT * FROM check_runs WHERE id = ? LIMIT 1")
+        .get(checkId) as Row | undefined;
       if (!row) return null;
       return rowToCheckRun(row);
     },
@@ -1217,7 +1388,7 @@ export function createStore(db: DatabaseSync) {
           id, session_id, project_id, name, status, command, output, error_output, exit_code,
           duration_ms, parsed_errors_json, affected_files_json,
           started_at, finished_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.sessionId ?? null,
@@ -1234,11 +1405,14 @@ export function createStore(db: DatabaseSync) {
         input.startedAt ?? null,
         input.finishedAt ?? null,
         ts,
-        ts
+        ts,
       );
       return requireRecord(store.getCheckRun(id), "check run");
     },
-    updateCheckRun(checkId: string, patch: Partial<CheckRunSummary>): CheckRunSummary {
+    updateCheckRun(
+      checkId: string,
+      patch: Partial<CheckRunSummary>,
+    ): CheckRunSummary {
       const current = store.getCheckRun(checkId);
       if (!current) throw new Error(`unknown check: ${checkId}`);
       const next: CheckRunSummary = {
@@ -1251,7 +1425,7 @@ export function createStore(db: DatabaseSync) {
          SET name = ?, status = ?, command = ?, output = ?, error_output = ?, exit_code = ?,
              duration_ms = ?, parsed_errors_json = ?, affected_files_json = ?,
              started_at = ?, finished_at = ?, updated_at = ?
-         WHERE id = ?`
+         WHERE id = ?`,
       ).run(
         next.name,
         next.status,
@@ -1265,7 +1439,7 @@ export function createStore(db: DatabaseSync) {
         next.startedAt,
         next.finishedAt,
         next.updatedAt,
-        checkId
+        checkId,
       );
       return requireRecord(store.getCheckRun(checkId), "updated check run");
     },
@@ -1277,7 +1451,13 @@ export function createStore(db: DatabaseSync) {
         if (active) return active;
       }
       const tasks = store.listTasks(sessionId, 100);
-      return tasks.find((task) => task.status === "running" || task.status === "queued") ?? tasks.at(-1) ?? null;
+      return (
+        tasks.find(
+          (task) => task.status === "running" || task.status === "queued",
+        ) ??
+        tasks.at(-1) ??
+        null
+      );
     },
     getNextSubtask(sessionId: string): TaskRecord | null {
       const tasks = store.listTasks(sessionId, 100);
@@ -1285,7 +1465,7 @@ export function createStore(db: DatabaseSync) {
     },
     getSubtaskContext(
       sessionId: string,
-      taskId?: string | null
+      taskId?: string | null,
     ): {
       session: SessionRecord | null;
       task: TaskRecord | null;
@@ -1300,11 +1480,20 @@ export function createStore(db: DatabaseSync) {
         lastSeenAt: string;
       }>;
       recentChunks: RetrievalChunk[];
-      recentLessons: Array<{ id: string; title: string; body: string; createdAt: string }>;
+      recentLessons: Array<{
+        id: string;
+        title: string;
+        body: string;
+        createdAt: string;
+      }>;
     } {
       const session = store.getSession(sessionId);
-      const task = taskId ? store.getTask(taskId) : store.getCurrentTask(sessionId);
-      const project = session?.projectId ? store.getProject(session.projectId) : null;
+      const task = taskId
+        ? store.getTask(taskId)
+        : store.getCurrentTask(sessionId);
+      const project = session?.projectId
+        ? store.getProject(session.projectId)
+        : null;
       return {
         session,
         task,
@@ -1318,7 +1507,7 @@ export function createStore(db: DatabaseSync) {
       return (
         db
           .prepare(
-            "SELECT day, model_name, prompt_tokens, completion_tokens, requests FROM model_usage_daily ORDER BY day DESC LIMIT ?"
+            "SELECT day, model_name, prompt_tokens, completion_tokens, requests FROM model_usage_daily ORDER BY day DESC LIMIT ?",
           )
           .all(limit) as Row[]
       ).map((row) => ({
@@ -1330,21 +1519,25 @@ export function createStore(db: DatabaseSync) {
       }));
     },
     listMcpCalls(limit = 20): McpCallSummary[] {
-      return (db.prepare("SELECT * FROM mcp_calls ORDER BY created_at DESC LIMIT ?").all(limit) as Row[]).map(
-        (row) => ({
-          id: asString(row.id),
-          sessionId: row.session_id == null ? null : asString(row.session_id),
-          projectId: row.project_id == null ? null : asString(row.project_id),
-          toolName: asString(row.tool_name),
-          inputJson: asString(row.input_json),
-          outputJson: row.output_json == null ? null : asString(row.output_json),
-          blocked: toBool(row.blocked),
-          createdAt: asString(row.created_at),
-        })
-      );
+      return (
+        db
+          .prepare("SELECT * FROM mcp_calls ORDER BY created_at DESC LIMIT ?")
+          .all(limit) as Row[]
+      ).map((row) => ({
+        id: asString(row.id),
+        sessionId: row.session_id == null ? null : asString(row.session_id),
+        projectId: row.project_id == null ? null : asString(row.project_id),
+        toolName: asString(row.tool_name),
+        inputJson: asString(row.input_json),
+        outputJson: row.output_json == null ? null : asString(row.output_json),
+        blocked: toBool(row.blocked),
+        createdAt: asString(row.created_at),
+      }));
     },
     getMcpCall(callId: string): McpCallSummary | null {
-      const row = db.prepare("SELECT * FROM mcp_calls WHERE id = ? LIMIT 1").get(callId) as Row | undefined;
+      const row = db
+        .prepare("SELECT * FROM mcp_calls WHERE id = ? LIMIT 1")
+        .get(callId) as Row | undefined;
       if (!row) return null;
       return {
         id: asString(row.id),
@@ -1361,7 +1554,7 @@ export function createStore(db: DatabaseSync) {
       return (
         db
           .prepare(
-            "SELECT id, type, status, payload_json, available_at, created_at, updated_at FROM jobs ORDER BY created_at DESC LIMIT ?"
+            "SELECT id, type, status, payload_json, available_at, created_at, updated_at FROM jobs ORDER BY created_at DESC LIMIT ?",
           )
           .all(limit) as Row[]
       ).map((row) => ({
@@ -1374,14 +1567,26 @@ export function createStore(db: DatabaseSync) {
         updatedAt: asString(row.updated_at),
       }));
     },
-    enqueueJob(input: { type: string; payload: Record<string, unknown>; availableAt?: string | null }): JobRecord {
+    enqueueJob(input: {
+      type: string;
+      payload: Record<string, unknown>;
+      availableAt?: string | null;
+    }): JobRecord {
       const id = createId("job");
       const ts = now();
       const availableAt = input.availableAt ?? ts;
       db.prepare(
         `INSERT INTO jobs (id, type, status, payload_json, available_at, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).run(id, input.type, "queued", JSON.stringify(input.payload), availableAt, ts, ts);
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        id,
+        input.type,
+        "queued",
+        JSON.stringify(input.payload),
+        availableAt,
+        ts,
+        ts,
+      );
       return {
         id,
         type: input.type,
@@ -1399,11 +1604,15 @@ export function createStore(db: DatabaseSync) {
            FROM jobs
            WHERE status = 'queued' AND available_at <= ?
            ORDER BY available_at ASC, created_at ASC
-           LIMIT 1`
+           LIMIT 1`,
         )
         .get(now()) as Row | undefined;
       if (!row) return null;
-      db.prepare("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?").run("running", now(), row.id);
+      db.prepare("UPDATE jobs SET status = ?, updated_at = ? WHERE id = ?").run(
+        "running",
+        now(),
+        row.id,
+      );
       return {
         id: asString(row.id),
         type: asString(row.type),
@@ -1415,13 +1624,18 @@ export function createStore(db: DatabaseSync) {
       };
     },
     cancelJob(jobId: string): JobRecord {
-      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as Row | undefined;
+      const current = db
+        .prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1")
+        .get(jobId) as Row | undefined;
       if (!current) throw new Error(`unknown job: ${jobId}`);
       const ts = now();
       const result = db
-        .prepare("UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'queued'")
+        .prepare(
+          "UPDATE jobs SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'queued'",
+        )
         .run(ts, jobId);
-      if (Number(result.changes) !== 1) throw new Error(`job ${jobId} is not queued`);
+      if (Number(result.changes) !== 1)
+        throw new Error(`job ${jobId} is not queued`);
       return {
         id: asString(current.id),
         type: asString(current.type),
@@ -1433,16 +1647,23 @@ export function createStore(db: DatabaseSync) {
       };
     },
     completeJob(jobId: string, output: unknown): JobRecord {
-      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as Row | undefined;
+      const current = db
+        .prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1")
+        .get(jobId) as Row | undefined;
       if (!current) {
         throw new Error(`unknown job: ${jobId}`);
       }
       const ts = now();
-      db.prepare("UPDATE jobs SET status = ?, payload_json = ?, updated_at = ? WHERE id = ?").run(
+      db.prepare(
+        "UPDATE jobs SET status = ?, payload_json = ?, updated_at = ? WHERE id = ?",
+      ).run(
         "completed",
-        JSON.stringify({ input: safeParseJson(asString(current.payload_json)), output }),
+        JSON.stringify({
+          input: safeParseJson(asString(current.payload_json)),
+          output,
+        }),
         ts,
-        jobId
+        jobId,
       );
       return {
         id: asString(current.id),
@@ -1458,16 +1679,23 @@ export function createStore(db: DatabaseSync) {
       };
     },
     failJob(jobId: string, error: string): JobRecord {
-      const current = db.prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1").get(jobId) as Row | undefined;
+      const current = db
+        .prepare("SELECT * FROM jobs WHERE id = ? LIMIT 1")
+        .get(jobId) as Row | undefined;
       if (!current) {
         throw new Error(`unknown job: ${jobId}`);
       }
       const ts = now();
-      db.prepare("UPDATE jobs SET status = ?, payload_json = ?, updated_at = ? WHERE id = ?").run(
+      db.prepare(
+        "UPDATE jobs SET status = ?, payload_json = ?, updated_at = ? WHERE id = ?",
+      ).run(
         "failed",
-        JSON.stringify({ input: safeParseJson(asString(current.payload_json)), error }),
+        JSON.stringify({
+          input: safeParseJson(asString(current.payload_json)),
+          error,
+        }),
         ts,
-        jobId
+        jobId,
       );
       return {
         id: asString(current.id),
@@ -1494,7 +1722,7 @@ export function createStore(db: DatabaseSync) {
       const ts = now();
       db.prepare(
         `INSERT INTO mcp_calls (id, session_id, project_id, tool_name, input_json, output_json, blocked, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.sessionId ?? null,
@@ -1503,7 +1731,7 @@ export function createStore(db: DatabaseSync) {
         input.inputJson,
         input.outputJson ?? null,
         input.blocked ? 1 : 0,
-        ts
+        ts,
       );
       return {
         id,
@@ -1517,8 +1745,12 @@ export function createStore(db: DatabaseSync) {
       };
     },
     getSettings(config: ConfigSnapshot): SettingsSnapshot {
-      const cloudEnabled = /^(1|true|yes)$/i.test(process.env.AI_CLOUD_ENABLED ?? "");
-      const qdrantEnabled = /^(1|true|yes)$/i.test(process.env.AI_QDRANT_ENABLED ?? "");
+      const cloudEnabled = /^(1|true|yes)$/i.test(
+        process.env.AI_CLOUD_ENABLED ?? "",
+      );
+      const qdrantEnabled = /^(1|true|yes)$/i.test(
+        process.env.AI_QDRANT_ENABLED ?? "",
+      );
       return {
         ...config,
         cloudEnabled,
@@ -1532,26 +1764,35 @@ export function createStore(db: DatabaseSync) {
     }> {
       const project = store.getProject(input.project);
       if (!project) throw new Error(`Unknown project: ${input.project}`);
-      const existingSession = input.sessionId ? store.getSession(input.sessionId) : null;
-      if (input.sessionId && !existingSession) throw new Error(`Unknown session: ${input.sessionId}`);
+      const existingSession = input.sessionId
+        ? store.getSession(input.sessionId)
+        : null;
+      if (input.sessionId && !existingSession)
+        throw new Error(`Unknown session: ${input.sessionId}`);
       if (existingSession && existingSession.projectId !== project.id) {
-        throw new Error(`Session ${existingSession.id} does not belong to project ${project.id}`);
+        throw new Error(
+          `Session ${existingSession.id} does not belong to project ${project.id}`,
+        );
       }
       const risk = input.risk ?? "medium";
-      const { decision: routeDecision, profileId: selectedPlannerProfile } = await resolveModelProfile(
-        {
-          role: "planner",
-          mode: "local",
-          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-          details: {
-            risk,
-            goal: input.goal,
-            contextTokens: Math.max(2048, Math.min(32_768, input.goal.length * 64)),
+      const { decision: routeDecision, profileId: selectedPlannerProfile } =
+        await resolveModelProfile(
+          {
+            role: "planner",
+            mode: "local",
+            cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+            details: {
+              risk,
+              goal: input.goal,
+              contextTokens: Math.max(
+                2048,
+                Math.min(32_768, input.goal.length * 64),
+              ),
+            },
+            fallbackProfileId: PROFILE_PLANNER_BALANCED,
           },
-          fallbackProfileId: PROFILE_PLANNER_BALANCED,
-        },
-        selectModelProfile("plan", { risk, goal: input.goal })
-      );
+          selectModelProfile("plan", { risk, goal: input.goal }),
+        );
       const session = existingSession
         ? store.updateSession(existingSession.id, {
             status: "running",
@@ -1575,7 +1816,9 @@ export function createStore(db: DatabaseSync) {
         fallbackProfileId: routeDecision.fallbackProfileId,
         reason: `${routeDecision.reason}; risk=${risk}; blocked=${routeDecision.blocked}`,
       });
-      const files = store.listProjectFiles(project.id, 12).map((file) => file.path);
+      const files = store
+        .listProjectFiles(project.id, 12)
+        .map((file) => file.path);
       const defaultTaskGraph: PlannerTaskDraft[] = [
         {
           title: "Inspect current implementation",
@@ -1623,20 +1866,29 @@ export function createStore(db: DatabaseSync) {
         sessionId: session.id,
         taskId: null,
       });
-      let plannerParseStatus: "parsed" | "repaired" | "deterministic_fallback" = "deterministic_fallback";
+      let plannerParseStatus: "parsed" | "repaired" | "deterministic_fallback" =
+        "deterministic_fallback";
       let taskGraphDraft = defaultTaskGraph;
       let likelyFiles = files.slice(0, 8);
       let checks = ["typecheck", "tests"];
       let modelRecommendation =
-        risk === "high" ? PROFILE_PLANNER_DEEP : risk === "medium" ? PROFILE_PLANNER_BALANCED : PROFILE_PLANNER_FAST;
+        risk === "high"
+          ? PROFILE_PLANNER_DEEP
+          : risk === "medium"
+            ? PROFILE_PLANNER_BALANCED
+            : PROFILE_PLANNER_FAST;
       let plannerModelCallId: string | null = null;
       try {
         store.appendEvent(
           createEvent(
             "model.called",
-            { role: "planner", profileId: plannerProfileId, compiledId: compiledPlanner.id },
-            { sessionId: session.id, projectId: project.id, agent: "planner" }
-          )
+            {
+              role: "planner",
+              profileId: plannerProfileId,
+              compiledId: compiledPlanner.id,
+            },
+            { sessionId: session.id, projectId: project.id, agent: "planner" },
+          ),
         );
         const plannerResult = await invokeModel(
           plannerProfileId,
@@ -1644,7 +1896,8 @@ export function createStore(db: DatabaseSync) {
             role: "planner",
             messages: compiledPlanner.messages,
             temperature: 0,
-            maxOutputTokens: modelsRepo.getProfile(plannerProfileId)?.maxOutputTokens ?? 1024,
+            maxOutputTokens:
+              modelsRepo.getProfile(plannerProfileId)?.maxOutputTokens ?? 1024,
             metadata: {
               compiledPrompt: compiledPlanner,
               responseTrace: { taskGraph: taskGraphDraft, likelyFiles, checks },
@@ -1653,9 +1906,11 @@ export function createStore(db: DatabaseSync) {
           {
             sessionId: session.id,
             taskId: null,
-          }
+          },
         );
-        const parsePlannerResult = (text: string): ReturnType<typeof parsePlannerOutput> => {
+        const parsePlannerResult = (
+          text: string,
+        ): ReturnType<typeof parsePlannerOutput> => {
           try {
             return parsePlannerOutput(parseJsonFragment(text));
           } catch {
@@ -1675,11 +1930,14 @@ export function createStore(db: DatabaseSync) {
                 { role: "assistant", content: plannerResult.text },
                 {
                   role: "user",
-                  content: "Return ONLY valid JSON matching the output schema. No markdown fences.",
+                  content:
+                    "Return ONLY valid JSON matching the output schema. No markdown fences.",
                 },
               ],
               temperature: 0,
-              maxOutputTokens: modelsRepo.getProfile(plannerProfileId)?.maxOutputTokens ?? 1024,
+              maxOutputTokens:
+                modelsRepo.getProfile(plannerProfileId)?.maxOutputTokens ??
+                1024,
               metadata: {
                 compiledPrompt: compiledPlanner,
                 repairAttempt: true,
@@ -1688,7 +1946,7 @@ export function createStore(db: DatabaseSync) {
             {
               sessionId: session.id,
               taskId: null,
-            }
+            },
           );
           parsedPlanner = parsePlannerResult(repaired.text);
           if (parsedPlanner) {
@@ -1697,15 +1955,22 @@ export function createStore(db: DatabaseSync) {
         }
         if (parsedPlanner) {
           taskGraphDraft = parsedPlanner.taskGraph;
-          likelyFiles = parsedPlanner.likelyFiles.length > 0 ? parsedPlanner.likelyFiles.slice(0, 8) : likelyFiles;
-          checks = parsedPlanner.checks.length > 0 ? parsedPlanner.checks : checks;
+          likelyFiles =
+            parsedPlanner.likelyFiles.length > 0
+              ? parsedPlanner.likelyFiles.slice(0, 8)
+              : likelyFiles;
+          checks =
+            parsedPlanner.checks.length > 0 ? parsedPlanner.checks : checks;
           modelRecommendation = (parsedPlanner.modelRecommendation ??
             modelRecommendation) as typeof modelRecommendation;
         }
         plannerModelCallId =
           modelsRepo
             .listCalls(session.id, 200)
-            .filter((call) => call.role === "planner" && call.profileId === plannerProfileId)
+            .filter(
+              (call) =>
+                call.role === "planner" && call.profileId === plannerProfileId,
+            )
             .at(-1)?.id ?? null;
         store.appendEvent(
           createEvent(
@@ -1717,8 +1982,8 @@ export function createStore(db: DatabaseSync) {
               compiledId: compiledPlanner.id,
               parseStatus: plannerParseStatus,
             },
-            { sessionId: session.id, projectId: project.id, agent: "planner" }
-          )
+            { sessionId: session.id, projectId: project.id, agent: "planner" },
+          ),
         );
       } catch (error) {
         store.appendEvent(
@@ -1729,8 +1994,13 @@ export function createStore(db: DatabaseSync) {
               error: error instanceof Error ? error.message : String(error),
               compiledId: compiledPlanner.id,
             },
-            { sessionId: session.id, projectId: project.id, agent: "planner", level: "warn" }
-          )
+            {
+              sessionId: session.id,
+              projectId: project.id,
+              agent: "planner",
+              level: "warn",
+            },
+          ),
         );
       }
       const persistedTaskGraph = taskGraphDraft.map((task, index) => {
@@ -1755,8 +2025,13 @@ export function createStore(db: DatabaseSync) {
               expectedFiles: task.expectedFiles,
               checks: task.checks,
             },
-            { sessionId: session.id, projectId: project.id, taskId: record.id, agent: "planner" }
-          )
+            {
+              sessionId: session.id,
+              projectId: project.id,
+              taskId: record.id,
+              agent: "planner",
+            },
+          ),
         );
         return {
           id: record.id,
@@ -1776,14 +2051,15 @@ export function createStore(db: DatabaseSync) {
         likelyFiles,
         checks,
         modelRecommendation,
-        researchDepth: risk === "low" ? "shallow" : risk === "high" ? "deep" : "standard",
+        researchDepth:
+          risk === "low" ? "shallow" : risk === "high" ? "deep" : "standard",
       };
       store.appendEvent(
         createEvent(
           "task.created",
           { title: "Plan generated", goal: input.goal },
-          { sessionId: session.id, projectId: project.id, agent: "planner" }
-        )
+          { sessionId: session.id, projectId: project.id, agent: "planner" },
+        ),
       );
       store.updateSession(session.id, {
         status: "completed",
@@ -1818,15 +2094,23 @@ export function createStore(db: DatabaseSync) {
         selectedProfileId: session.modelProfile ?? "handoff-local",
         reason: `target=${input.target}`,
       });
-      const files = store.listProjectFiles(project.id, 10).map((file) => file.path);
+      const files = store
+        .listProjectFiles(project.id, 10)
+        .map((file) => file.path);
       const recentQueries = retrievalRepo.listQueriesForSession(session.id, 5);
       const lastQuery = recentQueries.at(-1) ?? null;
-      const lastContext = lastQuery ? retrievalRepo.listSelectedContext(lastQuery.id) : [];
-      const lastResults = lastQuery ? retrievalRepo.listResults(lastQuery.id, 10) : [];
+      const lastContext = lastQuery
+        ? retrievalRepo.listSelectedContext(lastQuery.id)
+        : [];
+      const lastResults = lastQuery
+        ? retrievalRepo.listResults(lastQuery.id, 10)
+        : [];
       const memoryEntries = memoryRepo.listEntries(project.id, undefined, 5);
       const facts = memoryRepo.listFacts(project.id, 5);
       const rules = memoryRepo.listProjectRules(project.id, 5);
-      const previousMessages = conversationRepo.listMessages(session.id).slice(-6);
+      const previousMessages = conversationRepo
+        .listMessages(session.id)
+        .slice(-6);
       const ranked: RankedChunk[] = [];
       for (const item of lastContext) {
         const result = lastResults.find((r) => r.chunkId === item.chunkId);
@@ -1916,7 +2200,11 @@ export function createStore(db: DatabaseSync) {
           properties: { prompt: { type: "string" } },
           required: ["prompt"],
         },
-        metadata: { target: input.target, sessionId: session.id, contextPackId: contextPack.id },
+        metadata: {
+          target: input.target,
+          sessionId: session.id,
+          contextPackId: contextPack.id,
+        },
         tokenBudget: 4096,
       });
       store.recordCompiledPrompt({
@@ -1925,7 +2213,9 @@ export function createStore(db: DatabaseSync) {
         taskId: session.activeTaskId,
         contextPackId: contextPack.id,
       });
-      const prompt = compiled.messages.map((m) => `${m.role}: ${m.content}`).join("\n\n");
+      const prompt = compiled.messages
+        .map((m) => `${m.role}: ${m.content}`)
+        .join("\n\n");
       const selectedContext = {
         filesToInspect: files.slice(0, 4),
         filesLikelyToEdit: files.slice(0, 3),
@@ -1941,7 +2231,7 @@ export function createStore(db: DatabaseSync) {
       const ts = now();
       db.prepare(
         `INSERT INTO handoffs (id, session_id, task_id, project_id, target, prompt, selected_context_json, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         session.id,
@@ -1951,17 +2241,26 @@ export function createStore(db: DatabaseSync) {
         prompt,
         JSON.stringify(selectedContext),
         ts,
-        ts
+        ts,
       );
-      const handoffProfileId = modelsRepo.getProfile("handoff-local")?.id ?? "handoff-local";
+      const handoffProfileId =
+        modelsRepo.getProfile("handoff-local")?.id ?? "handoff-local";
       let handoffModelCallId: string | null = null;
       try {
         store.appendEvent(
           createEvent(
             "model.called",
-            { role: "coder_handoff", profileId: handoffProfileId, compiledId: compiled.id },
-            { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }
-          )
+            {
+              role: "coder_handoff",
+              profileId: handoffProfileId,
+              compiledId: compiled.id,
+            },
+            {
+              sessionId: session.id,
+              projectId: project.id,
+              agent: "handoff_agent",
+            },
+          ),
         );
         await invokeModel(
           handoffProfileId,
@@ -1969,23 +2268,33 @@ export function createStore(db: DatabaseSync) {
             role: "coder_handoff",
             messages: compiled.messages,
             temperature: 0,
-            maxOutputTokens: modelsRepo.getProfile(handoffProfileId)?.maxOutputTokens ?? 1024,
+            maxOutputTokens:
+              modelsRepo.getProfile(handoffProfileId)?.maxOutputTokens ?? 1024,
             metadata: {
               compiledPrompt: compiled,
               contextPackId: contextPack.id,
               target: input.target,
-              responseTrace: { handoffId: id, prompt, selectedContext, promptCompiled: true },
+              responseTrace: {
+                handoffId: id,
+                prompt,
+                selectedContext,
+                promptCompiled: true,
+              },
             },
           },
           {
             sessionId: session.id,
             taskId: session.activeTaskId,
-          }
+          },
         );
         handoffModelCallId =
           modelsRepo
             .listCalls(session.id, 200)
-            .filter((call) => call.role === "coder_handoff" && call.profileId === handoffProfileId)
+            .filter(
+              (call) =>
+                call.role === "coder_handoff" &&
+                call.profileId === handoffProfileId,
+            )
             .at(-1)?.id ?? null;
         store.appendEvent(
           createEvent(
@@ -1996,8 +2305,12 @@ export function createStore(db: DatabaseSync) {
               requestId: handoffModelCallId,
               compiledId: compiled.id,
             },
-            { sessionId: session.id, projectId: project.id, agent: "handoff_agent" }
-          )
+            {
+              sessionId: session.id,
+              projectId: project.id,
+              agent: "handoff_agent",
+            },
+          ),
         );
       } catch (error) {
         store.appendEvent(
@@ -2008,8 +2321,13 @@ export function createStore(db: DatabaseSync) {
               error: error instanceof Error ? error.message : String(error),
               compiledId: compiled.id,
             },
-            { sessionId: session.id, projectId: project.id, agent: "handoff_agent", level: "warn" }
-          )
+            {
+              sessionId: session.id,
+              projectId: project.id,
+              agent: "handoff_agent",
+              level: "warn",
+            },
+          ),
         );
       }
       const handoffAgentRun = agentsRepo.createRun({
@@ -2068,9 +2386,14 @@ export function createStore(db: DatabaseSync) {
       store.appendEvent(
         createEvent(
           "handoff.created",
-          { target: input.target, prompt, contextPackId: contextPack.id, compiledId: compiled.id },
-          { sessionId: session.id, projectId: project.id, agent: "handoff" }
-        )
+          {
+            target: input.target,
+            prompt,
+            contextPackId: contextPack.id,
+            compiledId: compiled.id,
+          },
+          { sessionId: session.id, projectId: project.id, agent: "handoff" },
+        ),
       );
       store.enqueueJob({
         type: "handoff.archive",
@@ -2092,9 +2415,13 @@ export function createStore(db: DatabaseSync) {
       };
     },
     dashboardSnapshot(): DashboardSnapshot {
-      const projects = db.prepare("SELECT COUNT(*) AS count FROM projects").get() as Row;
+      const projects = db
+        .prepare("SELECT COUNT(*) AS count FROM projects")
+        .get() as Row;
       const activeSessions = db
-        .prepare("SELECT COUNT(*) AS count FROM agent_sessions WHERE status IN ('queued','running','paused')")
+        .prepare(
+          "SELECT COUNT(*) AS count FROM agent_sessions WHERE status IN ('queued','running','paused')",
+        )
         .get() as Row;
       return {
         projects: toNumber(projects.count),
@@ -2104,7 +2431,11 @@ export function createStore(db: DatabaseSync) {
         recentChecks: store.listRecentChecks(8),
       };
     },
-    searchChunks(projectId: string, query: string, options: SearchOptions = {}): RetrievalChunk[] {
+    searchChunks(
+      projectId: string,
+      query: string,
+      options: SearchOptions = {},
+    ): RetrievalChunk[] {
       const project = store.getProject(projectId);
       const projectConfig = project ? resolveProjectConfig(project.path) : null;
       const embeddingConfig = readEmbeddingConfig({
@@ -2112,7 +2443,10 @@ export function createStore(db: DatabaseSync) {
       });
       const queryVector =
         query.trim().length > 0
-          ? embedQueryForQdrant({ text: query.trim(), dimension: embeddingConfig.dimension })
+          ? embedQueryForQdrant({
+              text: query.trim(),
+              dimension: embeddingConfig.dimension,
+            })
           : null;
       const chunks = searchProjectChunks({
         db,
@@ -2129,11 +2463,15 @@ export function createStore(db: DatabaseSync) {
       const boosted = chunks.map((chunk) => {
         const pathBoost = boostWeightForPath(chunk.path, projectConfig);
         const authBoost = projectConfig.retrieval.authHints.some((hint) =>
-          `${chunk.path}\n${chunk.content}`.toLowerCase().includes(hint.toLowerCase())
+          `${chunk.path}\n${chunk.content}`
+            .toLowerCase()
+            .includes(hint.toLowerCase()),
         )
           ? 0.5
           : 0;
-        return pathBoost > 0 || authBoost > 0 ? { ...chunk, score: chunk.score + pathBoost + authBoost } : chunk;
+        return pathBoost > 0 || authBoost > 0
+          ? { ...chunk, score: chunk.score + pathBoost + authBoost }
+          : chunk;
       });
       boosted.sort((left, right) => right.score - left.score);
       return boosted;
@@ -2142,7 +2480,7 @@ export function createStore(db: DatabaseSync) {
       projectId: string,
       query: string,
       queryVector: number[],
-      options: SearchOptions = {}
+      options: SearchOptions = {},
     ): RetrievalChunk[] {
       return searchProjectChunks({
         db,
@@ -2154,7 +2492,9 @@ export function createStore(db: DatabaseSync) {
         queryVector,
       });
     },
-    async addOrUpdateProject(input: ProjectCreateInput): Promise<ProjectSummary> {
+    async addOrUpdateProject(
+      input: ProjectCreateInput,
+    ): Promise<ProjectSummary> {
       return store.createProject(input);
     },
     async indexProject(projectIdentifier: string): Promise<IndexResult> {
@@ -2163,16 +2503,18 @@ export function createStore(db: DatabaseSync) {
         throw new Error(`Unknown project: ${projectIdentifier}`);
       }
       const projectConfig = resolveProjectConfig(project.path);
-      const { decision: routeDecision, profileId: selectedEmbeddingProfile } = await resolveModelProfile(
-        {
-          role: "embedding",
-          mode: "local",
-          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-          details: { goal: project.path, contextTokens: 1024 },
-          fallbackProfileId: projectConfig.models.embedding ?? "embedding-local",
-        },
-        selectModelProfile("index", { goal: project.path })
-      );
+      const { decision: routeDecision, profileId: selectedEmbeddingProfile } =
+        await resolveModelProfile(
+          {
+            role: "embedding",
+            mode: "local",
+            cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+            details: { goal: project.path, contextTokens: 1024 },
+            fallbackProfileId:
+              projectConfig.models.embedding ?? "embedding-local",
+          },
+          selectModelProfile("index", { goal: project.path }),
+        );
 
       const session = store.createSession({
         projectId: project.id,
@@ -2194,7 +2536,9 @@ export function createStore(db: DatabaseSync) {
       const push = (
         type: EventType,
         payload: Record<string, unknown>,
-        details: Partial<Pick<EventEnvelope, "taskId" | "agent" | "level">> = {}
+        details: Partial<
+          Pick<EventEnvelope, "taskId" | "agent" | "level">
+        > = {},
       ) => {
         const event = createEvent(type, payload, {
           sessionId: session.id,
@@ -2222,15 +2566,31 @@ export function createStore(db: DatabaseSync) {
       });
       store.updateTask(task.id, { status: "running" });
       store.updateProjectStatus(project.id, "indexing");
-      push("session.created", { title: session.title, source: session.source }, { agent: "orchestrator" });
-      push("session.started", { mode: session.mode }, { agent: "orchestrator" });
+      push(
+        "session.created",
+        { title: session.title, source: session.source },
+        { agent: "orchestrator" },
+      );
+      push(
+        "session.started",
+        { mode: session.mode },
+        { agent: "orchestrator" },
+      );
       push(
         "task.created",
         { title: task.title, description: task.description },
-        { taskId: task.id, agent: "orchestrator" }
+        { taskId: task.id, agent: "orchestrator" },
       );
-      push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
-      push("index.started", { projectName: project.name, manualRequest: true }, { taskId: task.id, agent: "indexer" });
+      push(
+        "task.started",
+        { title: task.title },
+        { taskId: task.id, agent: "orchestrator" },
+      );
+      push(
+        "index.started",
+        { projectName: project.name, manualRequest: true },
+        { taskId: task.id, agent: "indexer" },
+      );
 
       const indexerRun = agentsRepo.createRun({
         sessionId: session.id,
@@ -2244,169 +2604,209 @@ export function createStore(db: DatabaseSync) {
       });
 
       try {
-      const embeddingProfileId = session.modelProfile ?? "embedding-local";
-      const embeddingConfig = readEmbeddingConfig({
-        cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
-      });
-      const qdrantSettings = getActiveQdrantSettings();
-      const embeddingProfile = modelsRepo.getProfile(embeddingProfileId);
-      const qdrantClient = qdrantSettings
-        ? new QdrantClient({
-            settings: qdrantSettings,
-            initialDimension: embeddingConfig.dimension,
-          })
-        : null;
-      qdrantClient?.setDimension(embeddingConfig.dimension);
-      const qdrantDimensionState = qdrantClient?.probe() ?? null;
-      if (qdrantDimensionState && qdrantDimensionState.status === "mismatch") {
-        disableQdrant();
-      }
-      const indexSummary = await runIndexerProject({
-        db,
-        projectId: project.id,
-        projectPath: project.path,
-        projectConfig,
-        qdrant: qdrantClient,
-        embedBatch: async (inputs) => {
-          // Wrap the real embed call in a content-hash cache so
-          // reindexing a project (or re-running after a partial
-          // failure) only embeds chunks whose content actually
-          // changed since the last successful embed.
-          const effectiveModelName = embeddingProfile?.modelName ?? embeddingConfig.model;
-          const result = await embedWithCache(
-            inputs,
-            async (missing: string[]) =>
-              getRuntime().embed(
-                embeddingProfileId,
-                { input: missing, modelName: effectiveModelName },
-                {
-                  sessionId: session.id,
-                  taskId: task.id,
-                  recordCall: (call) => {
-                    modelsRepo.recordCall(call);
+        const embeddingProfileId = session.modelProfile ?? "embedding-local";
+        const embeddingConfig = readEmbeddingConfig({
+          cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
+        });
+        const qdrantSettings = getActiveQdrantSettings();
+        const embeddingProfile = modelsRepo.getProfile(embeddingProfileId);
+        const qdrantClient = qdrantSettings
+          ? new QdrantClient({
+              settings: qdrantSettings,
+              initialDimension: embeddingConfig.dimension,
+            })
+          : null;
+        qdrantClient?.setDimension(embeddingConfig.dimension);
+        const qdrantDimensionState = qdrantClient?.probe() ?? null;
+        if (
+          qdrantDimensionState &&
+          qdrantDimensionState.status === "mismatch"
+        ) {
+          disableQdrant();
+        }
+        const indexSummary = await runIndexerProject({
+          db,
+          projectId: project.id,
+          projectPath: project.path,
+          projectConfig,
+          qdrant: qdrantClient,
+          embedBatch: async (inputs) => {
+            // Wrap the real embed call in a content-hash cache so
+            // reindexing a project (or re-running after a partial
+            // failure) only embeds chunks whose content actually
+            // changed since the last successful embed.
+            const effectiveModelName =
+              embeddingProfile?.modelName ?? embeddingConfig.model;
+            const result = await embedWithCache(
+              inputs,
+              async (missing: string[]) =>
+                getRuntime().embed(
+                  embeddingProfileId,
+                  { input: missing, modelName: effectiveModelName },
+                  {
+                    sessionId: session.id,
+                    taskId: task.id,
+                    recordCall: (call) => {
+                      modelsRepo.recordCall(call);
+                    },
                   },
-                }
-              ),
-            {
-              providerId: embeddingProfile?.providerId ?? "provider_heuristic_local",
-              modelName: effectiveModelName,
-              dimension: embeddingConfig.dimension,
-              cache: embeddingCacheRepo,
-            }
-          );
-          return {
-            embeddings: result.embeddings,
-            dimensions: result.dimensions,
-            modelName: result.modelName,
-            providerId: result.providerId,
-          };
-        },
-        embeddingModel: embeddingProfile?.modelName ?? embeddingConfig.model,
-        embeddingProvider: embeddingProfile?.providerId ?? "provider_heuristic_local",
-        embeddingDimension: embeddingConfig.dimension,
-      });
-      if (indexSummary.qdrantFailed) {
-        disableQdrant();
-      }
-      const completedSession = store.updateSession(session.id, {
-        status: "completed",
-        finishedAt: now(),
-        durationMs: Date.parse(now()) - Date.parse(session.startedAt),
-        activeTaskId: null,
-        finalSummary: `Indexed ${indexSummary.filesIndexed} files and ${indexSummary.chunksIndexed} chunks.`,
-      });
-      store.updateTask(task.id, { status: "completed", resultJson: JSON.stringify(indexSummary) });
-      store.updateProjectStatus(project.id, "ready", now());
-      agentsRepo.appendMessage({
-        agentRunId: indexerRun.id,
-        direction: "out",
-        role: "summary",
-        content: `Indexed ${indexSummary.filesIndexed} files and ${indexSummary.chunksIndexed} chunks.`,
-        meta: { qdrantFailed: indexSummary.qdrantFailed },
-      });
-      agentsRepo.updateRun(indexerRun.id, {
-        status: "completed",
-        finishedAt: now(),
-        durationMs: Date.parse(now()) - Date.parse(indexerRun.startedAt),
-        output: {
-          filesIndexed: indexSummary.filesIndexed,
-          chunksIndexed: indexSummary.chunksIndexed,
-          qdrantFailed: indexSummary.qdrantFailed,
-        },
-      });
-      const embeddingCalls = modelsRepo.listCalls(session.id, 200).filter((call) => call.role === "embedding");
-      const lastEmbeddingCall = embeddingCalls.at(-1) ?? null;
-      store.appendEvent(
-        createEvent(
-          "model.called",
-          { role: "embedding", profileId: embeddingProfileId, batchCalls: embeddingCalls.length },
-          { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }
-        )
-      );
-      store.appendEvent(
-        createEvent(
-          "model.completed",
-          {
-            role: "embedding",
-            profileId: embeddingProfileId,
-            requestId: lastEmbeddingCall?.id ?? null,
-            batchCalls: embeddingCalls.length,
+                ),
+              {
+                providerId:
+                  embeddingProfile?.providerId ?? "provider_heuristic_local",
+                modelName: effectiveModelName,
+                dimension: embeddingConfig.dimension,
+                cache: embeddingCacheRepo,
+              },
+            );
+            return {
+              embeddings: result.embeddings,
+              dimensions: result.dimensions,
+              modelName: result.modelName,
+              providerId: result.providerId,
+            };
           },
-          { sessionId: session.id, projectId: project.id, taskId: task.id, agent: "indexer" }
-        )
-      );
+          embeddingModel: embeddingProfile?.modelName ?? embeddingConfig.model,
+          embeddingProvider:
+            embeddingProfile?.providerId ?? "provider_heuristic_local",
+          embeddingDimension: embeddingConfig.dimension,
+        });
+        if (indexSummary.qdrantFailed) {
+          disableQdrant();
+        }
+        const completedSession = store.updateSession(session.id, {
+          status: "completed",
+          finishedAt: now(),
+          durationMs: Date.parse(now()) - Date.parse(session.startedAt),
+          activeTaskId: null,
+          finalSummary: `Indexed ${indexSummary.filesIndexed} files and ${indexSummary.chunksIndexed} chunks.`,
+        });
+        store.updateTask(task.id, {
+          status: "completed",
+          resultJson: JSON.stringify(indexSummary),
+        });
+        store.updateProjectStatus(project.id, "ready", now());
+        agentsRepo.appendMessage({
+          agentRunId: indexerRun.id,
+          direction: "out",
+          role: "summary",
+          content: `Indexed ${indexSummary.filesIndexed} files and ${indexSummary.chunksIndexed} chunks.`,
+          meta: { qdrantFailed: indexSummary.qdrantFailed },
+        });
+        agentsRepo.updateRun(indexerRun.id, {
+          status: "completed",
+          finishedAt: now(),
+          durationMs: Date.parse(now()) - Date.parse(indexerRun.startedAt),
+          output: {
+            filesIndexed: indexSummary.filesIndexed,
+            chunksIndexed: indexSummary.chunksIndexed,
+            qdrantFailed: indexSummary.qdrantFailed,
+          },
+        });
+        const embeddingCalls = modelsRepo
+          .listCalls(session.id, 200)
+          .filter((call) => call.role === "embedding");
+        const lastEmbeddingCall = embeddingCalls.at(-1) ?? null;
+        store.appendEvent(
+          createEvent(
+            "model.called",
+            {
+              role: "embedding",
+              profileId: embeddingProfileId,
+              batchCalls: embeddingCalls.length,
+            },
+            {
+              sessionId: session.id,
+              projectId: project.id,
+              taskId: task.id,
+              agent: "indexer",
+            },
+          ),
+        );
+        store.appendEvent(
+          createEvent(
+            "model.completed",
+            {
+              role: "embedding",
+              profileId: embeddingProfileId,
+              requestId: lastEmbeddingCall?.id ?? null,
+              batchCalls: embeddingCalls.length,
+            },
+            {
+              sessionId: session.id,
+              projectId: project.id,
+              taskId: task.id,
+              agent: "indexer",
+            },
+          ),
+        );
 
-      push(
-        "task.completed",
-        { filesIndexed: indexSummary.filesIndexed, chunksIndexed: indexSummary.chunksIndexed },
-        { taskId: task.id, agent: "indexer" }
-      );
-      push(
-        "index.completed",
-        {
-          projectName: project.name,
-          filesIndexed: indexSummary.filesIndexed,
-          chunksIndexed: indexSummary.chunksIndexed,
-          manualRequest: true,
-        },
-        { taskId: task.id, agent: "indexer" }
-      );
-      push("session.completed", { summary: completedSession.finalSummary }, { agent: "orchestrator" });
-      const lesson = store.createLesson({
-        projectId: project.id,
-        sessionId: session.id,
-        title: `Indexed ${project.name}`,
-        body: `Indexed ${indexSummary.filesIndexed} files and ${indexSummary.chunksIndexed} chunks from ${project.path}.`,
-        tags: ["indexing", "bootstrap"],
-        importance: 1,
-      });
-      push(
-        "lesson.created",
-        {
-          id: lesson.id,
-          title: lesson.title,
-          body: lesson.body,
+        push(
+          "task.completed",
+          {
+            filesIndexed: indexSummary.filesIndexed,
+            chunksIndexed: indexSummary.chunksIndexed,
+          },
+          { taskId: task.id, agent: "indexer" },
+        );
+        push(
+          "index.completed",
+          {
+            projectName: project.name,
+            filesIndexed: indexSummary.filesIndexed,
+            chunksIndexed: indexSummary.chunksIndexed,
+            manualRequest: true,
+          },
+          { taskId: task.id, agent: "indexer" },
+        );
+        push(
+          "session.completed",
+          { summary: completedSession.finalSummary },
+          { agent: "orchestrator" },
+        );
+        const lesson = store.createLesson({
+          projectId: project.id,
+          sessionId: session.id,
+          title: `Indexed ${project.name}`,
+          body: `Indexed ${indexSummary.filesIndexed} files and ${indexSummary.chunksIndexed} chunks from ${project.path}.`,
           tags: ["indexing", "bootstrap"],
           importance: 1,
-        },
-        { agent: "learning" }
-      );
-      enqueueReflectionJob(store, session.id, "index", project.id);
+        });
+        push(
+          "lesson.created",
+          {
+            id: lesson.id,
+            title: lesson.title,
+            body: lesson.body,
+            tags: ["indexing", "bootstrap"],
+            importance: 1,
+          },
+          { agent: "learning" },
+        );
+        enqueueReflectionJob(store, session.id, "index", project.id);
 
-      return {
-        project: requireRecord(store.getProject(project.id), "indexed project"),
-        session: completedSession,
-        events,
-        filesIndexed: indexSummary.filesIndexed,
-        chunksIndexed: indexSummary.chunksIndexed,
-      };
+        return {
+          project: requireRecord(
+            store.getProject(project.id),
+            "indexed project",
+          ),
+          session: completedSession,
+          events,
+          filesIndexed: indexSummary.filesIndexed,
+          chunksIndexed: indexSummary.chunksIndexed,
+        };
       } catch (error) {
         const finishedAt = now();
-        const message = (error instanceof Error ? error.message : String(error)).slice(0, 1_000);
+        const message = (
+          error instanceof Error ? error.message : String(error)
+        ).slice(0, 1_000);
         store.updateSession(session.id, {
           status: "failed",
           finishedAt,
-          durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(session.startedAt)),
+          durationMs: Math.max(
+            0,
+            Date.parse(finishedAt) - Date.parse(session.startedAt),
+          ),
           activeTaskId: null,
           errorMessage: message,
           finalSummary: "Project indexing failed.",
@@ -2426,17 +2826,28 @@ export function createStore(db: DatabaseSync) {
         agentsRepo.updateRun(indexerRun.id, {
           status: "failed",
           finishedAt,
-          durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(indexerRun.startedAt)),
+          durationMs: Math.max(
+            0,
+            Date.parse(finishedAt) - Date.parse(indexerRun.startedAt),
+          ),
           error: message,
           output: { failed: true },
         });
-        push("task.failed", { error: message }, { taskId: task.id, agent: "indexer", level: "error" });
+        push(
+          "task.failed",
+          { error: message },
+          { taskId: task.id, agent: "indexer", level: "error" },
+        );
         push(
           "index.failed",
           { projectName: project.name, error: message, manualRequest: true },
-          { taskId: task.id, agent: "indexer", level: "error" }
+          { taskId: task.id, agent: "indexer", level: "error" },
         );
-        push("session.failed", { error: message }, { agent: "orchestrator", level: "error" });
+        push(
+          "session.failed",
+          { error: message },
+          { agent: "orchestrator", level: "error" },
+        );
         throw error;
       }
     },
@@ -2452,7 +2863,7 @@ export function createStore(db: DatabaseSync) {
       const ts = now();
       db.prepare(
         `INSERT INTO lessons (id, project_id, session_id, title, body, tags_json, importance, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         id,
         input.projectId,
@@ -2462,7 +2873,7 @@ export function createStore(db: DatabaseSync) {
         JSON.stringify(input.tags),
         input.importance,
         ts,
-        ts
+        ts,
       );
       memoryRepo.createCandidate({
         projectId: input.projectId,
@@ -2470,7 +2881,9 @@ export function createStore(db: DatabaseSync) {
         kind: "workflow_lesson",
         title: input.title,
         body: input.body,
-        evidence: [{ kind: "lesson", tags: input.tags, importance: input.importance }],
+        evidence: [
+          { kind: "lesson", tags: input.tags, importance: input.importance },
+        ],
         confidence: Math.min(1, Math.max(0, input.importance / 5)),
         scope: input.projectId ? "project" : "global",
       });
@@ -2488,19 +2901,27 @@ export function createStore(db: DatabaseSync) {
         sessionId: input.sessionId ?? null,
         taskId: input.taskId ?? null,
         retrievalQueryId: input.retrievalQueryId ?? null,
-        contextPackId: input.contextPackId ?? input.compiledPrompt.contextPackId ?? null,
+        contextPackId:
+          input.contextPackId ?? input.compiledPrompt.contextPackId ?? null,
         mode: input.compiledPrompt.mode,
         role: input.compiledPrompt.role,
         messagesJson: JSON.stringify(input.compiledPrompt.messages),
         estimatedTokens: input.compiledPrompt.estimatedTokens,
-        includedContextJson: JSON.stringify(input.compiledPrompt.includedContext),
+        includedContextJson: JSON.stringify(
+          input.compiledPrompt.includedContext,
+        ),
         omittedContextJson: JSON.stringify(input.compiledPrompt.omittedContext),
         safetyNotesJson: JSON.stringify(input.compiledPrompt.safetyNotes),
         outputSchemaJson:
-          input.compiledPrompt.outputSchema == null ? null : JSON.stringify(input.compiledPrompt.outputSchema),
+          input.compiledPrompt.outputSchema == null
+            ? null
+            : JSON.stringify(input.compiledPrompt.outputSchema),
       });
     },
-    listCompiledPrompts(sessionId?: string | null, limit = 50): CompiledPromptRecord[] {
+    listCompiledPrompts(
+      sessionId?: string | null,
+      limit = 50,
+    ): CompiledPromptRecord[] {
       return promptRepo.listCompiledPrompts(sessionId ?? null, limit);
     },
     getCompiledPrompt(promptId: string): CompiledPromptRecord | null {
@@ -2522,13 +2943,21 @@ export function createStore(db: DatabaseSync) {
       return config;
     },
     recommendModelProfile(
-      mode: AskMode | "ask" | "any" | "index" | "plan" | "handoff" | "check" | "reflect",
+      mode:
+        | AskMode
+        | "ask"
+        | "any"
+        | "index"
+        | "plan"
+        | "handoff"
+        | "check"
+        | "reflect",
       details: {
         risk?: "low" | "medium" | "high";
         depth?: "shallow" | "standard" | "deep";
         question?: string;
         goal?: string;
-      } = {}
+      } = {},
     ): string {
       return selectModelProfile(mode, details);
     },
@@ -2569,7 +2998,9 @@ export function createStore(db: DatabaseSync) {
 function safeParseJson(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value);
-    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+    return typeof parsed === "object" && parsed !== null
+      ? (parsed as Record<string, unknown>)
+      : {};
   } catch {
     return {};
   }
@@ -2592,8 +3023,12 @@ function rowToCheckRun(row: Row): CheckRunSummary {
     errorOutput: row.error_output == null ? null : asString(row.error_output),
     exitCode: row.exit_code == null ? null : toNumber(row.exit_code),
     durationMs: row.duration_ms == null ? null : toNumber(row.duration_ms),
-    parsedErrors: safeParseStringArray(safeParseJson(asString(row.parsed_errors_json ?? "[]"))),
-    affectedFiles: safeParseStringArray(safeParseJson(asString(row.affected_files_json ?? "[]"))),
+    parsedErrors: safeParseStringArray(
+      safeParseJson(asString(row.parsed_errors_json ?? "[]")),
+    ),
+    affectedFiles: safeParseStringArray(
+      safeParseJson(asString(row.affected_files_json ?? "[]")),
+    ),
     startedAt: row.started_at == null ? null : asString(row.started_at),
     finishedAt: row.finished_at == null ? null : asString(row.finished_at),
     createdAt: asString(row.created_at),
@@ -2618,25 +3053,39 @@ function parsePlannerOutput(value: unknown): {
     return null;
   }
   const record = value as Record<string, unknown>;
-  if (!Array.isArray(record.taskGraph) || !Array.isArray(record.likelyFiles) || !Array.isArray(record.checks)) {
+  if (
+    !Array.isArray(record.taskGraph) ||
+    !Array.isArray(record.likelyFiles) ||
+    !Array.isArray(record.checks)
+  ) {
     return null;
   }
-  const likelyFiles = record.likelyFiles.filter((entry): entry is string => typeof entry === "string");
-  const checks = record.checks.filter((entry): entry is string => typeof entry === "string");
+  const likelyFiles = record.likelyFiles.filter(
+    (entry): entry is string => typeof entry === "string",
+  );
+  const checks = record.checks.filter(
+    (entry): entry is string => typeof entry === "string",
+  );
   const taskGraph = record.taskGraph
     .filter(
-      (entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null && !Array.isArray(entry)
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === "object" && entry !== null && !Array.isArray(entry),
     )
     .map((entry) => {
       const expectedFiles = Array.isArray(entry.expectedFiles)
-        ? entry.expectedFiles.filter((file): file is string => typeof file === "string")
+        ? entry.expectedFiles.filter(
+            (file): file is string => typeof file === "string",
+          )
         : [];
       const taskChecks = Array.isArray(entry.checks)
-        ? entry.checks.filter((check): check is string => typeof check === "string")
+        ? entry.checks.filter(
+            (check): check is string => typeof check === "string",
+          )
         : [];
       return {
         title: typeof entry.title === "string" ? entry.title : "",
-        description: typeof entry.description === "string" ? entry.description : "",
+        description:
+          typeof entry.description === "string" ? entry.description : "",
         expectedFiles,
         checks: taskChecks,
       };
@@ -2649,7 +3098,10 @@ function parsePlannerOutput(value: unknown): {
     taskGraph,
     likelyFiles,
     checks,
-    modelRecommendation: typeof record.modelRecommendation === "string" ? record.modelRecommendation : null,
+    modelRecommendation:
+      typeof record.modelRecommendation === "string"
+        ? record.modelRecommendation
+        : null,
   };
 }
 
