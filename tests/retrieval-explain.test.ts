@@ -11,7 +11,16 @@ test("buildRetrievalPipelineInput loads FTS+heuristic+feedback+misses+memory+fac
   const workspace = await mkdtemp(join(tmpdir(), "ai-build-pipe-"));
   const repo = join(workspace, "repo");
   await mkdir(join(repo, "src"), { recursive: true });
-  await writeFile(join(repo, "src", "alpha.ts"), "export const alpha = 1;\n");
+  await writeFile(
+    join(repo, "src", "alpha.ts"),
+    [
+      "// unrelated preface one",
+      "// unrelated preface two",
+      "// unrelated preface three",
+      "// unrelated preface four",
+      "export const alpha = 1;",
+    ].join("\n")
+  );
   await writeFile(join(repo, "src", "beta.ts"), "export const beta = 2;\n");
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "repo" });
@@ -97,7 +106,16 @@ test("runRetrievalExplain returns a structured explanation that includes ranked,
   const workspace = await mkdtemp(join(tmpdir(), "ai-explain-"));
   const repo = join(workspace, "repo");
   await mkdir(join(repo, "src"), { recursive: true });
-  await writeFile(join(repo, "src", "alpha.ts"), "export const alpha = 1;\n");
+  await writeFile(
+    join(repo, "src", "alpha.ts"),
+    [
+      "// unrelated preface one",
+      "// unrelated preface two",
+      "// unrelated preface three",
+      "// unrelated preface four",
+      "export const alpha = 1;",
+    ].join("\n")
+  );
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "repo" });
   await store.indexProject(project.id);
@@ -117,6 +135,7 @@ test("runRetrievalExplain returns a structured explanation that includes ranked,
   assert.ok(Array.isArray(output.ranked));
   assert.ok(output.ranked.length > 0, "should rank at least one chunk");
   assert.ok(Array.isArray(output.selected));
+  assert.match(output.selected[0]?.excerpt ?? "", /alpha/);
   assert.ok(Array.isArray(output.dropped));
   assert.equal(typeof output.boost, "object");
   store.db.close();
