@@ -24,6 +24,50 @@ const UNTRUSTED_CONTEXT_KINDS = new Set<SessionContextPreviewItem["kind"]>([
   "clipboard",
 ]);
 
+const CONTEXT_KIND_PRIORITY: Record<SessionContextPreviewItem["kind"], number> = {
+  session: 0,
+  task: 0,
+  git: 0,
+  explicit_file: 1,
+  active_file: 1,
+  symbol: 1,
+  clipboard: 1,
+  retrieval: 2,
+  check: 3,
+  run: 3,
+  handoff: 3,
+  message: 4,
+  rule: 4,
+  changed_file: 5,
+  commit: 6,
+  memory: 6,
+  lesson: 6,
+};
+
+type ContextBudgetBucket = "core" | "explicit" | "retrieval" | "work" | "conversation" | "changed" | "history";
+
+function contextBudgetBucket(kind: SessionContextPreviewItem["kind"]): ContextBudgetBucket {
+  if (kind === "session" || kind === "task" || kind === "git") return "core";
+  if (kind === "explicit_file" || kind === "active_file" || kind === "symbol" || kind === "clipboard") {
+    return "explicit";
+  }
+  if (kind === "retrieval") return "retrieval";
+  if (kind === "check" || kind === "run" || kind === "handoff") return "work";
+  if (kind === "message" || kind === "rule") return "conversation";
+  if (kind === "changed_file") return "changed";
+  return "history";
+}
+
+function contextBucketLimit(bucket: ContextBudgetBucket, tokenBudget: number): number {
+  if (bucket === "core" || bucket === "explicit") return tokenBudget;
+  if (bucket === "retrieval") return Math.min(tokenBudget, Math.max(800, Math.floor(tokenBudget * 0.45)));
+  if (bucket === "changed") return Math.min(tokenBudget, Math.max(600, Math.floor(tokenBudget * 0.3)));
+  if (bucket === "work" || bucket === "conversation") {
+    return Math.min(tokenBudget, Math.max(500, Math.floor(tokenBudget * 0.2)));
+  }
+  return Math.min(tokenBudget, Math.max(400, Math.floor(tokenBudget * 0.15)));
+}
+
 function contextTrust(kind: SessionContextPreviewItem["kind"]): SessionContextPreviewItem["trust"] {
   if (UNTRUSTED_CONTEXT_KINDS.has(kind)) return "untrusted";
   if (kind === "session" || kind === "message") return "user";
@@ -327,11 +371,31 @@ export async function compileSessionContextPreview(
     seenContent.add(fingerprint);
     deduplicated.push(item);
   }
+  const orderedCandidates = deduplicated
+    .map((item, originalIndex) => ({ item, originalIndex }))
+    .sort(
+      (left, right) =>
+        CONTEXT_KIND_PRIORITY[left.item.kind] - CONTEXT_KIND_PRIORITY[right.item.kind] ||
+        left.originalIndex - right.originalIndex
+    )
+    .map(({ item }) => item);
   let estimatedTokens = 0;
-  for (const item of deduplicated) {
+  const tokensByBucket = new Map<ContextBudgetBucket, number>();
+  for (const item of orderedCandidates) {
+    const bucket = contextBudgetBucket(item.kind);
+    const bucketTokens = tokensByBucket.get(bucket) ?? 0;
+    if (bucketTokens + item.estimatedTokens > contextBucketLimit(bucket, tokenBudget)) {
+      excluded.push({
+        id: item.id,
+        reason: `${bucket} context allocation exceeded`,
+        estimatedTokens: item.estimatedTokens,
+      });
+      continue;
+    }
     if (estimatedTokens + item.estimatedTokens <= tokenBudget) {
       included.push(item);
       estimatedTokens += item.estimatedTokens;
+      tokensByBucket.set(bucket, bucketTokens + item.estimatedTokens);
     } else {
       excluded.push({ id: item.id, reason: "token budget exceeded", estimatedTokens: item.estimatedTokens });
     }
