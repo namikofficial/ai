@@ -2232,6 +2232,18 @@ export function createStore(db: DatabaseSync) {
       push("task.started", { title: task.title }, { taskId: task.id, agent: "orchestrator" });
       push("index.started", { projectName: project.name, manualRequest: true }, { taskId: task.id, agent: "indexer" });
 
+      const indexerRun = agentsRepo.createRun({
+        sessionId: session.id,
+        taskId: task.id,
+        projectId: project.id,
+        agent: "indexer",
+        role: "indexer",
+        modelRole: "embedding",
+        risk: "low",
+        input: { projectPath: project.path, mode: "index" },
+      });
+
+      try {
       const embeddingProfileId = session.modelProfile ?? "embedding-local";
       const embeddingConfig = readEmbeddingConfig({
         cloudEnabled: process.env.AI_CLOUD_ENABLED === "true",
@@ -2305,16 +2317,6 @@ export function createStore(db: DatabaseSync) {
       });
       store.updateTask(task.id, { status: "completed", resultJson: JSON.stringify(indexSummary) });
       store.updateProjectStatus(project.id, "ready", now());
-      const indexerRun = agentsRepo.createRun({
-        sessionId: session.id,
-        taskId: task.id,
-        projectId: project.id,
-        agent: "indexer",
-        role: "indexer",
-        modelRole: "embedding",
-        risk: "low",
-        input: { projectPath: project.path, mode: "index" },
-      });
       agentsRepo.appendMessage({
         agentRunId: indexerRun.id,
         direction: "out",
@@ -2398,6 +2400,45 @@ export function createStore(db: DatabaseSync) {
         filesIndexed: indexSummary.filesIndexed,
         chunksIndexed: indexSummary.chunksIndexed,
       };
+      } catch (error) {
+        const finishedAt = now();
+        const message = (error instanceof Error ? error.message : String(error)).slice(0, 1_000);
+        store.updateSession(session.id, {
+          status: "failed",
+          finishedAt,
+          durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(session.startedAt)),
+          activeTaskId: null,
+          errorMessage: message,
+          finalSummary: "Project indexing failed.",
+        });
+        store.updateTask(task.id, {
+          status: "failed",
+          resultJson: JSON.stringify({ error: message }),
+        });
+        store.updateProjectStatus(project.id, "error");
+        agentsRepo.appendMessage({
+          agentRunId: indexerRun.id,
+          direction: "out",
+          role: "summary",
+          content: `Indexing failed: ${message}`,
+          meta: { failed: true },
+        });
+        agentsRepo.updateRun(indexerRun.id, {
+          status: "failed",
+          finishedAt,
+          durationMs: Math.max(0, Date.parse(finishedAt) - Date.parse(indexerRun.startedAt)),
+          error: message,
+          output: { failed: true },
+        });
+        push("task.failed", { error: message }, { taskId: task.id, agent: "indexer", level: "error" });
+        push(
+          "index.failed",
+          { projectName: project.name, error: message, manualRequest: true },
+          { taskId: task.id, agent: "indexer", level: "error" }
+        );
+        push("session.failed", { error: message }, { agent: "orchestrator", level: "error" });
+        throw error;
+      }
     },
     createLesson(input: {
       projectId: string | null;
