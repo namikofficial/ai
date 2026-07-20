@@ -31,11 +31,15 @@ test("retrieval-engine: analyzes and rewrites a query", () => {
 
 test("retrieval-engine: builds FTS queries and ranks relevant chunks", () => {
   assert.deepEqual(tokenize("the auth flow in src/auth.ts"), ["auth", "flow", "src"]);
-  assert.equal(buildFtsQuery("auth login"), '"auth" AND "login"');
+  assert.equal(buildFtsQuery("auth login"), '"auth" OR "login"');
   assert.equal(classifyIntent("fix auth bug", "local"), "debug");
 
   const score = rankChunk("where is auth handled?", "src/auth.ts", "export function auth() { return true; }", 1, 4);
   assert.ok(score > 0);
+  assert.equal(
+    rankChunk("recoverInterruptedIndexing implemented", "docs/session.md", "unrelated session notes", 1, 4),
+    0
+  );
 });
 
 test("retrieval-engine: searchProjectChunks returns heuristic, FTS, and qdrant-safe results", async () => {
@@ -122,12 +126,13 @@ test("retrieval-engine: searchProjectChunks still works when code intelligence i
   const results = searchProjectChunks({
     db: store.db,
     projectId: project.id,
-    query: "handleLogin",
+    query: "where is handleLogin implemented?",
     limit: 4,
     qdrantSettings: null,
   });
 
   assert.ok(results.length > 0);
+  assert.equal(results[0]?.path, "src/auth.ts");
   assert.ok(
     results.every((chunk) => {
       const codeSymbols = chunk.metadata.codeSymbols;
