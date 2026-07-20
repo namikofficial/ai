@@ -93,30 +93,11 @@ export interface EmbeddingCacheRepo {
 }
 
 export function createEmbeddingCacheRepo(db: DatabaseSync): EmbeddingCacheRepo {
-  function ensureStatsRow(providerId: string, modelName: string, dimension: number): EmbeddingCacheStats {
+  function ensureStatsRow(providerId: string, modelName: string, dimension: number): void {
     const ts = now();
-    const existing = db
-      .prepare(
-        "SELECT hits, misses, bypassed, updated_at FROM embedding_cache_stats WHERE provider_id = ? AND model_name = ? AND dimension = ?"
-      )
-      .get(providerId, modelName, dimension) as
-      | { hits: number; misses: number; bypassed: number; updated_at: string }
-      | undefined;
-    if (existing) {
-      return {
-        providerId,
-        modelName,
-        dimension,
-        hits: asNumber(existing.hits),
-        misses: asNumber(existing.misses),
-        bypassed: asNumber(existing.bypassed),
-        updatedAt: asString(existing.updated_at),
-      };
-    }
     db.prepare(
       "INSERT OR IGNORE INTO embedding_cache_stats (id, provider_id, model_name, dimension, hits, misses, bypassed, updated_at) VALUES (?, ?, ?, ?, 0, 0, 0, ?)"
     ).run(newId("ecstats"), providerId, modelName, dimension, ts);
-    return { providerId, modelName, dimension, hits: 0, misses: 0, bypassed: 0, updatedAt: ts };
   }
 
   return {
@@ -170,24 +151,24 @@ export function createEmbeddingCacheRepo(db: DatabaseSync): EmbeddingCacheRepo {
         | { provider_id: string; model_name: string; dimension: number }
         | undefined;
       if (!row) return;
-      const stats = ensureStatsRow(row.provider_id, row.model_name, row.dimension);
+      ensureStatsRow(row.provider_id, row.model_name, row.dimension);
       db.prepare(
-        "UPDATE embedding_cache_stats SET hits = ?, updated_at = ? WHERE provider_id = ? AND model_name = ? AND dimension = ?"
-      ).run(stats.hits + 1, now(), row.provider_id, row.model_name, row.dimension);
+        "UPDATE embedding_cache_stats SET hits = hits + 1, updated_at = ? WHERE provider_id = ? AND model_name = ? AND dimension = ?"
+      ).run(now(), row.provider_id, row.model_name, row.dimension);
     },
     recordBypassed(providerId, modelName, dimension, count) {
       if (count <= 0) return;
-      const stats = ensureStatsRow(providerId, modelName, dimension);
+      ensureStatsRow(providerId, modelName, dimension);
       db.prepare(
         "UPDATE embedding_cache_stats SET bypassed = bypassed + ?, updated_at = ? WHERE provider_id = ? AND model_name = ? AND dimension = ?"
-      ).run(stats.bypassed + count, now(), providerId, modelName, dimension);
+      ).run(count, now(), providerId, modelName, dimension);
     },
     recordMiss(providerId, modelName, dimension, count) {
       if (count <= 0) return;
-      const stats = ensureStatsRow(providerId, modelName, dimension);
+      ensureStatsRow(providerId, modelName, dimension);
       db.prepare(
         "UPDATE embedding_cache_stats SET misses = misses + ?, updated_at = ? WHERE provider_id = ? AND model_name = ? AND dimension = ?"
-      ).run(stats.misses + count, now(), providerId, modelName, dimension);
+      ).run(count, now(), providerId, modelName, dimension);
     },
     purge(opts) {
       if (opts.olderThanDays && opts.olderThanDays > 0) {
