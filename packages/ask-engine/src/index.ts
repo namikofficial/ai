@@ -190,10 +190,11 @@ export function buildAskCitations(
     .sort((left, right) => right.length - left.length);
   return selected.map((entry) => {
     const lines = entry.chunk.content.split("\n");
-    const matchIndex = lines.findIndex((line) => {
-      const lowered = line.toLowerCase();
-      return needles.some((needle) => lowered.includes(needle));
-    });
+    let matchIndex = -1;
+    for (const needle of needles) {
+      matchIndex = lines.findIndex((line) => line.toLowerCase().includes(needle));
+      if (matchIndex >= 0) break;
+    }
     const excerptIndex = matchIndex < 0 ? 0 : Math.max(0, matchIndex - 1);
     const excerptLines = lines.slice(excerptIndex, excerptIndex + 4);
     const startLine = entry.chunk.startLine + excerptIndex;
