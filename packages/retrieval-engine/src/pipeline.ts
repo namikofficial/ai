@@ -98,9 +98,10 @@ export function buildRetrievalPipelineInput(
   for (const boost of source.retrieval.listPathBoosts(args.projectId, 200)) {
     pathBoosts.set(boost.path, boost.weight);
   }
-  // Derive budgetTokens from depth to match selectTopByTokenBudget() item counts.
-  // avgChunkTokens ≈ 150; use 200 as a safe upper estimate per chunk.
-  const budgetTokens = args.depth === "deep" ? 12 * 200 : args.depth === "shallow" ? 4 * 200 : 8 * 200;
+  // Keep enough room for both a definition and its nearest call site. Indexed
+  // code chunks commonly reach 700-900 tokens, so the old 200-token estimate
+  // selected one large chunk or two unrelated small chunks.
+  const budgetTokens = args.depth === "deep" ? 12 * 300 : args.depth === "shallow" ? 4 * 300 : 8 * 300;
 
   return {
     query: args.query,

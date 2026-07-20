@@ -2312,12 +2312,14 @@ export function createStore(db: DatabaseSync) {
       queryVector: number[],
       options: SearchOptions = {}
     ): RetrievalChunk[] {
+      const qdrantSettings = getActiveQdrantSettings();
+      if (!qdrantSettings) return [];
       return searchProjectChunks({
         db,
         projectId,
         query,
         limit: options.limit ?? 8,
-        qdrantSettings: getActiveQdrantSettings(),
+        qdrantSettings,
         queryVectorDimension: queryVector.length,
         queryVector,
       });

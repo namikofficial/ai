@@ -66,7 +66,7 @@ export function ftsSearch(
       .prepare(
         `SELECT
           c.*,
-          (100 - bm25(rag_chunks_fts)) AS fts_score
+          (0 - bm25(rag_chunks_fts)) AS fts_score
          FROM rag_chunks_fts
          JOIN rag_chunks c ON c.id = rag_chunks_fts.chunk_id
          WHERE rag_chunks_fts MATCH ? AND c.project_id = ?

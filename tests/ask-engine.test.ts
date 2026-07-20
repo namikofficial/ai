@@ -79,6 +79,32 @@ test("ask-engine: citation and fallback helpers are deterministic", () => {
     },
   ]);
   assert.equal(citations[0]?.excerpt, "line1\nline2\nline3\nline4");
+  const focused = buildAskCitations(
+    [
+      {
+        chunk: {
+          id: "c2",
+          projectId: "p1",
+          documentId: "d1",
+          path: "src/recovery.ts",
+          content: "line1\nline2\nline3\nline4\nrecoverInterruptedIndexing();\nline6",
+          startLine: 10,
+          endLine: 15,
+          tokenCount: 6,
+          score: 2,
+          metadata: {},
+        },
+        baseScore: 2,
+        rerankScore: 2,
+        finalScore: 2,
+        rerankReason: "exact symbol",
+        boosters: [],
+      },
+    ],
+    "Where is recoverInterruptedIndexing implemented?"
+  );
+  assert.match(focused[0]?.excerpt ?? "", /recoverInterruptedIndexing/);
+  assert.equal(focused[0]?.startLine, 13);
   assert.equal(
     buildAskFallbackAnswer("repo", "where is auth handled?"),
     'I could not find enough local context in repo to answer "where is auth handled?".'

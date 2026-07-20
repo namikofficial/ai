@@ -135,6 +135,10 @@ test("retrieval-engine: searchProjectChunks still works when code intelligence i
     })
   );
   await writeFile(join(repo, "src", "auth.ts"), "export function handleLogin() { return true; }\n");
+  await writeFile(
+    join(repo, "src", "generic.ts"),
+    "export const implementation = 'startup call site without the requested symbol';\n"
+  );
   const store = createStore(initializeStore(join(workspace, "ai.db")));
   const project = store.createProject({ path: repo, name: "disabled-ci" });
   await store.indexProject(project.id);
@@ -149,6 +153,7 @@ test("retrieval-engine: searchProjectChunks still works when code intelligence i
 
   assert.ok(results.length > 0);
   assert.equal(results[0]?.path, "src/auth.ts");
+  assert.equal(results[0]?.metadata.exactSymbolQuery, "handleLogin");
   assert.ok(
     results.every((chunk) => {
       const codeSymbols = chunk.metadata.codeSymbols;

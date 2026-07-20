@@ -173,7 +173,10 @@ export function buildAskAnswerPrompt(input: BuildAskAnswerPromptInput): CompileP
   };
 }
 
-export function buildAskCitations(selected: RankedChunk[]): Array<{
+export function buildAskCitations(
+  selected: RankedChunk[],
+  query?: string
+): Array<{
   chunkId: string;
   path: string;
   startLine: number;
@@ -181,14 +184,28 @@ export function buildAskCitations(selected: RankedChunk[]): Array<{
   excerpt: string;
   score: number;
 }> {
-  return selected.map((entry) => ({
-    chunkId: entry.chunk.id,
-    path: entry.chunk.path,
-    startLine: entry.chunk.startLine,
-    endLine: entry.chunk.endLine,
-    excerpt: entry.chunk.content.split("\n").slice(0, 4).join("\n"),
-    score: entry.finalScore,
-  }));
+  const analysis = query ? analyzeQuery(query) : null;
+  const needles = [...(analysis?.symbolHints ?? []), ...(analysis?.terms ?? [])]
+    .map((needle) => needle.toLowerCase())
+    .sort((left, right) => right.length - left.length);
+  return selected.map((entry) => {
+    const lines = entry.chunk.content.split("\n");
+    const matchIndex = lines.findIndex((line) => {
+      const lowered = line.toLowerCase();
+      return needles.some((needle) => lowered.includes(needle));
+    });
+    const excerptIndex = matchIndex < 0 ? 0 : Math.max(0, matchIndex - 1);
+    const excerptLines = lines.slice(excerptIndex, excerptIndex + 4);
+    const startLine = entry.chunk.startLine + excerptIndex;
+    return {
+      chunkId: entry.chunk.id,
+      path: entry.chunk.path,
+      startLine,
+      endLine: Math.min(entry.chunk.endLine, startLine + Math.max(0, excerptLines.length - 1)),
+      excerpt: excerptLines.join("\n"),
+      score: entry.finalScore,
+    };
+  });
 }
 
 export function buildAskFallbackAnswer(projectName: string, question: string): string {
@@ -956,7 +973,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
   const selected = pipelineOutput.selected;
   const dropped = pipelineOutput.dropped;
   const chunks = selected.map((entry) => entry.chunk);
-  const citations = buildAskCitations(selected);
+  const citations = buildAskCitations(selected, input.input.question);
 
   input.store.retrieval.recordResults(
     retrievalQuery.id,
@@ -1395,7 +1412,7 @@ export async function runAskWorkflow(input: RunAskWorkflowInput): Promise<AskRes
           chunks.push(...augmentedChunks);
           // Rebuild citations for the answer.
           citations.length = 0;
-          citations.push(...buildAskCitations(selected));
+          citations.push(...buildAskCitations(selected, input.input.question));
         }
         input.store.appendEvent(
           createEvent(

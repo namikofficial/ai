@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { RetrievalChunk } from "../../shared/src/index.ts";
 import { ftsSearch } from "./fts.ts";
-import { buildFtsQuery, rankChunk, tokenize } from "./index.ts";
+import { analyzeQuery, buildFtsQuery, rankChunk, tokenize } from "./index.ts";
 import { embedQueryForQdrant, type QdrantRuntimeSettings, searchQdrantChunksSync } from "./qdrant.ts";
 
 // Shared row helpers — exported so fts.ts can re-use them without duplication
@@ -237,6 +237,22 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
   }
 
   const ftsQuery = normalizedQuery.length > 0 ? buildFtsQuery(normalizedQuery) : null;
+  if (normalizedQuery.length > 0) {
+    for (const symbolHint of analyzeQuery(normalizedQuery).symbolHints) {
+      const symbolQuery = buildFtsQuery(symbolHint);
+      if (!symbolQuery) continue;
+      addCandidates(
+        ftsSearch(input.db, input.projectId, symbolQuery, limit, rankChunk).map((chunk) => ({
+          ...chunk,
+          score: chunk.score + 32,
+          metadata: {
+            ...chunk.metadata,
+            exactSymbolQuery: symbolHint,
+          },
+        }))
+      );
+    }
+  }
   if (ftsQuery) {
     const ftsChunks = ftsSearch(input.db, input.projectId, ftsQuery, limit, rankChunk);
     addCandidates(ftsChunks);
@@ -276,7 +292,7 @@ export function searchProjectChunks(input: SearchProjectChunksInput): RetrievalC
         .prepare(
           `SELECT
             c.*,
-            (100 - bm25(rag_chunks_fts)) AS fts_score
+            (0 - bm25(rag_chunks_fts)) AS fts_score
            FROM rag_chunks_fts
            JOIN rag_chunks c ON c.id = rag_chunks_fts.chunk_id
            WHERE c.project_id = ?
