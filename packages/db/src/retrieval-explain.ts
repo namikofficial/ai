@@ -49,10 +49,11 @@ function relevantExcerpt(content: string, needles: string[], lineCount = 4): str
     .map((needle) => needle.trim().toLowerCase())
     .filter((needle) => needle.length >= 3)
     .sort((left, right) => right.length - left.length);
-  const matchIndex = lines.findIndex((line) => {
-    const lowered = line.toLowerCase();
-    return normalizedNeedles.some((needle) => lowered.includes(needle));
-  });
+  let matchIndex = -1;
+  for (const needle of normalizedNeedles) {
+    matchIndex = lines.findIndex((line) => line.toLowerCase().includes(needle));
+    if (matchIndex >= 0) break;
+  }
   const start = matchIndex < 0 ? 0 : Math.max(0, matchIndex - 1);
   return lines.slice(start, start + lineCount).join("\n");
 }
