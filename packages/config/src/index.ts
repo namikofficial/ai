@@ -131,6 +131,8 @@ export function resolveEmbeddingConfig(): EmbeddingConfig {
 
 export function resolveConfig(overrides: Partial<ConfigSnapshot> = {}): ConfigSnapshot {
   const cwd = process.cwd();
+  const stateHome = process.env.XDG_STATE_HOME ?? join(process.env.HOME ?? cwd, ".local", "state");
+  const defaultRuntimeDir = join(stateHome, "ai-workbench", "runtime");
   const envDatabasePath = process.env.AI_DATABASE_PATH;
   const envRuntimeDir = process.env.AI_RUNTIME_DIR;
   const envApiPort = process.env.AI_API_PORT ? Number(process.env.AI_API_PORT) : null;
@@ -143,8 +145,8 @@ export function resolveConfig(overrides: Partial<ConfigSnapshot> = {}): ConfigSn
   const apiPort = overrides.apiPort ?? 4417;
   const qdrantEnabled = overrides.qdrantEnabled ?? envQdrantEnabled;
   return {
-    databasePath: overrides.databasePath ?? envDatabasePath ?? `${cwd}/runtime/ai.db`,
-    runtimeDir: overrides.runtimeDir ?? envRuntimeDir ?? `${cwd}/runtime`,
+    databasePath: overrides.databasePath ?? envDatabasePath ?? join(defaultRuntimeDir, "ai.db"),
+    runtimeDir: overrides.runtimeDir ?? envRuntimeDir ?? defaultRuntimeDir,
     apiUrl: overrides.apiUrl ?? envApiUrl ?? `http://127.0.0.1:${envApiPort ?? apiPort}`,
     webPort: overrides.webPort ?? envWebPort ?? 4317,
     apiPort: overrides.apiPort ?? envApiPort ?? apiPort,

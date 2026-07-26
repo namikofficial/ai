@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
 interface MigrationFile {
@@ -11,7 +12,9 @@ interface MigrationFile {
 const MIGRATIONS_DIR = "packages/db/migrations";
 
 function resolveMigrationsDir(): string {
-  return join(process.cwd(), MIGRATIONS_DIR);
+  // MCP clients launch the server with the user's project as cwd. Resolve
+  // migrations from this source file so the database can initialize anywhere.
+  return join(dirname(fileURLToPath(import.meta.url)), "../migrations");
 }
 
 export function listMigrations(): MigrationFile[] {

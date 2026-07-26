@@ -353,6 +353,10 @@ export interface IndexResult {
 export function openStore(options: StoreOptions) {
   const db = new DatabaseSync(options.databasePath);
   db.exec("PRAGMA foreign_keys = ON;");
+  // Multiple OpenCode instances can initialize the MCP server concurrently.
+  // Wait for the writer instead of failing immediately with SQLITE_BUSY while
+  // migrations or the default model catalog are being applied.
+  db.exec("PRAGMA busy_timeout = 30000;");
   return db;
 }
 

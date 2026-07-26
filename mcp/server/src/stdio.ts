@@ -23,37 +23,19 @@ type ProcessLike = {
 
 const proc = process as unknown as ProcessLike;
 
-function byteLength(value: string): number {
-  return new TextEncoder().encode(value).length;
-}
-
 function writeMessage(message: unknown): void {
   const json = JSON.stringify(message);
-  proc.stdout.write(`Content-Length: ${byteLength(json)}\r\n\r\n${json}`);
+  // MCP stdio is newline-delimited JSON-RPC. Do not write logs to stdout.
+  proc.stdout.write(`${json}\n`);
 }
 
 function parseMessages(buffer: string): { messages: unknown[]; rest: string } {
-  const messages: unknown[] = [];
-  let remaining = buffer;
-
-  while (true) {
-    const headerEnd = remaining.indexOf("\r\n\r\n");
-    if (headerEnd === -1) break;
-    const header = remaining.slice(0, headerEnd);
-    const lengthMatch = /content-length:\s*(\d+)/i.exec(header);
-    if (!lengthMatch) {
-      throw new Error("Missing Content-Length header");
-    }
-    const length = Number(lengthMatch[1]);
-    const bodyStart = headerEnd + 4;
-    const bodyEnd = bodyStart + length;
-    if (remaining.length < bodyEnd) break;
-    const body = remaining.slice(bodyStart, bodyEnd);
-    messages.push(JSON.parse(body));
-    remaining = remaining.slice(bodyEnd).replace(/^\r?\n/, "");
-  }
-
-  return { messages, rest: remaining };
+  const lines = buffer.split("\n");
+  const rest = lines.pop() ?? "";
+  return {
+    messages: lines.filter((line) => line.trim().length > 0).map((line) => JSON.parse(line)),
+    rest,
+  };
 }
 
 export async function startMcpServer(): Promise<void> {
@@ -72,39 +54,35 @@ export async function startMcpServer(): Promise<void> {
   proc.stdin.resume();
 
   let buffer = "";
-  proc.stdin.on("data", async (chunk: string) => {
+  let pending = Promise.resolve();
+  proc.stdin.on("data", (chunk: string) => {
     buffer += chunk;
-    try {
-      const parsed = parseMessages(buffer);
-      buffer = parsed.rest;
-      for (const message of parsed.messages) {
-        const request = message as {
-          jsonrpc?: string;
-          id?: string | number | null;
-          method?: string;
-          params?: Record<string, unknown>;
-        };
-        if (request.jsonrpc !== "2.0" || typeof request.method !== "string") {
-          continue;
+    pending = pending.then(async () => {
+      try {
+        const parsed = parseMessages(buffer);
+        buffer = parsed.rest;
+        for (const message of parsed.messages) {
+          const request = message as {
+            jsonrpc?: string;
+            id?: string | number | null;
+            method?: string;
+            params?: Record<string, unknown>;
+          };
+          if (request.jsonrpc !== "2.0" || typeof request.method !== "string") continue;
+          const response = await handleMcpRequest(store, config, {
+            jsonrpc: "2.0",
+            id: request.id ?? null,
+            method: request.method,
+            params: request.params,
+          });
+          if (response) writeMessage(response);
         }
-        const response = await handleMcpRequest(store, config, {
-          jsonrpc: "2.0",
-          id: request.id ?? null,
-          method: request.method,
-          params: request.params,
-        });
-        if (response) {
-          writeMessage(response);
-        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        proc.stderr.write(`${message}\n`);
+        writeMessage({ jsonrpc: "2.0", id: null, error: { code: -32700, message } });
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      writeMessage({
-        jsonrpc: "2.0",
-        id: null,
-        error: { code: -32700, message },
-      });
-    }
+    });
   });
 
   proc.on("SIGINT", () => proc.exit(0));
